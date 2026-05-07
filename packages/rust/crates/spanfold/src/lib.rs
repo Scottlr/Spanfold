@@ -15,10 +15,12 @@ mod explain;
 mod export;
 mod extensions;
 mod fixture;
+mod liveness;
 mod pipeline;
 mod primitive;
 mod records;
 mod temporal;
+mod testing;
 
 pub use analytics::{
     HierarchyComparisonResult, HierarchyComparisonRow, HierarchyComparisonRowKind,
@@ -38,6 +40,7 @@ pub use comparison::{
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
+    ComparisonDebugHtmlOptions, ComparisonExportError, ComparisonLlmContextOptions,
     export_plan_json, export_result_debug_html, export_result_json, export_result_json_lines,
     export_result_llm_context, export_result_markdown,
 };
@@ -46,12 +49,22 @@ pub use extensions::{
     ComparisonExtensionDescriptor, ComparisonExtensionMetadata, ComparisonExtensionSelector,
 };
 pub use fixture::{ContractFixture, FixtureError};
+pub use liveness::{LaneKey, LaneLivenessError, LaneLivenessSignal, LaneLivenessTracker};
 pub use pipeline::{
-    ChildActivityView, EventPipeline, EventPipelineBuilder, WindowPipelineBuilder, for_events,
+    ChildActivityView, EventPipeline, EventPipelineBuildError, EventPipelineBuilder,
+    EventPipelineMetadata, IngestionResult, RollUpSegmentProjection, WindowEmission,
+    WindowMetadata, WindowOptions, WindowPipelineBuilder, WindowTransitionKind, for_events,
 };
 pub use primitive::PrimitiveValue;
 pub use records::{
-    ClosedWindow, OpenWindow, WindowHistory, WindowHistoryFixture, WindowHistoryFixtureWindow,
-    WindowRecordId, WindowSegment, WindowTag,
+    ClosedWindow, OpenWindow, WindowAnnotation, WindowAnnotationTarget, WindowBoundaryChange,
+    WindowBoundaryReason, WindowGroupKind, WindowGroupSummary, WindowHistory, WindowHistoryFixture,
+    WindowHistoryFixtureWindow, WindowHistoryQuery, WindowHistorySnapshot, WindowOverlap,
+    WindowRecord, WindowRecordId, WindowResidualSegment, WindowSegment, WindowSnapshotQuery,
+    WindowSnapshotRecord, WindowTag, summarize_by_segment, summarize_by_tag,
 };
 pub use temporal::{TemporalAxis, TemporalPoint, TemporalRange, TemporalRangeError};
+pub use testing::{
+    SpanfoldAssert, SpanfoldAssertionError, SpanfoldSnapshot, VirtualComparisonClock,
+    WindowHistoryFixtureBuilder, WindowHistoryFixtureWindowBuilder,
+};

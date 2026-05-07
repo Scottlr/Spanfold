@@ -9,7 +9,12 @@ use spanfold::{
     OpenWindowPolicy, PrimitiveValue, WindowHistoryFixture, compare, export_result_debug_html,
     export_result_json, export_result_llm_context, export_result_markdown,
 };
-use std::{fs, process::ExitCode};
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::{BufRead, BufReader, Write},
+    process::ExitCode,
+};
 
 /// Production high-throughput CLI for Spanfold temporal evidence workflows.
 #[derive(Debug, Parser)]
@@ -56,6 +61,34 @@ enum Command {
         /// Window name to use when rows omit `windowName`.
         #[arg(long)]
         window: Option<String>,
+        /// Target source.
+        #[arg(long)]
+        target: String,
+        /// Against source. May be repeated.
+        #[arg(long)]
+        against: Vec<String>,
+        /// Output directory.
+        #[arg(long)]
+        out: String,
+    },
+    /// Convert event JSONL to flat Spanfold window JSONL.
+    ImportEvents {
+        /// Event JSONL path.
+        events: String,
+        /// Event import map JSON path.
+        #[arg(long)]
+        map: String,
+        /// Output window JSONL path.
+        #[arg(long)]
+        out: String,
+    },
+    /// Import event JSONL and write a full audit artifact bundle.
+    AuditEvents {
+        /// Event JSONL path.
+        events: String,
+        /// Event import map JSON path.
+        #[arg(long)]
+        map: String,
         /// Target source.
         #[arg(long)]
         target: String,
@@ -154,6 +187,27 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             out,
         } => {
             let result = compare_windows_jsonl(&windows, window.as_deref(), &target, &against)?;
+            write_audit_bundle(&result, &out)?;
+            Ok(if result.is_valid {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            })
+        }
+        Command::ImportEvents { events, map, out } => {
+            let windows = import_events(&events, &map)?;
+            write_windows_jsonl(&windows, &out)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::AuditEvents {
+            events,
+            map,
+            target,
+            against,
+            out,
+        } => {
+            let windows = import_events(&events, &map)?;
+            let result = compare_imported_windows(&windows, &target, &against)?;
             write_audit_bundle(&result, &out)?;
             Ok(if result.is_valid {
                 ExitCode::SUCCESS
@@ -285,6 +339,258 @@ fn compare_windows_jsonl(
     Ok(compare(&history, &plan))
 }
 
+fn import_events(path: &str, map_path: &str) -> Result<Vec<ImportedWindow>, String> {
+    let import_map = read_import_map(map_path)?;
+    let input = import_map.input.as_deref().unwrap_or("jsonl");
+    match input {
+        "jsonl" => import_events_jsonl(path, &import_map),
+        "csv" => import_events_csv(path, &import_map),
+        _ => Err(format!("unsupported event input format: {input}")),
+    }
+}
+
+fn import_events_jsonl(
+    path: &str,
+    import_map: &EventImportMap,
+) -> Result<Vec<ImportedWindow>, String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let reader = BufReader::new(file);
+    let mut active: BTreeMap<ImportStateKey, ImportState> = BTreeMap::new();
+    let mut windows = Vec::new();
+    let mut last_position: Option<i64> = None;
+
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.map_err(|error| error.to_string())?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(&line)
+            .map_err(|error| format!("{path}:{}: {error}", index + 1))?;
+        process_import_event(
+            &event,
+            import_map,
+            path,
+            index + 1,
+            &mut active,
+            &mut windows,
+            &mut last_position,
+        )?;
+    }
+
+    close_remaining_imported_windows(active, &mut windows);
+    Ok(windows)
+}
+
+fn import_events_csv(
+    path: &str,
+    import_map: &EventImportMap,
+) -> Result<Vec<ImportedWindow>, String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut lines = BufReader::new(file).lines();
+    let Some(header_line) = lines.next() else {
+        return Err(format!("{path}: CSV input is empty"));
+    };
+    let header_line = header_line.map_err(|error| error.to_string())?;
+    let headers = parse_csv_record(&header_line).map_err(|error| format!("{path}:1: {error}"))?;
+    if headers.is_empty() {
+        return Err(format!(
+            "{path}:1: CSV header must contain at least one column"
+        ));
+    }
+
+    let mut active: BTreeMap<ImportStateKey, ImportState> = BTreeMap::new();
+    let mut windows = Vec::new();
+    let mut last_position: Option<i64> = None;
+
+    for (index, line) in lines.enumerate() {
+        let line_number = index + 2;
+        let line = line.map_err(|error| error.to_string())?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let fields =
+            parse_csv_record(&line).map_err(|error| format!("{path}:{line_number}: {error}"))?;
+        if fields.len() != headers.len() {
+            return Err(format!(
+                "{path}:{line_number}: CSV row has {} fields, expected {}",
+                fields.len(),
+                headers.len()
+            ));
+        }
+        let mut event = serde_json::Map::new();
+        for (header, field) in headers.iter().zip(fields) {
+            event.insert(header.clone(), csv_field_to_json(&field));
+        }
+        process_import_event(
+            &serde_json::Value::Object(event),
+            import_map,
+            path,
+            line_number,
+            &mut active,
+            &mut windows,
+            &mut last_position,
+        )?;
+    }
+
+    close_remaining_imported_windows(active, &mut windows);
+    Ok(windows)
+}
+
+fn process_import_event(
+    event: &serde_json::Value,
+    import_map: &EventImportMap,
+    path: &str,
+    line_number: usize,
+    active: &mut BTreeMap<ImportStateKey, ImportState>,
+    windows: &mut Vec<ImportedWindow>,
+    last_position: &mut Option<i64>,
+) -> Result<(), String> {
+    let position = select_i64(event, &import_map.position, path, line_number)?;
+    if last_position.is_some_and(|last| position < last) {
+        return Err(format!(
+            "{path}:{line_number}: event position cannot move backwards"
+        ));
+    }
+    *last_position = Some(position);
+    let source = select_string(event, &import_map.source, path, line_number)?;
+    let partition = import_map
+        .partition
+        .as_ref()
+        .map(|selector| select_string(event, selector, path, line_number))
+        .transpose()?;
+
+    for window in &import_map.windows {
+        let key_selector = window
+            .key
+            .as_ref()
+            .or(import_map.key.as_ref())
+            .ok_or_else(|| "$.windows[].key or $.key is required".to_owned())?;
+        let key = select_string(event, key_selector, path, line_number)?;
+        let state_key = ImportStateKey {
+            window_name: window.name.clone(),
+            key: key.clone(),
+            source: source.clone(),
+            partition: partition.clone(),
+        };
+        let segments = select_named_values(event, &window.segments, path, line_number)?;
+        let tags = select_named_values(event, &window.tags, path, line_number)?;
+        let is_active = evaluate_predicate(event, &window.active, path, line_number)?;
+
+        if is_active {
+            if let Some(state) = active.get_mut(&state_key) {
+                if state.segments != segments {
+                    windows.push(state.to_window_for_key(&state_key, Some(position)));
+                    *state = ImportState {
+                        start_position: position,
+                        segments,
+                        tags,
+                    };
+                }
+                continue;
+            }
+            active.insert(
+                state_key,
+                ImportState {
+                    start_position: position,
+                    segments,
+                    tags,
+                },
+            );
+            continue;
+        }
+
+        if let Some(state) = active.remove(&state_key) {
+            windows.push(state.to_window_for_key(&state_key, Some(position)));
+        }
+    }
+    Ok(())
+}
+
+fn close_remaining_imported_windows(
+    active: BTreeMap<ImportStateKey, ImportState>,
+    windows: &mut Vec<ImportedWindow>,
+) {
+    for (state_key, state) in active {
+        windows.push(state.to_window_for_key(&state_key, None));
+    }
+}
+
+fn compare_imported_windows(
+    windows: &[ImportedWindow],
+    target: &str,
+    against: &[String],
+) -> Result<spanfold::ComparisonResult, String> {
+    if against.is_empty() {
+        return Err("audit-events requires at least one --against value".to_owned());
+    }
+
+    let mut builder = WindowHistoryFixture::new();
+    for window in windows {
+        if let Some(end) = window.end_position {
+            builder = builder
+                .closed_window(
+                    window.window_name.clone(),
+                    window.key.clone(),
+                    window.start_position,
+                    end,
+                    |metadata| apply_imported_metadata(metadata, window),
+                )
+                .map_err(|error| error.to_string())?;
+        } else {
+            builder = builder.open_window(
+                window.window_name.clone(),
+                window.key.clone(),
+                window.start_position,
+                |metadata| apply_imported_metadata(metadata, window),
+            );
+        }
+    }
+
+    let history = builder.build();
+    let plan = ComparisonPlan {
+        name: "Spanfold Event Audit".to_owned(),
+        target_source: target.to_owned(),
+        against: AgainstSelection::Sources(against.to_vec()),
+        scope_window: None,
+        scope_segments: Vec::new(),
+        scope_tags: Vec::new(),
+        comparators: vec![
+            Comparator::Overlap,
+            Comparator::Residual,
+            Comparator::Missing,
+            Comparator::Coverage,
+            Comparator::Gap,
+            Comparator::SymmetricDifference,
+        ],
+        known_at: None,
+        open_window_policy: OpenWindowPolicy::RequireClosed,
+        open_window_horizon: None,
+        strict: false,
+    };
+    Ok(compare(&history, &plan))
+}
+
+fn write_windows_jsonl(windows: &[ImportedWindow], path: &str) -> Result<(), String> {
+    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
+    for window in windows {
+        let line = serde_json::to_string(window).map_err(|error| error.to_string())?;
+        writeln!(file, "{line}").map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn read_import_map(path: &str) -> Result<EventImportMap, String> {
+    let json = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let import_map: EventImportMap =
+        serde_json::from_str(&json).map_err(|error| format!("{path}: {error}"))?;
+    if import_map.windows.is_empty() {
+        return Err(format!(
+            "{path}: $.windows must contain at least one window"
+        ));
+    }
+    Ok(import_map)
+}
+
 fn apply_jsonl_metadata(
     mut builder: spanfold::WindowHistoryFixtureWindow,
     row: &JsonlWindow,
@@ -306,6 +612,273 @@ fn apply_jsonl_metadata(
     builder
 }
 
+fn apply_imported_metadata(
+    mut builder: spanfold::WindowHistoryFixtureWindow,
+    window: &ImportedWindow,
+) -> spanfold::WindowHistoryFixtureWindow {
+    builder = builder.source(window.source.clone());
+    if let Some(partition) = &window.partition {
+        builder = builder.partition(partition.clone());
+    }
+    for segment in &window.segments {
+        builder = if let Some(parent) = &segment.parent_name {
+            builder.child_segment(segment.name.clone(), segment.value.clone(), parent.clone())
+        } else {
+            builder.segment(segment.name.clone(), segment.value.clone())
+        };
+    }
+    for tag in &window.tags {
+        builder = builder.tag(tag.name.clone(), tag.value.clone());
+    }
+    builder
+}
+
+fn select_named_values(
+    event: &serde_json::Value,
+    selectors: &[NamedFieldSelector],
+    path: &str,
+    line_number: usize,
+) -> Result<Vec<JsonlNamedValue>, String> {
+    selectors
+        .iter()
+        .map(|selector| {
+            let value = select_value(event, &selector.selector, path, line_number)?;
+            Ok(JsonlNamedValue {
+                name: selector.name.clone(),
+                value: primitive_from_json(value).map_err(|error| {
+                    format!(
+                        "{path}:{line_number}: {} selector '{}' {error}",
+                        selector.kind, selector.name
+                    )
+                })?,
+                parent_name: selector.parent_name.clone(),
+            })
+        })
+        .collect()
+}
+
+fn select_i64(
+    event: &serde_json::Value,
+    selector: &FieldSelector,
+    path: &str,
+    line_number: usize,
+) -> Result<i64, String> {
+    let value = select_value(event, selector, path, line_number)?;
+    value.as_i64().ok_or_else(|| {
+        format!(
+            "{path}:{line_number}: field '{}' must be an integer",
+            selector.field()
+        )
+    })
+}
+
+fn select_string(
+    event: &serde_json::Value,
+    selector: &FieldSelector,
+    path: &str,
+    line_number: usize,
+) -> Result<String, String> {
+    let value = select_value(event, selector, path, line_number)?;
+    primitive_to_string(value).ok_or_else(|| {
+        format!(
+            "{path}:{line_number}: field '{}' must be a scalar stringable value",
+            selector.field()
+        )
+    })
+}
+
+fn select_value<'a>(
+    event: &'a serde_json::Value,
+    selector: &FieldSelector,
+    path: &str,
+    line_number: usize,
+) -> Result<&'a serde_json::Value, String> {
+    select_field(event, selector.field(), path, line_number)
+}
+
+fn select_field<'a>(
+    event: &'a serde_json::Value,
+    field_path: &str,
+    path: &str,
+    line_number: usize,
+) -> Result<&'a serde_json::Value, String> {
+    let mut current = event;
+    for field in field_path.split('.') {
+        let Some(next) = current.get(field) else {
+            return Err(format!(
+                "{path}:{line_number}: missing event field '{field_path}'"
+            ));
+        };
+        current = next;
+    }
+    Ok(current)
+}
+
+fn evaluate_predicate(
+    event: &serde_json::Value,
+    predicate: &EventPredicate,
+    path: &str,
+    line_number: usize,
+) -> Result<bool, String> {
+    let value = select_field(event, &predicate.field, path, line_number)?;
+    let primitive = primitive_from_json(value).map_err(|error| {
+        format!(
+            "{path}:{line_number}: predicate field '{}' {error}",
+            predicate.field
+        )
+    })?;
+
+    let mut evaluated = false;
+    let mut matches = true;
+    if let Some(expected) = &predicate.equals {
+        evaluated = true;
+        matches &= primitive == *expected;
+    }
+    if let Some(expected) = &predicate.not_equals {
+        evaluated = true;
+        matches &= primitive != *expected;
+    }
+    if let Some(expected) = &predicate.greater_than {
+        evaluated = true;
+        matches &= compare_numbers(&primitive, expected, |left, right| left > right)
+            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+    }
+    if let Some(expected) = &predicate.greater_than_or_equal {
+        evaluated = true;
+        matches &= compare_numbers(&primitive, expected, |left, right| left >= right)
+            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+    }
+    if let Some(expected) = &predicate.less_than {
+        evaluated = true;
+        matches &= compare_numbers(&primitive, expected, |left, right| left < right)
+            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+    }
+    if let Some(expected) = &predicate.less_than_or_equal {
+        evaluated = true;
+        matches &= compare_numbers(&primitive, expected, |left, right| left <= right)
+            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+    }
+    if predicate.is_true.unwrap_or(false) {
+        evaluated = true;
+        matches &= primitive == PrimitiveValue::Bool(true);
+    }
+    if predicate.is_false.unwrap_or(false) {
+        evaluated = true;
+        matches &= primitive == PrimitiveValue::Bool(false);
+    }
+    if !evaluated {
+        return Err(format!(
+            "{path}:{line_number}: predicate for field '{}' has no condition",
+            predicate.field
+        ));
+    }
+    Ok(matches)
+}
+
+fn numeric_predicate_error(path: &str, line_number: usize, predicate: &EventPredicate) -> String {
+    format!(
+        "{path}:{line_number}: predicate field '{}' and threshold must be numeric",
+        predicate.field
+    )
+}
+
+fn compare_numbers(
+    left: &PrimitiveValue,
+    right: &PrimitiveValue,
+    compare: impl FnOnce(f64, f64) -> bool,
+) -> Option<bool> {
+    Some(compare(primitive_to_f64(left)?, primitive_to_f64(right)?))
+}
+
+fn primitive_to_f64(value: &PrimitiveValue) -> Option<f64> {
+    match value {
+        PrimitiveValue::Integer(value) => Some(*value as f64),
+        PrimitiveValue::Float(value) => Some(*value),
+        PrimitiveValue::String(_) | PrimitiveValue::Bool(_) | PrimitiveValue::Null => None,
+    }
+}
+
+fn primitive_from_json(value: &serde_json::Value) -> Result<PrimitiveValue, &'static str> {
+    match value {
+        serde_json::Value::Null => Ok(PrimitiveValue::Null),
+        serde_json::Value::Bool(value) => Ok(PrimitiveValue::Bool(*value)),
+        serde_json::Value::Number(value) => {
+            if let Some(integer) = value.as_i64() {
+                Ok(PrimitiveValue::Integer(integer))
+            } else if let Some(float) = value.as_f64() {
+                Ok(PrimitiveValue::Float(float))
+            } else {
+                Err("must be a finite JSON number")
+            }
+        }
+        serde_json::Value::String(value) => Ok(PrimitiveValue::String(value.clone())),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            Err("must be a scalar JSON value")
+        }
+    }
+}
+
+fn primitive_to_string(value: &serde_json::Value) -> Option<String> {
+    match primitive_from_json(value).ok()? {
+        PrimitiveValue::String(value) => Some(value),
+        PrimitiveValue::Integer(value) => Some(value.to_string()),
+        PrimitiveValue::Float(value) => Some(value.to_string()),
+        PrimitiveValue::Bool(value) => Some(value.to_string()),
+        PrimitiveValue::Null => None,
+    }
+}
+
+fn parse_csv_record(line: &str) -> Result<Vec<String>, &'static str> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        match character {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            ',' if !in_quotes => {
+                fields.push(field);
+                field = String::new();
+            }
+            _ => field.push(character),
+        }
+    }
+
+    if in_quotes {
+        return Err("CSV row contains an unterminated quoted field");
+    }
+    fields.push(field);
+    Ok(fields)
+}
+
+fn csv_field_to_json(field: &str) -> serde_json::Value {
+    let trimmed = field.trim();
+    if trimmed.is_empty() {
+        return serde_json::Value::Null;
+    }
+    match trimmed {
+        "true" => return serde_json::Value::Bool(true),
+        "false" => return serde_json::Value::Bool(false),
+        _ => {}
+    }
+    if let Ok(value) = trimmed.parse::<i64>() {
+        return serde_json::Value::Number(value.into());
+    }
+    if let Ok(value) = trimmed.parse::<f64>()
+        && let Some(number) = serde_json::Number::from_f64(value)
+    {
+        return serde_json::Value::Number(number);
+    }
+    serde_json::Value::String(field.to_owned())
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct JsonlWindow {
     #[serde(rename = "windowName")]
@@ -323,12 +896,168 @@ struct JsonlWindow {
     tags: Vec<JsonlNamedValue>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
 struct JsonlNamedValue {
     name: String,
     value: PrimitiveValue,
     #[serde(rename = "parentName")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     parent_name: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+struct ImportedWindow {
+    #[serde(rename = "windowName")]
+    window_name: String,
+    key: String,
+    source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    partition: Option<String>,
+    #[serde(rename = "startPosition")]
+    start_position: i64,
+    #[serde(rename = "endPosition")]
+    end_position: Option<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    segments: Vec<JsonlNamedValue>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<JsonlNamedValue>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ImportStateKey {
+    window_name: String,
+    key: String,
+    source: String,
+    partition: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ImportState {
+    start_position: i64,
+    segments: Vec<JsonlNamedValue>,
+    tags: Vec<JsonlNamedValue>,
+}
+
+impl ImportState {
+    fn to_window_for_key(&self, key: &ImportStateKey, end_position: Option<i64>) -> ImportedWindow {
+        ImportedWindow {
+            window_name: key.window_name.clone(),
+            key: key.key.clone(),
+            source: key.source.clone(),
+            partition: key.partition.clone(),
+            start_position: self.start_position,
+            end_position,
+            segments: self.segments.clone(),
+            tags: self.tags.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EventImportMap {
+    input: Option<String>,
+    source: FieldSelector,
+    key: Option<FieldSelector>,
+    position: FieldSelector,
+    partition: Option<FieldSelector>,
+    windows: Vec<EventWindowMap>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EventWindowMap {
+    name: String,
+    key: Option<FieldSelector>,
+    active: EventPredicate,
+    #[serde(default, deserialize_with = "deserialize_segments")]
+    segments: Vec<NamedFieldSelector>,
+    #[serde(default, deserialize_with = "deserialize_tags")]
+    tags: Vec<NamedFieldSelector>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EventPredicate {
+    field: String,
+    equals: Option<PrimitiveValue>,
+    #[serde(rename = "notEquals")]
+    not_equals: Option<PrimitiveValue>,
+    #[serde(rename = "greaterThan")]
+    greater_than: Option<PrimitiveValue>,
+    #[serde(rename = "greaterThanOrEqual")]
+    greater_than_or_equal: Option<PrimitiveValue>,
+    #[serde(rename = "lessThan")]
+    less_than: Option<PrimitiveValue>,
+    #[serde(rename = "lessThanOrEqual")]
+    less_than_or_equal: Option<PrimitiveValue>,
+    #[serde(rename = "isTrue")]
+    is_true: Option<bool>,
+    #[serde(rename = "isFalse")]
+    is_false: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum FieldSelector {
+    FieldName(String),
+    Field { field: String },
+}
+
+impl FieldSelector {
+    fn field(&self) -> &str {
+        match self {
+            Self::FieldName(field) | Self::Field { field } => field,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RawNamedFieldSelector {
+    name: String,
+    field: String,
+    #[serde(rename = "parentName")]
+    parent_name: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct NamedFieldSelector {
+    name: String,
+    selector: FieldSelector,
+    parent_name: Option<String>,
+    kind: &'static str,
+}
+
+fn deserialize_segments<'de, D>(deserializer: D) -> Result<Vec<NamedFieldSelector>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_named_selectors(deserializer, "segment")
+}
+
+fn deserialize_tags<'de, D>(deserializer: D) -> Result<Vec<NamedFieldSelector>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_named_selectors(deserializer, "tag")
+}
+
+fn deserialize_named_selectors<'de, D>(
+    deserializer: D,
+    kind: &'static str,
+) -> Result<Vec<NamedFieldSelector>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Vec::<RawNamedFieldSelector>::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .map(|selector| NamedFieldSelector {
+            name: selector.name,
+            selector: FieldSelector::Field {
+                field: selector.field,
+            },
+            parent_name: selector.parent_name,
+            kind,
+        })
+        .collect())
 }
 
 #[cfg(test)]

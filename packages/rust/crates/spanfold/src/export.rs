@@ -1,5 +1,11 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use thiserror::Error;
 
 use crate::{AgainstSelection, Comparator, ComparisonFinality, ComparisonPlan, ComparisonResult};
 
@@ -8,6 +14,115 @@ const RESULT_SCHEMA: &str = "spanfold.comparison.result";
 const ROW_SCHEMA: &str = "spanfold.comparison.result-row";
 const LLM_CONTEXT_SCHEMA: &str = "spanfold.comparison.llm-context";
 const SCHEMA_VERSION: u32 = 0;
+
+/// Error returned while writing configured comparison export artifacts.
+#[derive(Debug, Error)]
+pub enum ComparisonExportError {
+    /// File system error while creating directories or writing output.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// JSON serialization error while building an export payload.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+}
+
+/// Configures optional debug HTML export during comparison execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComparisonDebugHtmlOptions {
+    enabled: bool,
+    path: Option<PathBuf>,
+}
+
+impl ComparisonDebugHtmlOptions {
+    /// Returns options that do not write a debug HTML artifact.
+    #[must_use]
+    pub const fn disabled() -> Self {
+        Self {
+            enabled: false,
+            path: None,
+        }
+    }
+
+    /// Creates options that write a debug HTML artifact to a file.
+    #[must_use]
+    pub fn to_file(path: impl Into<PathBuf>) -> Self {
+        Self {
+            enabled: true,
+            path: Some(path.into()),
+        }
+    }
+
+    /// Gets whether debug HTML export is enabled.
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Gets the destination file path when export is enabled.
+    #[must_use]
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub(crate) fn export_if_enabled(
+        &self,
+        result: &ComparisonResult,
+    ) -> Result<(), ComparisonExportError> {
+        if let Some(path) = self.enabled.then_some(()).and(self.path.as_deref()) {
+            write_file(path, export_result_debug_html(result).as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+/// Configures optional LLM context export during comparison execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComparisonLlmContextOptions {
+    enabled: bool,
+    path: Option<PathBuf>,
+}
+
+impl ComparisonLlmContextOptions {
+    /// Returns options that do not write an LLM context artifact.
+    #[must_use]
+    pub const fn disabled() -> Self {
+        Self {
+            enabled: false,
+            path: None,
+        }
+    }
+
+    /// Creates options that write deterministic LLM context JSON to a file.
+    #[must_use]
+    pub fn to_file(path: impl Into<PathBuf>) -> Self {
+        Self {
+            enabled: true,
+            path: Some(path.into()),
+        }
+    }
+
+    /// Gets whether LLM context export is enabled.
+    #[must_use]
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Gets the destination file path when export is enabled.
+    #[must_use]
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub(crate) fn export_if_enabled(
+        &self,
+        result: &ComparisonResult,
+    ) -> Result<(), ComparisonExportError> {
+        if let Some(path) = self.enabled.then_some(()).and(self.path.as_deref()) {
+            write_file(path, export_result_llm_context(result)?.as_bytes())?;
+        }
+        Ok(())
+    }
+}
 
 /// Exports a comparison plan as deterministic JSON.
 pub fn export_plan_json(plan: &ComparisonPlan) -> Result<String, serde_json::Error> {
@@ -227,6 +342,15 @@ pub fn export_result_debug_html(result: &ComparisonResult) -> String {
         serde_json::to_string_pretty(&aligned).unwrap_or_default(),
         export_result_markdown(result)
     )
+}
+
+fn write_file(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, content)
 }
 
 fn append_json_lines<T: Serialize>(

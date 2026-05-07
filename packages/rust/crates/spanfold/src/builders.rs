@@ -224,15 +224,135 @@ impl<'a> WindowComparisonBuilder<'a> {
         compare(self.history, &self.plan)
     }
 
+    /// Executes the comparison and optionally writes configured export artifacts.
+    pub fn run_with_exports(
+        &self,
+        debug_html: &crate::ComparisonDebugHtmlOptions,
+        llm_context: &crate::ComparisonLlmContextOptions,
+    ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
+        let result = self.run();
+        debug_html.export_if_enabled(&result)?;
+        llm_context.export_if_enabled(&result)?;
+        Ok(result)
+    }
+
+    /// Executes the comparison and optionally writes a debug HTML artifact.
+    pub fn run_with_debug_html(
+        &self,
+        debug_html: &crate::ComparisonDebugHtmlOptions,
+    ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
+        self.run_with_exports(debug_html, &crate::ComparisonLlmContextOptions::disabled())
+    }
+
+    /// Executes the comparison and optionally writes an LLM context artifact.
+    pub fn run_with_llm_context(
+        &self,
+        llm_context: &crate::ComparisonLlmContextOptions,
+    ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
+        self.run_with_exports(&crate::ComparisonDebugHtmlOptions::disabled(), llm_context)
+    }
+
     /// Executes a live comparison at the supplied evaluation horizon.
     #[must_use]
     pub fn run_live(&self, evaluation_horizon: TemporalPoint) -> crate::ComparisonResult {
         compare_live(self.history, &self.plan, evaluation_horizon)
     }
 
+    /// Executes a live comparison and optionally writes configured export artifacts.
+    pub fn run_live_with_exports(
+        &self,
+        evaluation_horizon: TemporalPoint,
+        debug_html: &crate::ComparisonDebugHtmlOptions,
+        llm_context: &crate::ComparisonLlmContextOptions,
+    ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
+        let result = self.run_live(evaluation_horizon);
+        debug_html.export_if_enabled(&result)?;
+        llm_context.export_if_enabled(&result)?;
+        Ok(result)
+    }
+
+    /// Executes a live comparison and optionally writes a debug HTML artifact.
+    pub fn run_live_with_debug_html(
+        &self,
+        evaluation_horizon: TemporalPoint,
+        debug_html: &crate::ComparisonDebugHtmlOptions,
+    ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
+        self.run_live_with_exports(
+            evaluation_horizon,
+            debug_html,
+            &crate::ComparisonLlmContextOptions::disabled(),
+        )
+    }
+
+    /// Executes a live comparison and optionally writes an LLM context artifact.
+    pub fn run_live_with_llm_context(
+        &self,
+        evaluation_horizon: TemporalPoint,
+        llm_context: &crate::ComparisonLlmContextOptions,
+    ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
+        self.run_live_with_exports(
+            evaluation_horizon,
+            &crate::ComparisonDebugHtmlOptions::disabled(),
+            llm_context,
+        )
+    }
+
     /// Aligns the prepared comparison.
     #[must_use]
     pub fn align(&self) -> crate::AlignedComparison {
         align(&self.prepare())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use crate::{ComparisonDebugHtmlOptions, ComparisonLlmContextOptions, WindowHistoryFixture};
+
+    #[test]
+    fn builder_can_write_configured_debug_and_llm_exports() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 3, 6, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+        let directory = unique_temp_dir("spanfold-builder-exports");
+        let debug_path = directory.join("debug").join("provider-qa.html");
+        let llm_path = directory.join("llm").join("provider-qa.llm.json");
+
+        let result = history
+            .compare("Provider QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .overlap()
+            .run_with_exports(
+                &ComparisonDebugHtmlOptions::to_file(&debug_path),
+                &ComparisonLlmContextOptions::to_file(&llm_path),
+            )
+            .expect("configured exports");
+
+        assert!(result.is_valid);
+        assert!(
+            fs::read_to_string(&debug_path)
+                .expect("debug html")
+                .contains("Provider QA")
+        );
+        assert!(
+            fs::read_to_string(&llm_path)
+                .expect("llm context")
+                .contains("spanfold.comparison.llm-context")
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{name}-{}", std::process::id()))
     }
 }
