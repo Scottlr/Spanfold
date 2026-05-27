@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Spanfold — window diagram redesign</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: ui-sans-serif, -apple-system, system-ui, sans-serif; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="diagrams.jsx"></script>
+<script type="text/babel" src="diagram-specs.jsx"></script>
+<script type="text/babel" src="style-guide.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+
+// ─── Typography notes / before-after context ─────────────────────────
+const SFInk = '#1a1714';
+const SFInk2 = '#5a544c';
+const SFInk3 = '#8a837a';
+
+function Callout({ title, children }) {
+  return (
+    <div style={{
+      background: '#faf8f4',
+      border: '1px solid #e3ddd2',
+      padding: '28px 32px',
+      fontFamily: 'ui-sans-serif, -apple-system, system-ui, sans-serif',
+      color: SFInk,
+    }}>
+      <div style={{fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace', fontSize: 10, letterSpacing: 1.4, textTransform: 'uppercase', color: SFInk3, marginBottom: 18}}>Why this change</div>
+      <div style={{fontSize: 18, fontWeight: 600, letterSpacing: -0.2, marginBottom: 14, maxWidth: 640, lineHeight: 1.3}}>{title}</div>
+      <div style={{fontSize: 13, color: SFInk2, lineHeight: 1.6, maxWidth: 640}}>{children}</div>
+    </div>
+  );
+}
+
+// ─── A diagnosis of what's wrong today ───────────────────────────────
+function Diagnosis() {
+  const Row = ({n, what, why}) => (
+    <div style={{display:'grid', gridTemplateColumns: '28px 1fr', gap: 14, padding: '14px 0', borderTop: '1px solid #e3ddd2'}}>
+      <div style={{fontFamily:'"JetBrains Mono", ui-monospace, Menlo, monospace', fontSize:11, color: SFInk3, fontWeight:600, paddingTop:2}}>{n}</div>
+      <div>
+        <div style={{fontSize:14, fontWeight:600, color: SFInk, marginBottom:4}}>{what}</div>
+        <div style={{fontSize:13, color: SFInk2, lineHeight:1.55}}>{why}</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{width: 780, padding: '36px 40px', background:'#faf8f4', border:'1px solid #e3ddd2', fontFamily:'ui-sans-serif, -apple-system, system-ui, sans-serif', color: SFInk}}>
+      <div style={{fontFamily:'"JetBrains Mono", ui-monospace, Menlo, monospace', fontSize:10, letterSpacing:1.4, textTransform:'uppercase', color: SFInk3, marginBottom:10}}>Audit · Current site</div>
+      <div style={{fontSize:22, fontWeight:600, letterSpacing:-0.4, marginBottom:8}}>Why the diagrams aren't landing</div>
+      <div style={{fontSize:14, color: SFInk2, lineHeight:1.55, marginBottom: 18, maxWidth: 600}}>
+        The concepts are good — windows, half-open intervals, overlap/residual/missing, horizons, segments, cohorts, roll-ups.
+        The diagrams have the right <em>pieces</em> but don't commit to any one visual language, so readers can't tell what a bar, a tick, or a label means.
+      </div>
+      <Row n="01" what="No shared coordinate system across lanes"
+        why="Every diagram invents its own axis. Labels like '1  3  5  7  9' aren't tied to the bars above them with any guide — the reader has to eyeball which position a bar starts and ends at."/>
+      <Row n="02" what="Half-open notation is stated in prose, not shown"
+        why="The docs say '[3, 7)' — active at 3, no longer active at 7 — but bars are drawn as plain rectangles. Readers can't see the open bracket, which is the whole temporal model."/>
+      <Row n="03" what="Residual / overlap / missing look the same"
+        why="On comparing-histories, the three row kinds are drawn as three outlined grey boxes in the same style. The whole point is that they are semantically distinct evidence — they need distinct colour, not just distinct labels."/>
+      <Row n="04" what="The horizon is a floating word, not a line"
+        why="'Live vs final' shows a box labelled 'horizon' beside another box labelled 'live row'. There is no actual horizon line crossing the timeline, so the thing readers need to see — past vs future of the horizon — is invisible."/>
+      <Row n="05" what="Segments compete with windows instead of framing them"
+        why="Segments are drawn as peer bars next to window bars, so the reader can't tell what contains what. Segments are context — they should sit behind the timeline as tinted bands."/>
+      <Row n="07" what="v2 refinement — legend dock, block edges, numbered callouts"
+        why="v1 fixed the typography and semantics. v2 adds three things on top: every figure now docks a Key strip explaining its vocabulary; every bar is a two-tone block with a darker bottom edge so it reads as a physical object; numbered circles ①②③ (or letter markers for the horizon) sit on the things captions refer to so reading order is unambiguous."/>
+    </div>
+  );
+}
+
+// ─── System overview — the shared vocabulary ─────────────────────────
+function SystemCard() {
+  return (
+    <div style={{width: 780, padding: '36px 40px', background:'#faf8f4', border:'1px solid #e3ddd2', fontFamily:'ui-sans-serif, -apple-system, system-ui, sans-serif', color: SFInk}}>
+      <div style={{fontFamily:'"JetBrains Mono", ui-monospace, Menlo, monospace', fontSize:10, letterSpacing:1.4, textTransform:'uppercase', color: SFInk3, marginBottom:10}}>Proposal · Visual system</div>
+      <div style={{fontSize:22, fontWeight:600, letterSpacing:-0.4, marginBottom:8}}>One vocabulary, used across every page</div>
+      <div style={{fontSize:14, color: SFInk2, lineHeight:1.55, marginBottom: 22, maxWidth: 600}}>
+        Before redrawing any individual figure, commit to a shared vocabulary. Every diagram on the site gets the same position ruler, the same lane height, the same palette, and the same type ramp. The reader learns it once on the index page and re-uses it on every concepts page.
+      </div>
+
+      <svg width={700} height={220} viewBox="0 0 700 220" style={{overflow:'visible'}}>
+        <Defs/>
+        {/* Key 1 — the bar + bracket */}
+        <g transform="translate(0,20)">
+          <text x={0} y={-4} fontFamily={SF.fontMono} fontSize={10} letterSpacing={1.2} fill={SFInk3} style={{textTransform:'uppercase'}}>Window bar</text>
+          <Block x={0} w={140} h={32} color={SF.target} label="[a, b)"/>
+          <text x={0} y={58} fontFamily={SF.fontUI} fontSize={11} fill={SFInk2}>solid left edge = active at a;</text>
+          <text x={0} y={74} fontFamily={SF.fontUI} fontSize={11} fill={SFInk2}>bracketed right edge = no longer active at b</text>
+        </g>
+
+        {/* Key 2 — palette */}
+        <g transform="translate(360,20)">
+          <text x={0} y={-4} fontFamily={SF.fontMono} fontSize={10} letterSpacing={1.2} fill={SFInk3} style={{textTransform:'uppercase'}}>Semantic palette</text>
+          {[
+            {y: 0,  c: SF.target,   l: 'target / primary'},
+            {y: 22, c: SF.against,  l: 'against / contributor'},
+            {y: 44, c: SF.overlap,  l: 'overlap · agreement'},
+            {y: 66, c: SF.residual, l: 'residual · target-only'},
+            {y: 88, c: SF.missing,  l: 'missing · against-only'},
+          ].map((row,i) => (
+            <g key={i} transform={`translate(0,${row.y})`}>
+              <rect x={0} y={0} width={24} height={11} fill={row.c.fill}/>
+              <rect x={0} y={11} width={24} height={3} fill={row.c.edge}/>
+              <text x={34} y={11} fontFamily={SF.fontUI} fontSize={11} fill={SFInk}>{row.l}</text>
+            </g>
+          ))}
+          <g transform={`translate(0,110)`}>
+            <rect x={0} y={0} width={24} height={11} fill="url(#sf-hatch)"/>
+            <rect x={0} y={11} width={24} height={3} fill="#8f6f3e"/>
+            <text x={34} y={11} fontFamily={SF.fontUI} fontSize={11} fill={SFInk}>provisional · hatched</text>
+          </g>
+        </g>
+
+        {/* Key 3 — ruler */}
+        <g transform="translate(0,140)">
+          <text x={0} y={-4} fontFamily={SF.fontMono} fontSize={10} letterSpacing={1.2} fill={SFInk3} style={{textTransform:'uppercase'}}>Shared position ruler</text>
+          <g transform="translate(0,16)">
+            <Ruler positions={[0,3,6,10]} total={10} width={300}/>
+          </g>
+          <text x={0} y={60} fontFamily={SF.fontUI} fontSize={11} fill={SFInk2} style={{maxWidth:300}}>
+            One axis per figure. Only the positions that matter are labelled.
+          </text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+// ─── Root ────────────────────────────────────────────────────────────
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="intro" title="Spanfold · diagram redesign" subtitle="Audit of the current site, a shared visual system, and six redrawn figures">
+        <DCArtboard id="audit" label="01 · Audit — what's wrong today" width={780} height={620}>
+          <Diagnosis/>
+        </DCArtboard>
+        <DCArtboard id="system" label="02 · System — shared vocabulary" width={780} height={540}>
+          <SystemCard/>
+        </DCArtboard>
+        <DCArtboard id="styleguide" label="03 · Style guide — apply across the site" width={780} height={1500}>
+          <StyleGuide/>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="core" title="Core model" subtitle="Every figure carries its own key strip — the vocabulary is never more than an eye-flick away">
+        <DCArtboard id="window" label="A window, not a flag" width={780} height={460}>
+          <D_Window/>
+        </DCArtboard>
+        <DCArtboard id="compare" label="Overlap, residual, missing" width={780} height={580}>
+          <D_Compare/>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="temporal" title="Temporal edges" subtitle="Live/final and segment context">
+        <DCArtboard id="horizon" label="Live vs final · horizon" width={780} height={500}>
+          <D_Horizon/>
+        </DCArtboard>
+        <DCArtboard id="segments" label="Segments & tags" width={780} height={480}>
+          <D_Segments/>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="composition" title="Composition" subtitle="Multi-lane derivations: cohort quorum and hierarchical roll-ups">
+        <DCArtboard id="cohort" label="Cohort quorum" width={780} height={560}>
+          <D_Cohort/>
+        </DCArtboard>
+        <DCArtboard id="rollup" label="Roll-ups & hierarchy" width={780} height={560}>
+          <D_Rollup/>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="notes" title="Notes on applying this" subtitle="How to roll the system onto the live site">
+        <DCArtboard id="apply" label="Implementation notes" width={780} height={520}>
+          <Callout title="Ship the primitives first; redraw the figures afterward.">
+            <p style={{marginTop:0}}>
+              <b>1. Extract the primitives.</b> The diagrams are six compositions of five SVG primitives — <code>Ruler</code>, <code>Lane</code>, <code>WindowBar</code>, <code>EventDot</code>, <code>Figure</code>. Ship those as a small <code>spanfold-diagrams.js</code> included once per page. Every figure on the live site then becomes 15–40 lines of declarative placement.
+            </p>
+            <p>
+              <b>2. Commit to the half-open bracket.</b> This is the most important detail. Every window bar closes with the bracket glyph, every ruler shows the start and end positions, and the caption uses the same notation — <code>[3, 7)</code>. The concept becomes impossible to miss because you literally see it on every figure.
+            </p>
+            <p>
+              <b>3. Keep the colour set tiny and semantic.</b> Five fills total: target (slate), against (sand), overlap (forest), residual (brick), missing (ochre). No decorative colour. Provisional is encoded as a hatched fill so it reads even without colour — important for print and accessibility.
+            </p>
+            <p>
+              <b>4. Lanes always share an x-axis.</b> On any figure with more than one row, dashed vertical guides connect the event positions across every lane down to the ruler. Readers can visually trace a column to see what happens at position 4 without counting pixels.
+            </p>
+            <p>
+              <b>5. One axis, labelled sparingly.</b> Only the meaningful positions (window starts, window ends, horizon) get numeric ticks. Unit ticks remain but unlabelled. This is how railroad schedules and music notation do it — the eye goes to the labelled landmarks first.
+            </p>
+            <p style={{marginBottom:0}}>
+              <b>6. Remaining figures.</b> Apply the same system to the rest: <em>source matrix</em> becomes a grid of small WindowBars; <em>as-of queries</em> get a horizon line plus a grey-out mask on the future side; <em>coverage/gap</em> reuse the residual/missing palette with a coverage ratio callout.
+            </p>
+          </Callout>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

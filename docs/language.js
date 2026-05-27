@@ -1,6 +1,26 @@
 (function () {
+  const measurementId = "G-RDNDN2RW33";
   const storageKey = "spanfold-language";
   const supported = new Set(["csharp", "python"]);
+
+  function installGoogleAnalytics() {
+    if (window.gtag) {
+      return;
+    }
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
+    document.head.appendChild(script);
+
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function gtag() {
+      window.dataLayer.push(arguments);
+    };
+    window.gtag("js", new Date());
+    window.gtag("config", measurementId);
+  }
+
+  installGoogleAnalytics();
 
   function resolveLanguage(value) {
     return supported.has(value) ? value : "csharp";
