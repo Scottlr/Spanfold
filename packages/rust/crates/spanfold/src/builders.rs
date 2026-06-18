@@ -1,8 +1,78 @@
 use crate::{
-    AgainstSelection, CohortActivity, Comparator, ComparisonDiagnostic, ComparisonPlan,
-    DiagnosticSeverity, OpenWindowPolicy, PreparedComparison, PrimitiveValue, TemporalPoint,
-    WindowFilter, WindowHistory, align, compare, compare_live, prepare, prepare_live,
+    AgainstSelection, CohortActivity, Comparator, ComparisonDiagnostic,
+    ComparisonDuplicateWindowPolicy, ComparisonNormalizationPolicy, ComparisonOutputOptions,
+    ComparisonPlan, ComparisonScope, ComparisonSelector, ComparisonSelectorError, OpenWindowPolicy,
+    PreparedComparison, PrimitiveValue, TemporalPoint, WindowFilter, WindowHistory, align, compare,
+    compare_live, prepare, prepare_live,
 };
+
+/// Builds selectors for comparison plans and local selector predicates.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ComparisonSelectorBuilder;
+
+impl ComparisonSelectorBuilder {
+    /// Returns a selector for a configured window name.
+    #[must_use]
+    pub fn window_name(self, window_name: impl Into<String>) -> ComparisonSelector {
+        ComparisonSelector::for_window_name(window_name)
+    }
+
+    /// Returns a selector for a recorded window key.
+    #[must_use]
+    pub fn key(self, key: impl Into<String>) -> ComparisonSelector {
+        ComparisonSelector::for_key(key)
+    }
+
+    /// Returns a selector for a source identity.
+    #[must_use]
+    pub fn source(self, source: impl Into<String>) -> ComparisonSelector {
+        ComparisonSelector::for_source(source)
+    }
+
+    /// Returns a selector for any of several source identities.
+    #[must_use]
+    pub fn sources(
+        self,
+        sources: impl IntoIterator<Item = impl Into<String>>,
+    ) -> ComparisonSelector {
+        ComparisonSelector::for_sources(sources)
+    }
+
+    /// Returns a selector for a partition identity.
+    #[must_use]
+    pub fn partition(self, partition: impl Into<String>) -> ComparisonSelector {
+        ComparisonSelector::for_partition(partition)
+    }
+
+    /// Returns a selector for a half-open processing-position range.
+    pub fn position_range(
+        self,
+        start_inclusive: i64,
+        end_exclusive: Option<i64>,
+    ) -> Result<ComparisonSelector, ComparisonSelectorError> {
+        ComparisonSelector::for_position_range(start_inclusive, end_exclusive)
+    }
+
+    /// Returns a selector for a half-open timestamp range.
+    pub fn time_range(
+        self,
+        start_inclusive: i64,
+        end_exclusive: Option<i64>,
+    ) -> Result<ComparisonSelector, ComparisonSelectorError> {
+        ComparisonSelector::for_time_range(start_inclusive, end_exclusive)
+    }
+
+    /// Returns a runtime-only selector backed by a predicate.
+    #[must_use]
+    pub fn runtime(
+        self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        predicate: impl Fn(&crate::WindowRecord) -> bool + Send + Sync + 'static,
+    ) -> ComparisonSelector {
+        ComparisonSelector::runtime_only(name, description, predicate)
+    }
+}
 
 /// Fluent comparison builder over an existing recorded history.
 #[derive(Clone, Debug)]
@@ -21,13 +91,24 @@ impl WindowHistory {
                 name: name.into(),
                 target_source: String::new(),
                 against: AgainstSelection::Sources(Vec::new()),
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: None,
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: Vec::new(),
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: crate::TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         }
@@ -45,6 +126,15 @@ impl<'a> WindowComparisonBuilder<'a> {
     #[must_use]
     pub fn target_source(mut self, source: impl Into<String>) -> Self {
         self.plan.target_source = source.into();
+        self.plan.target_selector = None;
+        self
+    }
+
+    /// Sets the target selector for the comparison.
+    #[must_use]
+    pub fn target_selector(mut self, selector: ComparisonSelector) -> Self {
+        self.plan.target_source = selector.name.clone();
+        self.plan.target_selector = Some(selector);
         self
     }
 
@@ -52,6 +142,7 @@ impl<'a> WindowComparisonBuilder<'a> {
     #[must_use]
     pub fn against_source(mut self, source: impl Into<String>) -> Self {
         self.plan.against = AgainstSelection::Sources(vec![source.into()]);
+        self.plan.against_selectors.clear();
         self
     }
 
@@ -60,6 +151,14 @@ impl<'a> WindowComparisonBuilder<'a> {
     pub fn against_sources(mut self, sources: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.plan.against =
             AgainstSelection::Sources(sources.into_iter().map(Into::into).collect::<Vec<_>>());
+        self.plan.against_selectors.clear();
+        self
+    }
+
+    /// Adds a comparison selector.
+    #[must_use]
+    pub fn against_selector(mut self, selector: ComparisonSelector) -> Self {
+        self.plan.against_selectors.push(selector);
         self
     }
 
@@ -76,6 +175,7 @@ impl<'a> WindowComparisonBuilder<'a> {
             sources: sources.into_iter().map(Into::into).collect::<Vec<_>>(),
             activity,
         };
+        self.plan.against_selectors.clear();
         self
     }
 
@@ -83,6 +183,31 @@ impl<'a> WindowComparisonBuilder<'a> {
     #[must_use]
     pub fn scope_window(mut self, window_name: impl Into<String>) -> Self {
         self.plan.scope_window = Some(window_name.into());
+        self
+    }
+
+    /// Applies a reusable comparison scope.
+    #[must_use]
+    pub fn scope(mut self, scope: ComparisonScope) -> Self {
+        self.plan.scope_window = scope.window_name;
+        self.plan.scope_key = scope.key;
+        self.plan.scope_partition = scope.partition;
+        self.plan.scope_segments = scope.segment_filters;
+        self.plan.scope_tags = scope.tag_filters;
+        self
+    }
+
+    /// Limits the comparison to one logical key.
+    #[must_use]
+    pub fn scope_key(mut self, key: impl Into<String>) -> Self {
+        self.plan.scope_key = Some(key.into());
+        self
+    }
+
+    /// Limits the comparison to one partition.
+    #[must_use]
+    pub fn scope_partition(mut self, partition: impl Into<String>) -> Self {
+        self.plan.scope_partition = Some(partition.into());
         self
     }
 
@@ -122,6 +247,42 @@ impl<'a> WindowComparisonBuilder<'a> {
     pub fn clip_open_windows_to_position(mut self, position: i64) -> Self {
         self.plan.open_window_policy = OpenWindowPolicy::ClipToHorizon;
         self.plan.open_window_horizon = Some(TemporalPoint::position(position));
+        self
+    }
+
+    /// Applies a reusable normalization policy.
+    #[must_use]
+    pub fn normalization(mut self, policy: ComparisonNormalizationPolicy) -> Self {
+        self.plan.require_closed_windows = policy.require_closed_windows;
+        self.plan.use_half_open_ranges = policy.use_half_open_ranges;
+        self.plan.time_axis = policy.time_axis;
+        self.plan.null_timestamp_policy = policy.null_timestamp_policy;
+        self.plan.known_at = policy.known_at;
+        self.plan.open_window_policy = policy.open_window_policy;
+        self.plan.open_window_horizon = policy.open_window_horizon;
+        self.plan.coalesce_adjacent_windows = policy.coalesce_adjacent_windows;
+        self.plan.duplicate_window_policy = policy.duplicate_window_policy;
+        self
+    }
+
+    /// Coalesces adjacent normalized windows with identical comparison scope.
+    #[must_use]
+    pub fn coalesce_adjacent_windows(mut self) -> Self {
+        self.plan.coalesce_adjacent_windows = true;
+        self
+    }
+
+    /// Excludes duplicate normalized windows and emits a diagnostic.
+    #[must_use]
+    pub fn reject_duplicate_windows(mut self) -> Self {
+        self.plan.duplicate_window_policy = ComparisonDuplicateWindowPolicy::Reject;
+        self
+    }
+
+    /// Sets comparison result output preferences.
+    #[must_use]
+    pub fn output(mut self, output: ComparisonOutputOptions) -> Self {
+        self.plan.output = output;
         self
     }
 
@@ -184,26 +345,7 @@ impl<'a> WindowComparisonBuilder<'a> {
     /// Returns plan diagnostics without running comparators.
     #[must_use]
     pub fn validate(&self) -> Vec<ComparisonDiagnostic> {
-        let mut diagnostics = Vec::new();
-        if self.plan.strict && self.plan.scope_window.is_none() {
-            diagnostics.push(ComparisonDiagnostic {
-                code: "BroadSelector".to_owned(),
-                severity: DiagnosticSeverity::Error,
-            });
-        }
-        if self.plan.target_source.is_empty() {
-            diagnostics.push(ComparisonDiagnostic {
-                code: "MissingTarget".to_owned(),
-                severity: DiagnosticSeverity::Error,
-            });
-        }
-        if matches!(&self.plan.against, AgainstSelection::Sources(sources) if sources.is_empty()) {
-            diagnostics.push(ComparisonDiagnostic {
-                code: "MissingAgainst".to_owned(),
-                severity: DiagnosticSeverity::Error,
-            });
-        }
-        diagnostics
+        self.plan.validate()
     }
 
     /// Prepares the comparison.
@@ -308,7 +450,11 @@ impl<'a> WindowComparisonBuilder<'a> {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use crate::{ComparisonDebugHtmlOptions, ComparisonLlmContextOptions, WindowHistoryFixture};
+    use crate::{
+        ComparisonDebugHtmlOptions, ComparisonLlmContextOptions, ComparisonNormalizationPolicy,
+        ComparisonNullTimestampPolicy, ComparisonScope, TemporalAxis, TemporalPoint,
+        WindowHistoryFixture,
+    };
 
     #[test]
     fn builder_can_write_configured_debug_and_llm_exports() {
@@ -350,6 +496,157 @@ mod tests {
                 .contains("spanfold.comparison.llm-context")
         );
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn builder_accepts_reusable_scope_and_normalization_policy() {
+        let history = WindowHistoryFixture::new().build();
+        let plan = history
+            .compare("Provider QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope(
+                ComparisonScope::window("DeviceOffline")
+                    .key("device-1")
+                    .partition("region-a")
+                    .segment("period", "first")
+                    .tag("venue", "A"),
+            )
+            .normalization(
+                ComparisonNormalizationPolicy::clip_open_windows_to(TemporalPoint::position(10))
+                    .with_known_at(TemporalPoint::position(9))
+                    .coalescing_adjacent_windows()
+                    .rejecting_duplicate_windows(),
+            )
+            .overlap()
+            .plan()
+            .clone();
+
+        assert_eq!(plan.scope_window.as_deref(), Some("DeviceOffline"));
+        assert_eq!(plan.scope_key.as_deref(), Some("device-1"));
+        assert_eq!(plan.scope_partition.as_deref(), Some("region-a"));
+        assert_eq!(plan.scope_segments.len(), 1);
+        assert_eq!(plan.scope_tags.len(), 1);
+        assert_eq!(plan.open_window_horizon, Some(TemporalPoint::position(10)));
+        assert_eq!(plan.time_axis, TemporalAxis::ProcessingPosition);
+        assert_eq!(plan.known_at, Some(TemporalPoint::position(9)));
+        assert!(plan.coalesce_adjacent_windows);
+        assert_eq!(
+            plan.duplicate_window_policy,
+            crate::ComparisonDuplicateWindowPolicy::Reject
+        );
+    }
+
+    #[test]
+    fn builder_applies_reusable_event_time_normalization_policy() {
+        let history = WindowHistoryFixture::new().build();
+        let plan = history
+            .compare("Event-time QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .normalization(
+                ComparisonNormalizationPolicy::event_time().excluding_missing_event_time(),
+            )
+            .overlap()
+            .plan()
+            .clone();
+
+        assert_eq!(plan.time_axis, TemporalAxis::Timestamp);
+        assert_eq!(
+            plan.null_timestamp_policy,
+            ComparisonNullTimestampPolicy::Exclude
+        );
+    }
+
+    #[test]
+    fn selector_builder_creates_composable_selectors() {
+        let selector = crate::ComparisonSelectorBuilder
+            .window_name("DeviceOffline")
+            .and(crate::ComparisonSelectorBuilder.source("provider-a"));
+        let window = crate::WindowRecord::Closed(crate::ClosedWindow {
+            id: crate::WindowRecordId::new("record-1"),
+            window_name: "DeviceOffline".to_owned(),
+            key: "device-1".to_owned(),
+            range: crate::TemporalRange::positions(1, 5).expect("range"),
+            known_at: None,
+            source: Some("provider-a".to_owned()),
+            partition: None,
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        });
+
+        assert!(selector.matches(&window));
+        assert!(
+            crate::ComparisonSelectorBuilder
+                .position_range(5, Some(1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn builder_can_scope_by_key_and_partition() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a").partition("fleet-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 3, 6, |w| {
+                w.source("provider-b").partition("fleet-a")
+            })
+            .expect("against")
+            .closed_window("DeviceOffline", "device-2", 1, 5, |w| {
+                w.source("provider-a").partition("fleet-a")
+            })
+            .expect("other key")
+            .build();
+
+        let result = history
+            .compare("Scoped QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .scope_key("device-1")
+            .scope_partition("fleet-a")
+            .overlap()
+            .run();
+
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows[0].key, "device-1");
+        assert_eq!(result.overlap_rows[0].partition.as_deref(), Some("fleet-a"));
+    }
+
+    #[test]
+    fn builder_can_set_normalization_duplicate_and_coalesce_policy() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 3, |w| {
+                w.source("provider-a")
+            })
+            .expect("target first")
+            .closed_window("DeviceOffline", "device-1", 3, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target second")
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+
+        let result = history
+            .compare("Normalization QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .coalesce_adjacent_windows()
+            .reject_duplicate_windows()
+            .overlap()
+            .run();
+
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows[0].target_record_ids.len(), 2);
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {

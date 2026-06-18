@@ -43,6 +43,30 @@ def test_pipeline_records_open_and_closed_windows_by_source() -> None:
     assert window.end_position == 2
 
 
+def test_open_window_close_uses_direct_recording_lookup() -> None:
+    pipeline = (
+        Spanfold.for_events()
+        .record_windows()
+        .track_window(
+            "DeviceOffline",
+            key=lambda event: event.device_id,
+            is_active=lambda event: not event.is_online,
+            segments=lambda event: {"region": event.region},
+        )
+    )
+
+    pipeline.ingest(DeviceStatus("device-17", False, "north"), source="provider-a")
+    pipeline.ingest(DeviceStatus("device-17", False, "south"), source="provider-a")
+    pipeline.ingest(DeviceStatus("device-17", True, "south"), source="provider-a")
+
+    assert len(pipeline.history.closed_windows) == 2
+    assert not pipeline.history.open_windows
+    assert [window.segments[0].value for window in pipeline.history.closed_windows] == [
+        "north",
+        "south",
+    ]
+
+
 def test_window_options_receive_opened_and_closed_callbacks_before_global_callbacks() -> None:
     opened = []
     closed = []

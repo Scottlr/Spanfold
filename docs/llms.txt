@@ -32,6 +32,7 @@ Overlap, Residual (target-only), Missing (comparison-only), Gap, Coverage, Symme
 
 - [.NET / C#](https://github.com/Scottlr/Spanfold/blob/main/packages/dotnet/README.md): C# API surface, CLI, testing helpers, samples, benchmarks
 - [Python](https://github.com/Scottlr/Spanfold/blob/main/packages/python/README.md): feature-parity core API with idiomatic typed Python names
+- [Rust](https://github.com/Scottlr/Spanfold/blob/main/packages/rust/README.md): Rust 2024 core API, selector-backed comparisons, deterministic exports, audit bundles, testing helpers, benchmarks, and CLI workflows
 
 ## Repository
 

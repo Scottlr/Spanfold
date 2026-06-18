@@ -16,6 +16,7 @@ When a predicate changes — a service goes down, a threshold is crossed, a stat
 
 ```bash
 dotnet add package Spanfold
+cargo add spanfold --path packages/rust/crates/spanfold
 ```
 
 ## Quick Start
@@ -207,6 +208,15 @@ fixture CLI commands.
 
 → [Python package README](packages/python/README.md)
 
+## Rust Package
+
+A Rust 2024 package and CLI that support the core comparison contract with
+idiomatic builder methods, typed temporal records, selector-backed comparison
+plans, deterministic exports, audit bundles, testing helpers, and high-throughput
+window recording.
+
+→ [Rust package README](packages/rust/README.md)
+
 ---
 
 ## Repository Layout
@@ -226,6 +236,10 @@ packages/
     samples/
     docs/
     pyproject.toml
+  rust/
+    crates/
+    tests/
+    Cargo.toml
 docs/
   index.html
   assets/
@@ -245,6 +259,14 @@ Run the Python port tests:
 cd packages/python
 python -m pip install -e ".[dev]"
 pytest
+```
+
+Run the Rust port tests and lints:
+
+```bash
+cd packages/rust
+cargo test --workspace
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 ## Documentation

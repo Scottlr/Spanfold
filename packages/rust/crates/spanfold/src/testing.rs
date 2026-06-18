@@ -266,7 +266,8 @@ fn flush_token(
 mod tests {
     use super::*;
     use crate::{
-        AgainstSelection, Comparator, ComparisonPlan, OpenWindowPolicy, WindowHistoryFixture,
+        AgainstSelection, Comparator, ComparisonDuplicateWindowPolicy, ComparisonPlan,
+        OpenWindowPolicy, WindowHistoryFixture,
     };
 
     #[test]
@@ -285,13 +286,24 @@ mod tests {
             name: "fixture helper".to_owned(),
             target_source: "provider-a".to_owned(),
             against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Overlap, Comparator::Residual],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: crate::TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
             known_at: None,
             open_window_policy: OpenWindowPolicy::RequireClosed,
             open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: false,
         };
 
@@ -333,13 +345,24 @@ mod tests {
             name: "empty".to_owned(),
             target_source: "provider-a".to_owned(),
             against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: None,
+            scope_key: None,
+            scope_partition: None,
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: crate::TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
             known_at: None,
             open_window_policy: OpenWindowPolicy::RequireClosed,
             open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: false,
         };
         let result = crate::compare(&history, &plan);

@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -103,6 +107,342 @@ pub enum AgainstSelection {
     },
 }
 
+type SelectorPredicate = Arc<dyn Fn(&crate::WindowRecord) -> bool + Send + Sync>;
+
+#[derive(Clone)]
+enum ComparisonSelectorKind {
+    Any,
+    WindowName(String),
+    Key(String),
+    Source(String),
+    Sources(Vec<String>),
+    Partition(String),
+    PositionRange {
+        start_inclusive: i64,
+        end_exclusive: Option<i64>,
+    },
+    TimeRange {
+        start_inclusive: i64,
+        end_exclusive: Option<i64>,
+    },
+    Runtime(SelectorPredicate),
+    And(Box<ComparisonSelectorKind>, Box<ComparisonSelectorKind>),
+    Or(Box<ComparisonSelectorKind>, Box<ComparisonSelectorKind>),
+}
+
+impl fmt::Debug for ComparisonSelectorKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Any => formatter.write_str("Any"),
+            Self::WindowName(value) => formatter.debug_tuple("WindowName").field(value).finish(),
+            Self::Key(value) => formatter.debug_tuple("Key").field(value).finish(),
+            Self::Source(value) => formatter.debug_tuple("Source").field(value).finish(),
+            Self::Sources(value) => formatter.debug_tuple("Sources").field(value).finish(),
+            Self::Partition(value) => formatter.debug_tuple("Partition").field(value).finish(),
+            Self::PositionRange {
+                start_inclusive,
+                end_exclusive,
+            } => formatter
+                .debug_struct("PositionRange")
+                .field("start_inclusive", start_inclusive)
+                .field("end_exclusive", end_exclusive)
+                .finish(),
+            Self::TimeRange {
+                start_inclusive,
+                end_exclusive,
+            } => formatter
+                .debug_struct("TimeRange")
+                .field("start_inclusive", start_inclusive)
+                .field("end_exclusive", end_exclusive)
+                .finish(),
+            Self::Runtime(_) => formatter.write_str("Runtime(<predicate>)"),
+            Self::And(left, right) => formatter
+                .debug_tuple("And")
+                .field(left)
+                .field(right)
+                .finish(),
+            Self::Or(left, right) => formatter
+                .debug_tuple("Or")
+                .field(left)
+                .field(right)
+                .finish(),
+        }
+    }
+}
+
+impl ComparisonSelectorKind {
+    fn matches(&self, window: &crate::WindowRecord) -> bool {
+        match self {
+            Self::Any => true,
+            Self::WindowName(window_name) => window.window_name() == window_name,
+            Self::Key(key) => window.key() == key,
+            Self::Source(source) => window.source() == Some(source.as_str()),
+            Self::Sources(sources) => sources
+                .iter()
+                .any(|source| window.source() == Some(source.as_str())),
+            Self::Partition(partition) => window.partition() == Some(partition.as_str()),
+            Self::PositionRange {
+                start_inclusive,
+                end_exclusive,
+            } => {
+                let start = window.start();
+                start.axis() == TemporalAxis::ProcessingPosition
+                    && start.magnitude() >= *start_inclusive
+                    && end_exclusive.is_none_or(|end| start.magnitude() < end)
+            }
+            Self::TimeRange {
+                start_inclusive,
+                end_exclusive,
+            } => {
+                let start = window.start();
+                start.axis() == TemporalAxis::Timestamp
+                    && start.magnitude() >= *start_inclusive
+                    && end_exclusive.is_none_or(|end| start.magnitude() < end)
+            }
+            Self::Runtime(predicate) => predicate(window),
+            Self::And(left, right) => left.matches(window) && right.matches(window),
+            Self::Or(left, right) => left.matches(window) || right.matches(window),
+        }
+    }
+}
+
+/// Describes a selection used by a window comparison plan.
+#[derive(Clone, Debug)]
+pub struct ComparisonSelector {
+    /// Stable selector name used in output and diagnostics.
+    pub name: String,
+    /// Human-readable selector description.
+    pub description: String,
+    /// Whether this selector can be exported as plan data.
+    pub is_serializable: bool,
+    /// Cohort activity rule when this selector represents a cohort.
+    pub cohort_activity: Option<CohortActivity>,
+    /// Source identities that belong to this cohort selector.
+    pub cohort_sources: Vec<String>,
+    kind: ComparisonSelectorKind,
+}
+
+impl PartialEq for ComparisonSelector {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.description == other.description
+            && self.is_serializable == other.is_serializable
+            && self.cohort_activity == other.cohort_activity
+            && self.cohort_sources == other.cohort_sources
+    }
+}
+
+impl ComparisonSelector {
+    /// Creates a serializable selector descriptor that matches every window.
+    #[must_use]
+    pub fn serializable(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::Any,
+        }
+    }
+
+    /// Creates a selector for a configured window name.
+    #[must_use]
+    pub fn for_window_name(window_name: impl Into<String>) -> Self {
+        let window_name = window_name.into();
+        Self {
+            name: format!("window:{window_name}"),
+            description: format!("window name = {window_name}"),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::WindowName(window_name),
+        }
+    }
+
+    /// Creates a selector for a recorded window key.
+    #[must_use]
+    pub fn for_key(key: impl Into<String>) -> Self {
+        let key = key.into();
+        Self {
+            name: format!("key:{key}"),
+            description: format!("key = {key}"),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::Key(key),
+        }
+    }
+
+    /// Creates a selector for a source identity.
+    #[must_use]
+    pub fn for_source(source: impl Into<String>) -> Self {
+        let source = source.into();
+        Self {
+            name: format!("source:{source}"),
+            description: format!("source = {source}"),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::Source(source),
+        }
+    }
+
+    /// Creates a selector for any of several source identities.
+    #[must_use]
+    pub fn for_sources(sources: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self::for_sources_core(sources, None)
+    }
+
+    /// Creates a selector for a cohort of source identities.
+    #[must_use]
+    pub fn for_cohort_sources(
+        sources: impl IntoIterator<Item = impl Into<String>>,
+        activity: CohortActivity,
+    ) -> Self {
+        Self::for_sources_core(sources, Some(activity))
+    }
+
+    fn for_sources_core(
+        sources: impl IntoIterator<Item = impl Into<String>>,
+        activity: Option<CohortActivity>,
+    ) -> Self {
+        let sources = sources.into_iter().map(Into::into).collect::<Vec<_>>();
+        let name = format!("sources:{}", sources.join(","));
+        let description = format!("source in [{}]", sources.join(", "));
+        Self {
+            name,
+            description,
+            is_serializable: true,
+            cohort_activity: activity,
+            cohort_sources: sources.clone(),
+            kind: ComparisonSelectorKind::Sources(sources),
+        }
+    }
+
+    /// Creates a selector for a partition identity.
+    #[must_use]
+    pub fn for_partition(partition: impl Into<String>) -> Self {
+        let partition = partition.into();
+        Self {
+            name: format!("partition:{partition}"),
+            description: format!("partition = {partition}"),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::Partition(partition),
+        }
+    }
+
+    /// Creates a selector for a half-open processing-position start range.
+    pub fn for_position_range(
+        start_inclusive: i64,
+        end_exclusive: Option<i64>,
+    ) -> Result<Self, ComparisonSelectorError> {
+        if end_exclusive.is_some_and(|end| end < start_inclusive) {
+            return Err(ComparisonSelectorError::RangeEndBeforeStart);
+        }
+        let end_label = end_exclusive.map_or_else(|| "*".to_owned(), |end| end.to_string());
+        Ok(Self {
+            name: format!("position:{start_inclusive}..{end_label}"),
+            description: format!("start position in [{start_inclusive}, {end_label})"),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::PositionRange {
+                start_inclusive,
+                end_exclusive,
+            },
+        })
+    }
+
+    /// Creates a selector for a half-open event-time start range.
+    pub fn for_time_range(
+        start_inclusive: i64,
+        end_exclusive: Option<i64>,
+    ) -> Result<Self, ComparisonSelectorError> {
+        if end_exclusive.is_some_and(|end| end < start_inclusive) {
+            return Err(ComparisonSelectorError::RangeEndBeforeStart);
+        }
+        let end_label = end_exclusive.map_or_else(|| "*".to_owned(), |end| end.to_string());
+        Ok(Self {
+            name: format!("time:{start_inclusive}..{end_label}"),
+            description: format!("start time in [{start_inclusive}, {end_label})"),
+            is_serializable: true,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::TimeRange {
+                start_inclusive,
+                end_exclusive,
+            },
+        })
+    }
+
+    /// Creates a runtime-only selector backed by a predicate.
+    #[must_use]
+    pub fn runtime_only(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        predicate: impl Fn(&crate::WindowRecord) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            is_serializable: false,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::Runtime(Arc::new(predicate)),
+        }
+    }
+
+    /// Creates a copy of this selector with a different display name.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Creates a selector that requires both selectors to match.
+    #[must_use]
+    pub fn and(self, other: Self) -> Self {
+        Self {
+            name: format!("{}&{}", self.name, other.name),
+            description: format!("({}) and ({})", self.description, other.description),
+            is_serializable: self.is_serializable && other.is_serializable,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::And(Box::new(self.kind), Box::new(other.kind)),
+        }
+    }
+
+    /// Creates a selector that allows either selector to match.
+    #[must_use]
+    pub fn or(self, other: Self) -> Self {
+        Self {
+            name: format!("{}|{}", self.name, other.name),
+            description: format!("({}) or ({})", self.description, other.description),
+            is_serializable: self.is_serializable && other.is_serializable,
+            cohort_activity: None,
+            cohort_sources: Vec::new(),
+            kind: ComparisonSelectorKind::Or(Box::new(self.kind), Box::new(other.kind)),
+        }
+    }
+
+    /// Returns whether this selector matches a recorded window.
+    #[must_use]
+    pub fn matches(&self, window: &crate::WindowRecord) -> bool {
+        self.kind.matches(window)
+    }
+}
+
+/// Selector construction error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ComparisonSelectorError {
+    /// Range end is before the start.
+    #[error("selector range end cannot be earlier than the start")]
+    RangeEndBeforeStart,
+}
+
 /// Cohort activity rule.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CohortActivity {
@@ -177,6 +517,245 @@ pub struct WindowFilter {
     pub value: PrimitiveValue,
 }
 
+/// Scope used to select the windows compared by a plan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComparisonScope {
+    /// Optional window family scope.
+    pub window_name: Option<String>,
+    /// Optional logical key scope.
+    pub key: Option<String>,
+    /// Optional partition scope.
+    pub partition: Option<String>,
+    /// Time axis used by scoped temporal comparators.
+    pub time_axis: crate::TemporalAxis,
+    /// Segment filters.
+    pub segment_filters: Vec<WindowFilter>,
+    /// Tag filters.
+    pub tag_filters: Vec<WindowFilter>,
+}
+
+impl Default for ComparisonScope {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+impl ComparisonScope {
+    /// Creates an unrestricted processing-position scope.
+    #[must_use]
+    pub fn all() -> Self {
+        Self {
+            window_name: None,
+            key: None,
+            partition: None,
+            time_axis: crate::TemporalAxis::ProcessingPosition,
+            segment_filters: Vec::new(),
+            tag_filters: Vec::new(),
+        }
+    }
+
+    /// Creates a scope restricted to one window family.
+    #[must_use]
+    pub fn window(window_name: impl Into<String>) -> Self {
+        Self {
+            window_name: Some(window_name.into()),
+            ..Self::all()
+        }
+    }
+
+    /// Returns this scope using event-time normalization.
+    #[must_use]
+    pub const fn on_event_time(mut self) -> Self {
+        self.time_axis = crate::TemporalAxis::Timestamp;
+        self
+    }
+
+    /// Returns this scope using processing-position normalization.
+    #[must_use]
+    pub const fn on_position(mut self) -> Self {
+        self.time_axis = crate::TemporalAxis::ProcessingPosition;
+        self
+    }
+
+    /// Restricts the scope to one logical key.
+    #[must_use]
+    pub fn key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    /// Restricts the scope to one partition.
+    #[must_use]
+    pub fn partition(mut self, partition: impl Into<String>) -> Self {
+        self.partition = Some(partition.into());
+        self
+    }
+
+    /// Adds a segment equality filter.
+    #[must_use]
+    pub fn segment(mut self, name: impl Into<String>, value: impl Into<PrimitiveValue>) -> Self {
+        self.segment_filters.push(WindowFilter {
+            name: name.into(),
+            value: value.into(),
+        });
+        self
+    }
+
+    /// Adds a tag equality filter.
+    #[must_use]
+    pub fn tag(mut self, name: impl Into<String>, value: impl Into<PrimitiveValue>) -> Self {
+        self.tag_filters.push(WindowFilter {
+            name: name.into(),
+            value: value.into(),
+        });
+        self
+    }
+}
+
+/// Handling for records that do not have timestamps in event-time comparisons.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComparisonNullTimestampPolicy {
+    /// Emit a diagnostic for records without event timestamps.
+    Reject,
+    /// Exclude records without event timestamps.
+    Exclude,
+}
+
+/// Describes how recorded windows are normalized before comparison.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComparisonNormalizationPolicy {
+    /// Whether open windows must be closed.
+    pub require_closed_windows: bool,
+    /// Whether ranges use start-inclusive/end-exclusive semantics.
+    pub use_half_open_ranges: bool,
+    /// Normalization axis.
+    pub time_axis: crate::TemporalAxis,
+    /// Open-window handling.
+    pub open_window_policy: OpenWindowPolicy,
+    /// Horizon used when clipping open windows.
+    pub open_window_horizon: Option<crate::TemporalPoint>,
+    /// Missing timestamp handling in event-time mode.
+    pub null_timestamp_policy: ComparisonNullTimestampPolicy,
+    /// Whether adjacent normalized windows can be coalesced.
+    pub coalesce_adjacent_windows: bool,
+    /// Duplicate normalized-window handling.
+    pub duplicate_window_policy: ComparisonDuplicateWindowPolicy,
+    /// Availability point used for known-at filtering.
+    pub known_at: Option<crate::TemporalPoint>,
+}
+
+impl Default for ComparisonNormalizationPolicy {
+    fn default() -> Self {
+        Self::default_policy()
+    }
+}
+
+impl ComparisonNormalizationPolicy {
+    /// Returns the default historical comparison normalization policy.
+    #[must_use]
+    pub const fn default_policy() -> Self {
+        Self {
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: crate::TemporalAxis::ProcessingPosition,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            known_at: None,
+        }
+    }
+
+    /// Returns a policy that excludes open windows from historical comparison.
+    #[must_use]
+    pub const fn require_closed() -> Self {
+        Self::default_policy()
+    }
+
+    /// Returns a policy that clips open windows to an explicit horizon.
+    #[must_use]
+    pub const fn clip_open_windows_to(horizon: crate::TemporalPoint) -> Self {
+        Self {
+            require_closed_windows: false,
+            time_axis: horizon.axis(),
+            open_window_policy: OpenWindowPolicy::ClipToHorizon,
+            open_window_horizon: Some(horizon),
+            ..Self::default_policy()
+        }
+    }
+
+    /// Returns a policy that normalizes on the event-time axis.
+    #[must_use]
+    pub const fn event_time() -> Self {
+        Self {
+            time_axis: crate::TemporalAxis::Timestamp,
+            ..Self::default_policy()
+        }
+    }
+
+    /// Returns this policy with missing event timestamps rejected.
+    #[must_use]
+    pub const fn rejecting_missing_event_time(mut self) -> Self {
+        self.null_timestamp_policy = ComparisonNullTimestampPolicy::Reject;
+        self
+    }
+
+    /// Returns this policy with missing event timestamps excluded.
+    #[must_use]
+    pub const fn excluding_missing_event_time(mut self) -> Self {
+        self.null_timestamp_policy = ComparisonNullTimestampPolicy::Exclude;
+        self
+    }
+
+    /// Returns this policy with a known-at availability point.
+    #[must_use]
+    pub const fn with_known_at(mut self, point: crate::TemporalPoint) -> Self {
+        self.known_at = Some(point);
+        self
+    }
+
+    /// Returns this policy with adjacent-window coalescing enabled.
+    #[must_use]
+    pub const fn coalescing_adjacent_windows(mut self) -> Self {
+        self.coalesce_adjacent_windows = true;
+        self
+    }
+
+    /// Returns this policy with duplicate normalized windows rejected.
+    #[must_use]
+    pub const fn rejecting_duplicate_windows(mut self) -> Self {
+        self.duplicate_window_policy = ComparisonDuplicateWindowPolicy::Reject;
+        self
+    }
+}
+
+/// Describes output preferences for a comparison plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ComparisonOutputOptions {
+    /// Whether result output should include aligned segment details.
+    pub include_aligned_segments: bool,
+    /// Whether result output should include explain data.
+    pub include_explain_data: bool,
+}
+
+impl Default for ComparisonOutputOptions {
+    fn default() -> Self {
+        Self::default_options()
+    }
+}
+
+impl ComparisonOutputOptions {
+    /// Returns the default comparison output options.
+    #[must_use]
+    pub const fn default_options() -> Self {
+        Self {
+            include_aligned_segments: true,
+            include_explain_data: true,
+        }
+    }
+}
+
 /// Typed comparison plan.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComparisonPlan {
@@ -186,22 +765,141 @@ pub struct ComparisonPlan {
     pub target_source: String,
     /// Comparison side selection.
     pub against: AgainstSelection,
+    /// Optional selector object for the target side.
+    pub target_selector: Option<ComparisonSelector>,
+    /// Optional selector objects for the comparison side.
+    pub against_selectors: Vec<ComparisonSelector>,
     /// Optional window family scope.
     pub scope_window: Option<String>,
+    /// Optional logical key scope.
+    pub scope_key: Option<String>,
+    /// Optional partition scope.
+    pub scope_partition: Option<String>,
     /// Segment filters.
     pub scope_segments: Vec<WindowFilter>,
     /// Tag filters.
     pub scope_tags: Vec<WindowFilter>,
     /// Comparator declarations.
     pub comparators: Vec<Comparator>,
+    /// Whether open windows must be closed during normalization.
+    pub require_closed_windows: bool,
+    /// Whether ranges use start-inclusive/end-exclusive semantics.
+    pub use_half_open_ranges: bool,
+    /// Temporal axis requested for normalization.
+    pub time_axis: TemporalAxis,
+    /// Missing timestamp handling in event-time mode.
+    pub null_timestamp_policy: ComparisonNullTimestampPolicy,
     /// Availability point used for known-at filtering.
     pub known_at: Option<crate::TemporalPoint>,
     /// How open windows are handled.
     pub open_window_policy: OpenWindowPolicy,
     /// Exclusive horizon used when clipping open windows.
     pub open_window_horizon: Option<crate::TemporalPoint>,
+    /// Whether adjacent normalized windows can be coalesced.
+    pub coalesce_adjacent_windows: bool,
+    /// Duplicate normalized-window handling.
+    pub duplicate_window_policy: ComparisonDuplicateWindowPolicy,
+    /// Result output preferences.
+    pub output: ComparisonOutputOptions,
     /// Whether strict validation is enabled.
     pub strict: bool,
+}
+
+impl ComparisonPlan {
+    pub(crate) fn effective_target_selector(&self) -> ComparisonSelector {
+        self.target_selector
+            .clone()
+            .unwrap_or_else(|| ComparisonSelector::for_source(self.target_source.clone()))
+    }
+
+    pub(crate) fn effective_against_selectors(&self) -> Vec<ComparisonSelector> {
+        if !self.against_selectors.is_empty() {
+            return self.against_selectors.clone();
+        }
+        match &self.against {
+            AgainstSelection::Sources(sources) => sources
+                .iter()
+                .cloned()
+                .map(ComparisonSelector::for_source)
+                .collect(),
+            AgainstSelection::Cohort {
+                name,
+                sources,
+                activity,
+            } => vec![
+                ComparisonSelector::for_cohort_sources(sources.clone(), activity.clone())
+                    .with_name(name.clone()),
+            ],
+        }
+    }
+
+    /// Returns whether every effective selector can be exported as portable data.
+    #[must_use]
+    pub fn is_serializable(&self) -> bool {
+        self.effective_target_selector().is_serializable
+            && self
+                .effective_against_selectors()
+                .iter()
+                .all(|selector| selector.is_serializable)
+    }
+
+    /// Returns structural plan validation diagnostics without reading history.
+    #[must_use]
+    pub fn validate(&self) -> Vec<ComparisonDiagnostic> {
+        let mut diagnostics = Vec::new();
+        let exportability_severity = if self.strict {
+            DiagnosticSeverity::Error
+        } else {
+            DiagnosticSeverity::Warning
+        };
+
+        if self.name.trim().is_empty() {
+            diagnostics.push(plan_diagnostic("MissingName", DiagnosticSeverity::Error));
+        }
+
+        if self.target_selector.is_none() && self.target_source.trim().is_empty() {
+            diagnostics.push(plan_diagnostic("MissingTarget", DiagnosticSeverity::Error));
+        } else if !self.effective_target_selector().is_serializable {
+            diagnostics.push(plan_diagnostic(
+                "NonSerializableSelector",
+                exportability_severity.clone(),
+            ));
+        }
+
+        let against = self.effective_against_selectors();
+        if against.is_empty() {
+            diagnostics.push(plan_diagnostic("MissingAgainst", DiagnosticSeverity::Error));
+        } else {
+            for selector in against {
+                if !selector.is_serializable {
+                    diagnostics.push(plan_diagnostic(
+                        "NonSerializableSelector",
+                        exportability_severity.clone(),
+                    ));
+                }
+            }
+        }
+
+        if self.scope_window.is_none() {
+            diagnostics.push(plan_diagnostic("MissingScope", DiagnosticSeverity::Error));
+        }
+
+        if self.comparators.is_empty() {
+            diagnostics.push(plan_diagnostic(
+                "MissingComparator",
+                DiagnosticSeverity::Error,
+            ));
+        }
+
+        diagnostics
+    }
+}
+
+fn plan_diagnostic(code: &str, severity: DiagnosticSeverity) -> ComparisonDiagnostic {
+    ComparisonDiagnostic {
+        code: code.to_owned(),
+        severity,
+    }
 }
 
 /// Open-window normalization policy.
@@ -211,6 +909,15 @@ pub enum OpenWindowPolicy {
     RequireClosed,
     /// Open windows are clipped to the configured horizon.
     ClipToHorizon,
+}
+
+/// Duplicate normalized-window handling policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComparisonDuplicateWindowPolicy {
+    /// Preserve duplicate normalized windows.
+    Preserve,
+    /// Exclude duplicate normalized windows and emit a diagnostic.
+    Reject,
 }
 
 /// Diagnostic severity.
@@ -258,6 +965,8 @@ pub struct RowPoint {
     pub axis: TemporalAxis,
     /// Scalar point magnitude.
     pub magnitude: i64,
+    /// Clock identity for timestamp points.
+    pub clock: Option<&'static str>,
 }
 
 /// The active side for a disagreement segment.
@@ -740,9 +1449,10 @@ pub struct ComparisonResult {
 
 #[derive(Clone, Debug)]
 struct SegmentRef<'a> {
-    start: i64,
-    end: i64,
+    start: crate::TemporalPoint,
+    end: crate::TemporalPoint,
     record_id: &'a str,
+    record_ids: Vec<String>,
     source: &'a str,
 }
 
@@ -759,10 +1469,10 @@ struct AlignedSegment {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TransitionPoint<'a> {
     record_id: &'a str,
-    point: i64,
+    point: crate::TemporalPoint,
 }
 
-type GroupKey = (String, String, Option<String>);
+type GroupKey = (String, String, Option<String>, TemporalAxis);
 type GroupWindows<'a> = (Vec<SegmentRef<'a>>, Vec<SegmentRef<'a>>);
 
 struct ResultArtifacts {
@@ -828,13 +1538,16 @@ pub struct NormalizedWindowRecord {
     /// Deterministic record ID.
     #[serde(rename = "recordId")]
     pub record_id: String,
+    /// All source record IDs contributing to this normalized window.
+    #[serde(rename = "recordIds")]
+    pub record_ids: Vec<String>,
     /// Selector name.
     #[serde(rename = "selectorName")]
     pub selector_name: String,
     /// Comparison side.
     pub side: ComparisonSide,
     /// Normalized range.
-    pub range: RowRange,
+    pub range: crate::TemporalRange,
     /// Whether the range depends on an open window clipped to a horizon.
     #[serde(rename = "isProvisional")]
     pub is_provisional: bool,
@@ -946,22 +1659,39 @@ fn execute_compare(
     live_horizon_override: Option<crate::TemporalPoint>,
 ) -> ComparisonResult {
     let mut diagnostics = Vec::new();
-    if plan.strict && plan.scope_window.is_none() {
-        diagnostics.push(ComparisonDiagnostic {
-            code: "BroadSelector".to_owned(),
-            severity: DiagnosticSeverity::Error,
-        });
-    }
-
+    let prepared = prepare_internal(history, plan, live_horizon_override);
+    diagnostics.extend(prepared.diagnostics.clone());
+    diagnostics.extend(runtime_critic_diagnostics(
+        plan,
+        &prepared,
+        live_horizon_override,
+    ));
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     {
-        return empty_result(&plan.name, diagnostics);
+        let mut result = materialize_result(
+            plan,
+            &plan.name,
+            false,
+            diagnostics,
+            ResultArtifacts {
+                comparator_summaries: Vec::new(),
+                coverage_summaries: Vec::new(),
+                lead_lag_summaries: Vec::new(),
+                row_finalities: Vec::new(),
+                extension_metadata: Vec::new(),
+                rows: ComparisonRows::default(),
+            },
+        );
+        result.known_at = plan.known_at.map(row_point_from_temporal_point);
+        result.evaluation_horizon = live_horizon_override
+            .or(plan.open_window_horizon)
+            .map(row_point_from_temporal_point);
+        result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
+        return result;
     }
 
-    let prepared = prepare_internal(history, plan, live_horizon_override);
-    diagnostics.extend(prepared.diagnostics.clone());
     let aligned = align_internal(&prepared);
     let groups = group_normalized_windows(&prepared);
     let mut rows = ComparisonRows::default();
@@ -971,43 +1701,43 @@ fn execute_compare(
     for comparator in &plan.comparators {
         let row_count = match comparator {
             Comparator::Overlap => {
-                let emitted = build_overlap_rows(&groups, &plan.against);
+                let emitted = build_overlap_rows(&aligned);
                 let count = emitted.len();
                 rows.overlap.extend(emitted);
                 count
             }
             Comparator::Residual => {
-                let emitted = build_residual_rows(&groups, &plan.against);
+                let emitted = build_residual_rows(&aligned);
                 let count = emitted.len();
                 rows.residual.extend(emitted);
                 count
             }
             Comparator::Missing => {
-                let emitted = build_missing_rows(&groups, &plan.against);
+                let emitted = build_missing_rows(&aligned);
                 let count = emitted.len();
                 rows.missing.extend(emitted);
                 count
             }
             Comparator::Coverage => {
-                let emitted = build_coverage_rows(&groups, &plan.against);
+                let emitted = build_coverage_rows(&aligned);
                 let count = emitted.len();
                 rows.coverage.extend(emitted);
                 count
             }
             Comparator::Gap => {
-                let emitted = build_gap_rows(&groups, &plan.against);
+                let emitted = build_gap_rows(&aligned);
                 let count = emitted.len();
                 rows.gap.extend(emitted);
                 count
             }
             Comparator::SymmetricDifference => {
-                let emitted = build_symmetric_difference_rows(&groups, &plan.against);
+                let emitted = build_symmetric_difference_rows(&aligned);
                 let count = emitted.len();
                 rows.symmetric_difference.extend(emitted);
                 count
             }
             Comparator::Containment => {
-                let emitted = build_containment_rows(&groups, &plan.against);
+                let emitted = build_containment_rows(&aligned);
                 let count = emitted.len();
                 rows.containment.extend(emitted);
                 count
@@ -1093,6 +1823,64 @@ fn parse_parameterized_comparator(value: &str) -> Option<Comparator> {
     }
 }
 
+fn runtime_critic_diagnostics(
+    plan: &ComparisonPlan,
+    prepared: &PreparedComparison,
+    live_horizon_override: Option<crate::TemporalPoint>,
+) -> Vec<ComparisonDiagnostic> {
+    let severity = if plan.strict {
+        DiagnosticSeverity::Error
+    } else {
+        DiagnosticSeverity::Warning
+    };
+    let mut diagnostics = Vec::new();
+
+    if !plan.is_serializable() {
+        push_diagnostic_once(
+            &mut diagnostics,
+            "RuntimeNonSerializablePlan",
+            severity.clone(),
+        );
+    }
+    if plan.scope_window.is_none() {
+        push_diagnostic_once(&mut diagnostics, "BroadSelector", severity.clone());
+    }
+    if plan.known_at.is_none()
+        && plan
+            .comparators
+            .iter()
+            .any(|item| matches!(item, Comparator::AsOf { .. }))
+    {
+        push_diagnostic_once(&mut diagnostics, "FutureLeakageRisk", severity.clone());
+    }
+    if plan.open_window_policy == OpenWindowPolicy::ClipToHorizon
+        && plan.open_window_horizon.is_none()
+        && live_horizon_override.is_none()
+    {
+        push_diagnostic_once(
+            &mut diagnostics,
+            "LiveFinalityWithoutHorizon",
+            severity.clone(),
+        );
+    }
+    if prepared
+        .excluded_windows
+        .iter()
+        .any(|window| window.diagnostic_code.as_deref() == Some("OpenWindowsWithoutPolicy"))
+    {
+        push_diagnostic_once(&mut diagnostics, "UnboundedOpenDuration", severity.clone());
+    }
+    if let (Some(horizon), Some(known_at)) = (plan.open_window_horizon, plan.known_at)
+        && horizon.axis() == TemporalAxis::Timestamp
+        && known_at.axis() == TemporalAxis::Timestamp
+        && horizon.clock() != known_at.clock()
+    {
+        push_diagnostic_once(&mut diagnostics, "MixedClockRisk", severity);
+    }
+
+    diagnostics
+}
+
 fn parse_temporal_axis(value: &str) -> Option<TemporalAxis> {
     match value {
         "ProcessingPosition" => Some(TemporalAxis::ProcessingPosition),
@@ -1121,35 +1909,6 @@ fn parse_as_of_direction(value: &str) -> Option<AsOfDirection> {
 fn parse_non_negative_i64(value: &str) -> Option<i64> {
     let parsed = value.parse::<i64>().ok()?;
     (parsed >= 0).then_some(parsed)
-}
-
-fn empty_result(plan_name: &str, diagnostics: Vec<ComparisonDiagnostic>) -> ComparisonResult {
-    materialize_result(
-        &ComparisonPlan {
-            name: plan_name.to_owned(),
-            target_source: String::new(),
-            against: AgainstSelection::Sources(Vec::new()),
-            scope_window: None,
-            scope_segments: Vec::new(),
-            scope_tags: Vec::new(),
-            comparators: Vec::new(),
-            known_at: None,
-            open_window_policy: OpenWindowPolicy::RequireClosed,
-            open_window_horizon: None,
-            strict: false,
-        },
-        plan_name,
-        false,
-        diagnostics,
-        ResultArtifacts {
-            comparator_summaries: Vec::new(),
-            coverage_summaries: Vec::new(),
-            lead_lag_summaries: Vec::new(),
-            row_finalities: Vec::new(),
-            extension_metadata: Vec::new(),
-            rows: ComparisonRows::default(),
-        },
-    )
 }
 
 fn materialize_result(
@@ -1505,11 +2264,27 @@ fn prepare_internal(
             ))
     });
 
+    let target_selector = plan.effective_target_selector();
+    let target_selector_name = if plan.target_selector.is_some() {
+        target_selector.name.as_str()
+    } else {
+        "target"
+    };
+    let against_selectors = plan.effective_against_selectors();
+    let use_explicit_against_selector_names = !plan.against_selectors.is_empty();
+
     for candidate in candidates {
         let window = to_window_artifact(&candidate);
-        let known_at_position = candidate
-            .known_at_position()
-            .unwrap_or(candidate.start_position());
+        let record = candidate.to_window_record();
+        let known_at_position = candidate.known_at_position().unwrap_or_else(|| {
+            if candidate.is_open() {
+                candidate.start_position()
+            } else {
+                candidate
+                    .end_position()
+                    .unwrap_or(candidate.start_position())
+            }
+        });
         if let Some(known_at) = plan.known_at
             && (known_at.axis() != TemporalAxis::ProcessingPosition
                 || known_at_position > known_at.magnitude())
@@ -1538,6 +2313,28 @@ fn prepare_internal(
             });
             continue;
         }
+        if let Some(scope_key) = &plan.scope_key
+            && candidate.key() != scope_key
+        {
+            excluded_windows.push(ExcludedWindowRecord {
+                record_id: window.record_id.clone(),
+                reason: "Window is outside the comparison scope.".to_owned(),
+                diagnostic_code: None,
+                window,
+            });
+            continue;
+        }
+        if let Some(scope_partition) = &plan.scope_partition
+            && candidate.partition() != Some(scope_partition.as_str())
+        {
+            excluded_windows.push(ExcludedWindowRecord {
+                record_id: window.record_id.clone(),
+                reason: "Window is outside the comparison scope.".to_owned(),
+                diagnostic_code: None,
+                window,
+            });
+            continue;
+        }
 
         if !matches_window_artifact(&window, &plan.scope_segments, &plan.scope_tags) {
             excluded_windows.push(ExcludedWindowRecord {
@@ -1549,16 +2346,12 @@ fn prepare_internal(
             continue;
         }
 
-        let is_target = candidate.source() == Some(plan.target_source.as_str());
-        let is_against = match &plan.against {
-            AgainstSelection::Sources(sources) => candidate
-                .source()
-                .is_some_and(|source| sources.iter().any(|item| item == source)),
-            AgainstSelection::Cohort { sources, .. } => candidate
-                .source()
-                .is_some_and(|source| sources.iter().any(|item| item == source)),
-        };
-        if !is_target && !is_against {
+        let is_target = target_selector.matches(&record);
+        let matching_against_selectors = against_selectors
+            .iter()
+            .filter(|selector| selector.matches(&record))
+            .collect::<Vec<_>>();
+        if !is_target && matching_against_selectors.is_empty() {
             excluded_windows.push(ExcludedWindowRecord {
                 record_id: window.record_id.clone(),
                 reason: "Window did not match target or comparison selectors.".to_owned(),
@@ -1572,7 +2365,7 @@ fn prepare_internal(
         if is_target
             && let Some(normalized) = normalize_candidate(
                 &candidate,
-                "target",
+                target_selector_name,
                 ComparisonSide::Target,
                 plan,
                 live_horizon_override,
@@ -1582,20 +2375,28 @@ fn prepare_internal(
         {
             normalized_windows.push(normalized);
         }
-        if is_against
-            && let Some(normalized) = normalize_candidate(
+        for selector in matching_against_selectors {
+            let selector_name = if use_explicit_against_selector_names {
+                selector.name.as_str()
+            } else {
+                "against"
+            };
+            if let Some(normalized) = normalize_candidate(
                 &candidate,
-                "against",
+                selector_name,
                 ComparisonSide::Against,
                 plan,
                 live_horizon_override,
                 &mut diagnostics,
                 &mut excluded_windows,
-            )
-        {
-            normalized_windows.push(normalized);
+            ) {
+                normalized_windows.push(normalized);
+            }
         }
     }
+
+    let normalized_windows =
+        postprocess_normalized_windows(normalized_windows, plan, &mut diagnostics);
 
     PreparedComparison {
         plan: plan.clone(),
@@ -1606,19 +2407,138 @@ fn prepare_internal(
     }
 }
 
+fn postprocess_normalized_windows(
+    windows: Vec<NormalizedWindowRecord>,
+    plan: &ComparisonPlan,
+    diagnostics: &mut Vec<ComparisonDiagnostic>,
+) -> Vec<NormalizedWindowRecord> {
+    let deduplicated = deduplicate_normalized_windows(windows, plan, diagnostics);
+    if plan.coalesce_adjacent_windows {
+        coalesce_normalized_windows(deduplicated)
+    } else {
+        deduplicated
+    }
+}
+
+fn deduplicate_normalized_windows(
+    windows: Vec<NormalizedWindowRecord>,
+    plan: &ComparisonPlan,
+    diagnostics: &mut Vec<ComparisonDiagnostic>,
+) -> Vec<NormalizedWindowRecord> {
+    let mut seen = BTreeSet::new();
+    let mut rows = Vec::new();
+    for window in windows {
+        let key = normalized_duplicate_key(&window);
+        if seen.contains(&key) {
+            push_diagnostic_once(diagnostics, "DuplicateWindow", DiagnosticSeverity::Warning);
+            if plan.duplicate_window_policy == ComparisonDuplicateWindowPolicy::Reject {
+                continue;
+            }
+        } else {
+            seen.insert(key);
+        }
+        rows.push(window);
+    }
+    rows
+}
+
+fn coalesce_normalized_windows(
+    windows: Vec<NormalizedWindowRecord>,
+) -> Vec<NormalizedWindowRecord> {
+    let mut groups: BTreeMap<String, Vec<NormalizedWindowRecord>> = BTreeMap::new();
+    for window in windows {
+        groups
+            .entry(normalized_coalesce_key(&window))
+            .or_default()
+            .push(window);
+    }
+
+    let mut rows = Vec::new();
+    for mut windows in groups.into_values() {
+        windows.sort_by_key(|window| {
+            (
+                window.range.start(),
+                window.range.end(),
+                window.record_id.clone(),
+            )
+        });
+        for window in windows {
+            if let Some(previous) = rows.last_mut()
+                && can_coalesce_normalized(previous, &window)
+            {
+                previous.range =
+                    crate::TemporalRange::new(previous.range.start(), window.range.end())
+                        .expect("adjacent normalized ranges share an axis");
+                previous.is_provisional |= window.is_provisional;
+                previous.record_ids.extend(window.record_ids);
+                continue;
+            }
+            rows.push(window);
+        }
+    }
+    rows
+}
+
+fn can_coalesce_normalized(
+    first: &NormalizedWindowRecord,
+    second: &NormalizedWindowRecord,
+) -> bool {
+    normalized_coalesce_key(first) == normalized_coalesce_key(second)
+        && first.range.end() == second.range.start()
+}
+
+fn normalized_duplicate_key(window: &NormalizedWindowRecord) -> String {
+    format!(
+        "{}|{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}",
+        window.selector_name,
+        window.side,
+        window.window.window_name,
+        window.window.key,
+        window.window.source,
+        window.window.partition,
+        window.range.start(),
+        window.range.end(),
+        window.segments
+    )
+}
+
+fn normalized_coalesce_key(window: &NormalizedWindowRecord) -> String {
+    format!(
+        "{}|{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}",
+        window.selector_name,
+        window.side,
+        window.window.window_name,
+        window.window.key,
+        window.window.source,
+        window.window.partition,
+        window.segments,
+        window.window.tags
+    )
+}
+
+fn push_diagnostic_once(
+    diagnostics: &mut Vec<ComparisonDiagnostic>,
+    code: &str,
+    severity: DiagnosticSeverity,
+) {
+    if diagnostics.iter().any(|diagnostic| diagnostic.code == code) {
+        return;
+    }
+    diagnostics.push(ComparisonDiagnostic {
+        code: code.to_owned(),
+        severity,
+    });
+}
+
 fn align_internal(prepared: &PreparedComparison) -> AlignedComparison {
     let groups = group_normalized_windows(prepared);
     let mut segments = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
+    for ((window_name, key, partition, _axis), (targets, againsts)) in groups {
         for segment in aligned_segments(
             targets.as_slice(),
             againsts.as_slice(),
             &prepared.plan.against,
-        )
-        .into_iter()
-        .filter(|segment| {
-            !segment.target_record_ids.is_empty() || !segment.against_record_ids.is_empty()
-        }) {
+        ) {
             segments.push(AlignedSegmentArtifact {
                 segment_id: format!("segment[{}]", segments.len()),
                 window_name: window_name.clone(),
@@ -1649,12 +2569,14 @@ fn group_normalized_windows(prepared: &PreparedComparison) -> BTreeMap<GroupKey,
                 normalized.window.window_name.clone(),
                 normalized.window.key.clone(),
                 normalized.window.partition.clone(),
+                normalized.range.start().axis(),
             ))
             .or_default();
         let segment = SegmentRef {
-            start: normalized.range.start,
-            end: normalized.range.end,
+            start: normalized.range.start(),
+            end: normalized.range.end(),
             record_id: normalized.record_id.as_str(),
+            record_ids: normalized.record_ids.clone(),
             source: normalized.window.source.as_deref().unwrap_or(""),
         };
         match normalized.side {
@@ -1669,6 +2591,7 @@ fn row_point_from_temporal_point(point: crate::TemporalPoint) -> RowPoint {
     RowPoint {
         axis: point.axis(),
         magnitude: point.magnitude(),
+        clock: point.clock(),
     }
 }
 
@@ -1714,15 +2637,23 @@ impl RawWindowRef<'_> {
     }
 
     fn start_position(&self) -> i64 {
+        self.start_point().magnitude()
+    }
+
+    fn start_point(&self) -> crate::TemporalPoint {
         match self {
-            Self::Closed(window) => window.range.start().magnitude(),
-            Self::Open(window) => window.start.magnitude(),
+            Self::Closed(window) => window.range.start(),
+            Self::Open(window) => window.start,
         }
     }
 
     fn end_position(&self) -> Option<i64> {
+        self.end_point().map(|point| point.magnitude())
+    }
+
+    fn end_point(&self) -> Option<crate::TemporalPoint> {
         match self {
-            Self::Closed(window) => Some(window.range.end().magnitude()),
+            Self::Closed(window) => Some(window.range.end()),
             Self::Open(_) => None,
         }
     }
@@ -1750,6 +2681,13 @@ impl RawWindowRef<'_> {
 
     fn is_open(&self) -> bool {
         matches!(self, Self::Open(_))
+    }
+
+    fn to_window_record(&self) -> crate::WindowRecord {
+        match self {
+            Self::Closed(window) => crate::WindowRecord::Closed((*window).clone()),
+            Self::Open(window) => crate::WindowRecord::Open((*window).clone()),
+        }
     }
 }
 
@@ -1779,14 +2717,34 @@ fn normalize_candidate(
     excluded_windows: &mut Vec<ExcludedWindowRecord>,
 ) -> Option<NormalizedWindowRecord> {
     let horizon = live_horizon_override.or(plan.open_window_horizon);
-    let end_position = match candidate.end_position() {
+    if plan.time_axis == TemporalAxis::Timestamp
+        && candidate.start_point().axis() != TemporalAxis::Timestamp
+    {
+        let window = to_window_artifact(candidate);
+        excluded_windows.push(ExcludedWindowRecord {
+            record_id: window.record_id.clone(),
+            reason: "Event-time comparison requires recorded event timestamps.".to_owned(),
+            diagnostic_code: Some("MissingEventTime".to_owned()),
+            window,
+        });
+        diagnostics.push(ComparisonDiagnostic {
+            code: "MissingEventTime".to_owned(),
+            severity: match plan.null_timestamp_policy {
+                ComparisonNullTimestampPolicy::Reject => DiagnosticSeverity::Error,
+                ComparisonNullTimestampPolicy::Exclude => DiagnosticSeverity::Warning,
+            },
+        });
+        return None;
+    }
+
+    let end_point = match candidate.end_point() {
         Some(end) => (end, false),
         None => match (plan.open_window_policy, horizon) {
             (OpenWindowPolicy::ClipToHorizon, Some(point))
-                if point.axis() == TemporalAxis::ProcessingPosition
-                    && point.magnitude() >= candidate.start_position() =>
+                if point.axis() == candidate.start_point().axis()
+                    && point >= candidate.start_point() =>
             {
-                (point.magnitude(), true)
+                (point, true)
             }
             (OpenWindowPolicy::ClipToHorizon, Some(_)) => {
                 let window = to_window_artifact(candidate);
@@ -1822,13 +2780,12 @@ fn normalize_candidate(
 
     Some(NormalizedWindowRecord {
         record_id: candidate.record_id().to_owned(),
+        record_ids: vec![candidate.record_id().to_owned()],
         selector_name: selector_name.to_owned(),
         side,
-        range: RowRange {
-            start: candidate.start_position(),
-            end: end_position.0,
-        },
-        is_provisional: end_position.1,
+        range: crate::TemporalRange::new(candidate.start_point(), end_point.0)
+            .expect("normalized candidate range was already validated"),
+        is_provisional: end_point.1,
         segments: candidate.segments().to_vec(),
         window: to_window_artifact(candidate),
     })
@@ -1867,7 +2824,7 @@ fn aligned_segments(
         points.insert(item.end);
     }
 
-    let points: Vec<i64> = points.into_iter().collect();
+    let points: Vec<crate::TemporalPoint> = points.into_iter().collect();
     let mut segments = Vec::new();
     for pair in points.windows(2) {
         let start = pair[0];
@@ -1880,12 +2837,12 @@ fn aligned_segments(
         let mut against_record_ids = Vec::new();
         for item in targets {
             if item.start < end && item.end > start {
-                target_record_ids.push(item.record_id.to_owned());
+                target_record_ids.extend(item.record_ids.iter().cloned());
             }
         }
         for item in againsts {
             if item.start < end && item.end > start {
-                against_record_ids.push(item.record_id.to_owned());
+                against_record_ids.extend(item.record_ids.iter().cloned());
             }
         }
 
@@ -1906,8 +2863,8 @@ fn aligned_segments(
         };
 
         segments.push(AlignedSegment {
-            start,
-            end,
+            start: start.magnitude(),
+            end: end.magnitude(),
             target_record_ids,
             against_record_ids,
             against_is_active,
@@ -1917,229 +2874,183 @@ fn aligned_segments(
     segments
 }
 
-fn build_overlap_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<OverlapRow> {
+fn build_overlap_rows(aligned: &AlignedComparison) -> Vec<OverlapRow> {
     let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            if segment.target_record_ids.is_empty() || !segment.against_is_active {
-                continue;
-            }
+    for segment in &aligned.segments {
+        if segment.target_record_ids.is_empty() || !segment.against_is_active {
+            continue;
+        }
 
-            rows.push(OverlapRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                range: RowRange {
-                    start: segment.start,
-                    end: segment.end,
-                },
-                target_record_ids: segment.target_record_ids,
-                against_record_ids: segment.against_record_ids,
+        rows.push(OverlapRow {
+            window_name: segment.window_name.clone(),
+            key: segment.key.clone(),
+            partition: segment.partition.clone(),
+            range: segment.range,
+            target_record_ids: segment.target_record_ids.clone(),
+            against_record_ids: segment.against_record_ids.clone(),
+        });
+    }
+    rows
+}
+
+fn build_residual_rows(aligned: &AlignedComparison) -> Vec<ResidualRow> {
+    let mut rows = Vec::new();
+    for segment in &aligned.segments {
+        if segment.target_record_ids.is_empty() || segment.against_is_active {
+            continue;
+        }
+
+        rows.push(ResidualRow {
+            window_name: segment.window_name.clone(),
+            key: segment.key.clone(),
+            partition: segment.partition.clone(),
+            range: segment.range,
+            target_record_ids: segment.target_record_ids.clone(),
+        });
+    }
+    rows
+}
+
+fn build_missing_rows(aligned: &AlignedComparison) -> Vec<MissingRow> {
+    let mut rows = Vec::new();
+    for segment in &aligned.segments {
+        if !segment.target_record_ids.is_empty() || !segment.against_is_active {
+            continue;
+        }
+
+        rows.push(MissingRow {
+            window_name: segment.window_name.clone(),
+            key: segment.key.clone(),
+            partition: segment.partition.clone(),
+            range: segment.range,
+            against_record_ids: segment.against_record_ids.clone(),
+        });
+    }
+    rows
+}
+
+fn build_coverage_rows(aligned: &AlignedComparison) -> Vec<CoverageRow> {
+    let mut rows = Vec::new();
+    for segment in &aligned.segments {
+        if segment.target_record_ids.is_empty() {
+            continue;
+        }
+
+        let target_magnitude = segment.range.end - segment.range.start;
+        rows.push(CoverageRow {
+            window_name: segment.window_name.clone(),
+            key: segment.key.clone(),
+            partition: segment.partition.clone(),
+            range: segment.range,
+            target_magnitude,
+            covered_magnitude: if segment.against_is_active {
+                target_magnitude
+            } else {
+                0
+            },
+            target_record_ids: segment.target_record_ids.clone(),
+            against_record_ids: segment.against_record_ids.clone(),
+        });
+    }
+    rows
+}
+
+fn build_gap_rows(aligned: &AlignedComparison) -> Vec<GapRow> {
+    let mut rows = Vec::new();
+    for segment in &aligned.segments {
+        if !segment.target_record_ids.is_empty() || segment.against_is_active {
+            continue;
+        }
+
+        rows.push(GapRow {
+            window_name: segment.window_name.clone(),
+            key: segment.key.clone(),
+            partition: segment.partition.clone(),
+            range: segment.range,
+        });
+    }
+    rows
+}
+
+fn build_symmetric_difference_rows(aligned: &AlignedComparison) -> Vec<SymmetricDifferenceRow> {
+    let mut rows = Vec::new();
+    for segment in &aligned.segments {
+        let has_target = !segment.target_record_ids.is_empty();
+        let has_against = segment.against_is_active;
+        if has_target == has_against {
+            continue;
+        }
+
+        rows.push(SymmetricDifferenceRow {
+            window_name: segment.window_name.clone(),
+            key: segment.key.clone(),
+            partition: segment.partition.clone(),
+            range: segment.range,
+            side: if has_target {
+                ComparisonSide::Target
+            } else {
+                ComparisonSide::Against
+            },
+            target_record_ids: segment.target_record_ids.clone(),
+            against_record_ids: segment.against_record_ids.clone(),
+        });
+    }
+    rows
+}
+
+fn build_containment_rows(aligned: &AlignedComparison) -> Vec<ContainmentRow> {
+    let mut rows = Vec::new();
+    let target_ranges = target_ranges_by_record_id(&aligned.prepared);
+    for segment in &aligned.segments {
+        if segment.target_record_ids.is_empty() {
+            continue;
+        }
+
+        if segment.against_is_active {
+            rows.push(ContainmentRow {
+                window_name: segment.window_name.clone(),
+                key: segment.key.clone(),
+                partition: segment.partition.clone(),
+                range: segment.range,
+                status: ContainmentStatus::Contained,
+                target_record_ids: segment.target_record_ids.clone(),
+                container_record_ids: segment.against_record_ids.clone(),
+            });
+            continue;
+        }
+
+        for target_record_id in &segment.target_record_ids {
+            rows.push(ContainmentRow {
+                window_name: segment.window_name.clone(),
+                key: segment.key.clone(),
+                partition: segment.partition.clone(),
+                range: segment.range,
+                status: classify_uncontained_segment(
+                    target_ranges.get(target_record_id.as_str()),
+                    (segment.range.start, segment.range.end),
+                ),
+                target_record_ids: vec![target_record_id.clone()],
+                container_record_ids: Vec::new(),
             });
         }
     }
     rows
 }
 
-fn build_residual_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<ResidualRow> {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            if segment.target_record_ids.is_empty() || segment.against_is_active {
-                continue;
-            }
-
-            rows.push(ResidualRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                range: RowRange {
-                    start: segment.start,
-                    end: segment.end,
-                },
-                target_record_ids: segment.target_record_ids,
-            });
+fn target_ranges_by_record_id(prepared: &PreparedComparison) -> BTreeMap<&str, (i64, i64)> {
+    let mut ranges = BTreeMap::new();
+    for window in &prepared.normalized_windows {
+        if window.side == ComparisonSide::Target {
+            ranges.insert(
+                window.record_id.as_str(),
+                (
+                    window.range.start().magnitude(),
+                    window.range.end().magnitude(),
+                ),
+            );
         }
     }
-    rows
-}
-
-fn build_missing_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<MissingRow> {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            if !segment.target_record_ids.is_empty() || !segment.against_is_active {
-                continue;
-            }
-
-            rows.push(MissingRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                range: RowRange {
-                    start: segment.start,
-                    end: segment.end,
-                },
-                against_record_ids: segment.against_record_ids,
-            });
-        }
-    }
-    rows
-}
-
-fn build_coverage_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<CoverageRow> {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            if segment.target_record_ids.is_empty() {
-                continue;
-            }
-
-            rows.push(CoverageRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                range: RowRange {
-                    start: segment.start,
-                    end: segment.end,
-                },
-                target_magnitude: segment.end - segment.start,
-                covered_magnitude: if segment.against_is_active {
-                    segment.end - segment.start
-                } else {
-                    0
-                },
-                target_record_ids: segment.target_record_ids,
-                against_record_ids: segment.against_record_ids,
-            });
-        }
-    }
-    rows
-}
-
-fn build_gap_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<GapRow> {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            if !segment.target_record_ids.is_empty() || segment.against_is_active {
-                continue;
-            }
-
-            rows.push(GapRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                range: RowRange {
-                    start: segment.start,
-                    end: segment.end,
-                },
-            });
-        }
-    }
-    rows
-}
-
-fn build_symmetric_difference_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<SymmetricDifferenceRow> {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            let has_target = !segment.target_record_ids.is_empty();
-            let has_against = segment.against_is_active;
-            if has_target == has_against {
-                continue;
-            }
-
-            rows.push(SymmetricDifferenceRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                range: RowRange {
-                    start: segment.start,
-                    end: segment.end,
-                },
-                side: if has_target {
-                    ComparisonSide::Target
-                } else {
-                    ComparisonSide::Against
-                },
-                target_record_ids: segment.target_record_ids,
-                against_record_ids: segment.against_record_ids,
-            });
-        }
-    }
-    rows
-}
-
-fn build_containment_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    against_selection: &AgainstSelection,
-) -> Vec<ContainmentRow> {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
-        let mut target_ranges = BTreeMap::new();
-        for target in targets {
-            target_ranges.insert(target.record_id, (target.start, target.end));
-        }
-
-        for segment in aligned_segments(targets, againsts, against_selection) {
-            if segment.target_record_ids.is_empty() {
-                continue;
-            }
-
-            if segment.against_is_active {
-                rows.push(ContainmentRow {
-                    window_name: window_name.clone(),
-                    key: key.clone(),
-                    partition: partition.clone(),
-                    range: RowRange {
-                        start: segment.start,
-                        end: segment.end,
-                    },
-                    status: ContainmentStatus::Contained,
-                    target_record_ids: segment.target_record_ids,
-                    container_record_ids: segment.against_record_ids,
-                });
-                continue;
-            }
-
-            for target_record_id in segment.target_record_ids {
-                rows.push(ContainmentRow {
-                    window_name: window_name.clone(),
-                    key: key.clone(),
-                    partition: partition.clone(),
-                    range: RowRange {
-                        start: segment.start,
-                        end: segment.end,
-                    },
-                    status: classify_uncontained_segment(
-                        target_ranges.get(target_record_id.as_str()),
-                        (segment.start, segment.end),
-                    ),
-                    target_record_ids: vec![target_record_id],
-                    container_record_ids: Vec::new(),
-                });
-            }
-        }
-    }
-    rows
+    ranges
 }
 
 fn classify_uncontained_segment(
@@ -2165,29 +3076,11 @@ fn build_lead_lag_rows(
     axis: TemporalAxis,
     tolerance_magnitude: i64,
 ) -> (Vec<LeadLagRow>, LeadLagSummary) {
-    if axis != TemporalAxis::ProcessingPosition {
-        return (
-            Vec::new(),
-            LeadLagSummary {
-                transition,
-                axis,
-                tolerance_magnitude,
-                row_count: 0,
-                target_lead_count: 0,
-                target_lag_count: 0,
-                equal_count: 0,
-                missing_comparison_count: 0,
-                outside_tolerance_count: 0,
-                minimum_delta_magnitude: None,
-                maximum_delta_magnitude: None,
-            },
-        );
-    }
-
     let mut rows = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
+    for ((window_name, key, partition, _group_axis), (targets, againsts)) in groups {
         let mut comparison_points: Vec<TransitionPoint<'_>> = againsts
             .iter()
+            .filter(|against| against.start.axis() == axis)
             .map(|against| TransitionPoint {
                 record_id: against.record_id,
                 point: if transition == LeadLagTransition::Start {
@@ -2200,6 +3093,9 @@ fn build_lead_lag_rows(
         comparison_points.sort_by_key(|item| (item.point, item.record_id));
 
         for target in targets {
+            if target.start.axis() != axis {
+                continue;
+            }
             let target_point = if transition == LeadLagTransition::Start {
                 target.start
             } else {
@@ -2213,10 +3109,7 @@ fn build_lead_lag_rows(
                     partition: partition.clone(),
                     transition: transition.clone(),
                     axis,
-                    target_point: RowPoint {
-                        axis,
-                        magnitude: target_point,
-                    },
+                    target_point: row_point_from_temporal_point(target_point),
                     comparison_point: None,
                     delta_magnitude: None,
                     tolerance_magnitude,
@@ -2229,21 +3122,15 @@ fn build_lead_lag_rows(
             }
 
             let nearest = find_nearest_transition(&comparison_points, target_point);
-            let delta = target_point - nearest.point;
+            let delta = delta_magnitude(target_point, nearest.point);
             rows.push(LeadLagRow {
                 window_name: window_name.clone(),
                 key: key.clone(),
                 partition: partition.clone(),
                 transition: transition.clone(),
                 axis,
-                target_point: RowPoint {
-                    axis,
-                    magnitude: target_point,
-                },
-                comparison_point: Some(RowPoint {
-                    axis,
-                    magnitude: nearest.point,
-                }),
+                target_point: row_point_from_temporal_point(target_point),
+                comparison_point: Some(row_point_from_temporal_point(nearest.point)),
                 delta_magnitude: Some(delta),
                 tolerance_magnitude,
                 is_within_tolerance: delta.abs() <= tolerance_magnitude,
@@ -2296,18 +3183,26 @@ fn build_lead_lag_rows(
 
 fn find_nearest_transition<'a>(
     candidates: &'a [TransitionPoint<'a>],
-    target_point: i64,
+    target_point: crate::TemporalPoint,
 ) -> TransitionPoint<'a> {
     let mut best = candidates[0];
-    let mut best_distance = (target_point - best.point).abs();
+    let mut best_distance = delta_magnitude(target_point, best.point).abs();
     for &candidate in &candidates[1..] {
-        let distance = (target_point - candidate.point).abs();
+        let distance = delta_magnitude(target_point, candidate.point).abs();
         if distance < best_distance {
             best = candidate;
             best_distance = distance;
         }
     }
     best
+}
+
+fn delta_magnitude(
+    target_point: crate::TemporalPoint,
+    comparison_point: crate::TemporalPoint,
+) -> i64 {
+    debug_assert_eq!(target_point.axis(), comparison_point.axis());
+    target_point.magnitude() - comparison_point.magnitude()
 }
 
 fn direction_for_delta(delta: i64) -> LeadLagDirection {
@@ -2326,15 +3221,12 @@ fn build_as_of_rows(
     axis: TemporalAxis,
     tolerance_magnitude: i64,
 ) -> (Vec<AsOfRow>, Vec<ComparisonDiagnostic>) {
-    if axis != TemporalAxis::ProcessingPosition {
-        return (Vec::new(), Vec::new());
-    }
-
     let mut rows = Vec::new();
     let mut diagnostics = Vec::new();
-    for ((window_name, key, partition), (targets, againsts)) in groups {
+    for ((window_name, key, partition, _group_axis), (targets, againsts)) in groups {
         let mut candidates: Vec<TransitionPoint<'_>> = againsts
             .iter()
+            .filter(|against| against.start.axis() == axis)
             .map(|against| TransitionPoint {
                 record_id: against.record_id,
                 point: against.start,
@@ -2343,11 +3235,11 @@ fn build_as_of_rows(
         candidates.sort_by_key(|item| (item.point, item.record_id));
 
         for target in targets {
+            if target.start.axis() != axis {
+                continue;
+            }
             let target_point = target.start;
-            let target_point_row = RowPoint {
-                axis,
-                magnitude: target_point,
-            };
+            let target_point_row = row_point_from_temporal_point(target_point);
 
             if candidates.is_empty() {
                 rows.push(AsOfRow {
@@ -2379,7 +3271,7 @@ fn build_as_of_rows(
                     target_point: target_point_row,
                     matched_point: None,
                     distance_magnitude: future_rejected
-                        .map(|item| (target_point - item.point).abs()),
+                        .map(|item| delta_magnitude(target_point, item.point).abs()),
                     tolerance_magnitude,
                     status: if future_rejected.is_some() {
                         AsOfMatchStatus::FutureRejected
@@ -2392,7 +3284,7 @@ fn build_as_of_rows(
                 continue;
             };
 
-            let distance = (target_point - best.point).abs();
+            let distance = delta_magnitude(target_point, best.point).abs();
             if distance > tolerance_magnitude {
                 rows.push(AsOfRow {
                     window_name: window_name.clone(),
@@ -2425,10 +3317,7 @@ fn build_as_of_rows(
                 axis,
                 direction: direction.clone(),
                 target_point: target_point_row,
-                matched_point: Some(RowPoint {
-                    axis,
-                    magnitude: best.point,
-                }),
+                matched_point: Some(row_point_from_temporal_point(best.point)),
                 distance_magnitude: Some(distance),
                 tolerance_magnitude,
                 status: if ambiguous {
@@ -2449,7 +3338,7 @@ fn build_as_of_rows(
 
 fn find_as_of_candidate<'a>(
     candidates: &'a [TransitionPoint<'a>],
-    target_point: i64,
+    target_point: crate::TemporalPoint,
     direction: &AsOfDirection,
 ) -> (
     Option<TransitionPoint<'a>>,
@@ -2471,7 +3360,7 @@ fn find_as_of_candidate<'a>(
             continue;
         }
 
-        let distance = (target_point - candidate.point).abs();
+        let distance = delta_magnitude(target_point, candidate.point).abs();
         if best_distance.is_none_or(|current| distance < current) {
             best = Some(candidate);
             best_distance = Some(distance);
@@ -2495,6 +3384,169 @@ mod tests {
     use crate::{WindowHistoryFixture, fixture::ContractFixture};
 
     use super::*;
+
+    #[test]
+    fn selectors_match_windows_and_compose_predicates() {
+        let window = crate::WindowRecord::Closed(crate::ClosedWindow {
+            id: crate::WindowRecordId::new("record-1"),
+            window_name: "DeviceOffline".to_owned(),
+            key: "device-1".to_owned(),
+            range: crate::TemporalRange::positions(10, 20).expect("range"),
+            known_at: None,
+            source: Some("provider-a".to_owned()),
+            partition: Some("fleet-a".to_owned()),
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        });
+
+        assert!(ComparisonSelector::for_source("provider-a").matches(&window));
+        assert!(!ComparisonSelector::for_source("provider-b").matches(&window));
+        assert!(ComparisonSelector::for_window_name("DeviceOffline").matches(&window));
+        assert!(ComparisonSelector::for_key("device-1").matches(&window));
+        assert!(ComparisonSelector::for_partition("fleet-a").matches(&window));
+        assert!(
+            ComparisonSelector::for_window_name("DeviceOffline")
+                .and(ComparisonSelector::for_source("provider-a"))
+                .matches(&window)
+        );
+        assert!(
+            ComparisonSelector::for_source("provider-b")
+                .or(ComparisonSelector::for_source("provider-a"))
+                .matches(&window)
+        );
+    }
+
+    #[test]
+    fn runtime_selector_is_not_serializable_and_uses_predicate() {
+        let window = crate::WindowRecord::Closed(crate::ClosedWindow {
+            id: crate::WindowRecordId::new("record-1"),
+            window_name: "DeviceOffline".to_owned(),
+            key: "device-1".to_owned(),
+            range: crate::TemporalRange::positions(0, 12).expect("range"),
+            known_at: None,
+            source: None,
+            partition: None,
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        });
+        let selector = ComparisonSelector::runtime_only(
+            "long-window",
+            "window duration is longer than ten positions",
+            |record| {
+                record
+                    .end()
+                    .is_some_and(|end| end.magnitude() - record.start().magnitude() > 10)
+            },
+        );
+
+        assert!(selector.matches(&window));
+        assert!(!selector.is_serializable);
+    }
+
+    #[test]
+    fn plan_validate_reports_structural_and_selector_diagnostics() {
+        let history = WindowHistoryFixture::new().build();
+        let complete = history
+            .compare("Provider QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .overlap()
+            .plan()
+            .clone();
+
+        assert!(complete.validate().is_empty());
+
+        let missing = history.compare(" ").plan().clone();
+        let missing_codes = missing
+            .validate()
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>();
+
+        assert!(missing_codes.iter().any(|code| code == "MissingName"));
+        assert!(missing_codes.iter().any(|code| code == "MissingTarget"));
+        assert!(missing_codes.iter().any(|code| code == "MissingAgainst"));
+        assert!(missing_codes.iter().any(|code| code == "MissingScope"));
+        assert!(missing_codes.iter().any(|code| code == "MissingComparator"));
+
+        let runtime_only = history
+            .compare("Runtime selector QA")
+            .target_selector(ComparisonSelector::runtime_only(
+                "provider-a",
+                "runtime provider selector",
+                |_| true,
+            ))
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .overlap()
+            .strict()
+            .plan()
+            .clone();
+
+        assert!(runtime_only.validate().iter().any(|diagnostic| {
+            diagnostic.code == "NonSerializableSelector"
+                && diagnostic.severity == DiagnosticSeverity::Error
+        }));
+    }
+
+    #[test]
+    fn range_selectors_use_half_open_start_ranges() {
+        let position_window = crate::WindowRecord::Closed(crate::ClosedWindow {
+            id: crate::WindowRecordId::new("record-1"),
+            window_name: "DeviceOffline".to_owned(),
+            key: "device-1".to_owned(),
+            range: crate::TemporalRange::positions(10, 20).expect("range"),
+            known_at: None,
+            source: None,
+            partition: None,
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        });
+        let time_window = crate::WindowRecord::Closed(crate::ClosedWindow {
+            id: crate::WindowRecordId::new("record-2"),
+            window_name: "DeviceOffline".to_owned(),
+            key: "device-1".to_owned(),
+            range: crate::TemporalRange::new(
+                crate::TemporalPoint::timestamp_ticks(15),
+                crate::TemporalPoint::timestamp_ticks(20),
+            )
+            .expect("range"),
+            known_at: None,
+            source: None,
+            partition: None,
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        });
+
+        assert!(
+            ComparisonSelector::for_position_range(10, Some(20))
+                .expect("selector")
+                .matches(&position_window)
+        );
+        assert!(
+            !ComparisonSelector::for_position_range(11, Some(20))
+                .expect("selector")
+                .matches(&position_window)
+        );
+        assert!(
+            ComparisonSelector::for_time_range(10, Some(20))
+                .expect("selector")
+                .matches(&time_window)
+        );
+        assert!(matches!(
+            ComparisonSelector::for_position_range(20, Some(10)),
+            Err(ComparisonSelectorError::RangeEndBeforeStart)
+        ));
+    }
 
     #[test]
     fn basic_overlap_fixture_matches_expected_counts() {
@@ -2528,13 +3580,24 @@ mod tests {
             name: "Provider QA".to_owned(),
             target_source: "provider-a".to_owned(),
             against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Gap, Comparator::SymmetricDifference],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
             known_at: None,
             open_window_policy: OpenWindowPolicy::RequireClosed,
             open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: false,
         };
 
@@ -2565,13 +3628,24 @@ mod tests {
             name: "Containment".to_owned(),
             target_source: "target".to_owned(),
             against: AgainstSelection::Sources(vec!["container".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Containment],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
             known_at: None,
             open_window_policy: OpenWindowPolicy::RequireClosed,
             open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: false,
         };
 
@@ -2612,7 +3686,11 @@ mod tests {
                 name: "Latency QA".to_owned(),
                 target_source: "target".to_owned(),
                 against: AgainstSelection::Sources(vec!["comparison".to_owned()]),
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("DeviceOffline".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![Comparator::LeadLag {
@@ -2620,9 +3698,16 @@ mod tests {
                     axis: TemporalAxis::ProcessingPosition,
                     tolerance_magnitude: 5,
                 }],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );
@@ -2640,7 +3725,11 @@ mod tests {
                 name: "Quote at trade".to_owned(),
                 target_source: "trade".to_owned(),
                 against: AgainstSelection::Sources(vec!["quote".to_owned()]),
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("Quote".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![Comparator::AsOf {
@@ -2648,15 +3737,153 @@ mod tests {
                     axis: TemporalAxis::ProcessingPosition,
                     tolerance_magnitude: 5,
                 }],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );
         assert_eq!(as_of.as_of_rows.len(), 1);
         assert_eq!(as_of.as_of_rows[0].status, AsOfMatchStatus::Matched);
         assert_eq!(as_of.as_of_rows[0].distance_magnitude, Some(3));
+    }
+
+    #[test]
+    fn timestamp_axis_lead_lag_and_as_of_use_event_time_ranges() {
+        #[derive(Clone)]
+        struct QuoteEvent {
+            selection_id: &'static str,
+            observed_at: i64,
+            active: bool,
+        }
+
+        let mut pipeline = crate::for_events::<QuoteEvent>()
+            .record_windows()
+            .with_event_time(|event| event.observed_at)
+            .track_window("Quote", |event| event.selection_id, |event| event.active)
+            .build();
+        pipeline.ingest(
+            QuoteEvent {
+                selection_id: "selection-1",
+                observed_at: 900,
+                active: true,
+            },
+            Some("quote"),
+            None,
+        );
+        pipeline.ingest(
+            QuoteEvent {
+                selection_id: "selection-1",
+                observed_at: 1_000,
+                active: true,
+            },
+            Some("trade"),
+            None,
+        );
+        pipeline.ingest(
+            QuoteEvent {
+                selection_id: "selection-1",
+                observed_at: 1_100,
+                active: false,
+            },
+            Some("trade"),
+            None,
+        );
+        pipeline.ingest(
+            QuoteEvent {
+                selection_id: "selection-1",
+                observed_at: 1_200,
+                active: false,
+            },
+            Some("quote"),
+            None,
+        );
+        let history = pipeline.history();
+
+        let lead_lag = compare(
+            history,
+            &ComparisonPlan {
+                name: "Timestamp latency".to_owned(),
+                target_source: "trade".to_owned(),
+                against: AgainstSelection::Sources(vec!["quote".to_owned()]),
+                target_selector: None,
+                against_selectors: Vec::new(),
+                scope_window: Some("Quote".to_owned()),
+                scope_key: None,
+                scope_partition: None,
+                scope_segments: Vec::new(),
+                scope_tags: Vec::new(),
+                comparators: vec![Comparator::LeadLag {
+                    transition: LeadLagTransition::Start,
+                    axis: TemporalAxis::Timestamp,
+                    tolerance_magnitude: 150,
+                }],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+                known_at: None,
+                open_window_policy: OpenWindowPolicy::RequireClosed,
+                open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
+                strict: false,
+            },
+        );
+
+        assert_eq!(lead_lag.lead_lag_rows.len(), 1);
+        assert_eq!(lead_lag.lead_lag_rows[0].axis, TemporalAxis::Timestamp);
+        assert_eq!(lead_lag.lead_lag_rows[0].delta_magnitude, Some(100));
+        assert_eq!(
+            lead_lag.lead_lag_rows[0].direction,
+            LeadLagDirection::TargetLags
+        );
+        assert!(lead_lag.lead_lag_rows[0].is_within_tolerance);
+
+        let as_of = compare(
+            history,
+            &ComparisonPlan {
+                name: "Timestamp quote".to_owned(),
+                target_source: "trade".to_owned(),
+                against: AgainstSelection::Sources(vec!["quote".to_owned()]),
+                target_selector: None,
+                against_selectors: Vec::new(),
+                scope_window: Some("Quote".to_owned()),
+                scope_key: None,
+                scope_partition: None,
+                scope_segments: Vec::new(),
+                scope_tags: Vec::new(),
+                comparators: vec![Comparator::AsOf {
+                    direction: AsOfDirection::Previous,
+                    axis: TemporalAxis::Timestamp,
+                    tolerance_magnitude: 150,
+                }],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+                known_at: None,
+                open_window_policy: OpenWindowPolicy::RequireClosed,
+                open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
+                strict: false,
+            },
+        );
+
+        assert_eq!(as_of.as_of_rows.len(), 1);
+        assert_eq!(as_of.as_of_rows[0].axis, TemporalAxis::Timestamp);
+        assert_eq!(as_of.as_of_rows[0].status, AsOfMatchStatus::Matched);
+        assert_eq!(as_of.as_of_rows[0].distance_magnitude, Some(100));
     }
 
     #[test]
@@ -2686,13 +3913,24 @@ mod tests {
                     sources: vec!["source-b".to_owned(), "source-c".to_owned()],
                     activity: CohortActivity::All,
                 },
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("SelectionPriced".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![Comparator::Residual],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );
@@ -2740,13 +3978,24 @@ mod tests {
                     ],
                     activity: CohortActivity::AtLeast { count: 2 },
                 },
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("SelectionPriced".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![Comparator::Residual],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );
@@ -2773,13 +4022,24 @@ mod tests {
                     sources: vec!["source-b".to_owned(), "source-c".to_owned()],
                     activity: CohortActivity::None,
                 },
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("SelectionPriced".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![Comparator::Residual],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );
@@ -2804,13 +4064,24 @@ mod tests {
             name: "Live QA".to_owned(),
             target_source: "provider-a".to_owned(),
             against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Residual],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
             known_at: None,
             open_window_policy: OpenWindowPolicy::ClipToHorizon,
             open_window_horizon: Some(crate::TemporalPoint::position(10)),
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: false,
         };
 
@@ -2837,13 +4108,24 @@ mod tests {
             name: "Decision audit".to_owned(),
             target_source: "provider-a".to_owned(),
             against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
             known_at: Some(crate::TemporalPoint::position(5)),
             open_window_policy: OpenWindowPolicy::RequireClosed,
             open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: false,
         };
 
@@ -2854,6 +4136,574 @@ mod tests {
         assert_eq!(
             prepared.excluded_windows[0].diagnostic_code.as_deref(),
             Some("FutureWindowExcluded")
+        );
+    }
+
+    #[test]
+    fn scope_key_and_partition_filter_selected_windows() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a").partition("fleet-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 2, 6, |w| {
+                w.source("provider-b").partition("fleet-a")
+            })
+            .expect("against")
+            .closed_window("DeviceOffline", "device-2", 1, 5, |w| {
+                w.source("provider-a").partition("fleet-a")
+            })
+            .expect("other key")
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a").partition("fleet-b")
+            })
+            .expect("other partition")
+            .build();
+        let plan = ComparisonPlan {
+            name: "Scoped".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: Some("device-1".to_owned()),
+            scope_partition: Some("fleet-a".to_owned()),
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows[0].key, "device-1");
+        assert_eq!(result.overlap_rows[0].partition.as_deref(), Some("fleet-a"));
+        assert_eq!(
+            result.prepared.as_ref().expect("prepared")["selectedWindows"]
+                .as_array()
+                .expect("selected windows")
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn normalization_can_reject_duplicate_windows() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("duplicate target")
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+        let plan = ComparisonPlan {
+            name: "Duplicate QA".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Reject,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "DuplicateWindow")
+        );
+        assert_eq!(result.overlap_rows[0].target_record_ids.len(), 1);
+    }
+
+    #[test]
+    fn normalization_can_coalesce_adjacent_windows() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 3, |w| {
+                w.source("provider-a")
+            })
+            .expect("target first")
+            .closed_window("DeviceOffline", "device-1", 3, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target second")
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+        let plan = ComparisonPlan {
+            name: "Coalesce QA".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: true,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows[0].range, RowRange { start: 1, end: 5 });
+        assert_eq!(result.overlap_rows[0].target_record_ids.len(), 2);
+    }
+
+    #[test]
+    fn runtime_critic_warns_for_broad_scope_and_future_leakage_risk() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("Quote", "selection-1", 10, 11, |w| w.source("trade"))
+            .expect("trade")
+            .closed_window("Quote", "selection-1", 7, 20, |w| w.source("quote"))
+            .expect("quote")
+            .build();
+        let plan = ComparisonPlan {
+            name: "Runtime critic".to_owned(),
+            target_source: "trade".to_owned(),
+            against: AgainstSelection::Sources(vec!["quote".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: None,
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::AsOf {
+                direction: AsOfDirection::Previous,
+                axis: TemporalAxis::ProcessingPosition,
+                tolerance_magnitude: 5,
+            }],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert!(result.is_valid);
+        assert!(
+            result
+                .warning_diagnostics()
+                .iter()
+                .any(|item| item.code == "BroadSelector")
+        );
+        assert!(
+            result
+                .warning_diagnostics()
+                .iter()
+                .any(|item| item.code == "FutureLeakageRisk")
+        );
+    }
+
+    #[test]
+    fn runtime_selector_plans_execute_locally_and_emit_warning() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 3, 7, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+
+        let result = history
+            .compare("Runtime selector QA")
+            .target_selector(ComparisonSelector::runtime_only(
+                "dynamic-target",
+                "runtime target predicate",
+                |window| window.source() == Some("provider-a"),
+            ))
+            .against_selector(ComparisonSelector::for_source("provider-b"))
+            .scope_window("DeviceOffline")
+            .overlap()
+            .run();
+
+        assert!(result.is_valid);
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(
+            result.prepared.as_ref().expect("prepared")["normalizedWindows"][0]["selectorName"],
+            "dynamic-target"
+        );
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RuntimeNonSerializablePlan"
+                && diagnostic.severity == DiagnosticSeverity::Warning
+        }));
+    }
+
+    #[test]
+    fn strict_runtime_selector_plan_blocks_materialization() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 3, 7, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+
+        let result = history
+            .compare("Strict runtime selector QA")
+            .target_selector(ComparisonSelector::runtime_only(
+                "dynamic-target",
+                "runtime target predicate",
+                |window| window.source() == Some("provider-a"),
+            ))
+            .against_selector(ComparisonSelector::for_source("provider-b"))
+            .scope_window("DeviceOffline")
+            .overlap()
+            .strict()
+            .run();
+
+        assert!(!result.is_valid);
+        assert!(result.aligned.is_none());
+        assert!(result.overlap_rows.is_empty());
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RuntimeNonSerializablePlan"
+                && diagnostic.severity == DiagnosticSeverity::Error
+        }));
+    }
+
+    #[test]
+    fn strict_runtime_critic_blocks_rows_and_alignment() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 3, 6, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+        let plan = ComparisonPlan {
+            name: "Strict broad".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: None,
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: true,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert!(!result.is_valid);
+        assert!(result.aligned.is_none());
+        assert!(result.overlap_rows.is_empty());
+        assert!(
+            result
+                .error_diagnostics()
+                .iter()
+                .any(|item| item.code == "BroadSelector")
+        );
+    }
+
+    #[test]
+    fn runtime_critic_reports_unbounded_open_duration() {
+        let history = WindowHistoryFixture::new()
+            .open_window("DeviceOffline", "device-1", 1, |w| w.source("provider-a"))
+            .build();
+        let plan = ComparisonPlan {
+            name: "Open QA".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "OpenWindowsWithoutPolicy")
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "UnboundedOpenDuration")
+        );
+    }
+
+    #[test]
+    fn runtime_critic_reports_live_finality_without_horizon() {
+        let history = WindowHistoryFixture::new().build();
+        let plan = ComparisonPlan {
+            name: "Live QA".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::ClipToHorizon,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert!(result.is_valid);
+        assert!(
+            result
+                .warning_diagnostics()
+                .iter()
+                .any(|item| item.code == "LiveFinalityWithoutHorizon")
+        );
+    }
+
+    #[test]
+    fn runtime_critic_reports_mixed_timestamp_clocks() {
+        let history = WindowHistoryFixture::new().build();
+        let plan = ComparisonPlan {
+            name: "Clock QA".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: Some(crate::TemporalPoint::timestamp_ticks_with_clock(
+                1, "received",
+            )),
+            open_window_policy: OpenWindowPolicy::ClipToHorizon,
+            open_window_horizon: Some(crate::TemporalPoint::timestamp_ticks_with_clock(
+                1, "provider",
+            )),
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let result = compare(&history, &plan);
+
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "MixedClockRisk"
+                && diagnostic.severity == DiagnosticSeverity::Warning
+        }));
+    }
+
+    #[test]
+    fn closed_windows_default_known_at_to_close_position() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("window")
+            .build();
+        let plan = ComparisonPlan {
+            name: "Decision audit".to_owned(),
+            target_source: "provider-a".to_owned(),
+            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: Some("DeviceOffline".to_owned()),
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators: vec![Comparator::Overlap],
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: Some(crate::TemporalPoint::position(4)),
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: crate::ComparisonOutputOptions::default_options(),
+            strict: false,
+        };
+
+        let prepared = prepare(&history, &plan);
+
+        assert!(prepared.normalized_windows.is_empty());
+        assert_eq!(prepared.excluded_windows.len(), 1);
+        assert_eq!(
+            prepared.excluded_windows[0].diagnostic_code.as_deref(),
+            Some("FutureWindowExcluded")
+        );
+    }
+
+    #[test]
+    fn event_time_normalization_excludes_position_only_windows_by_policy() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-b")
+            })
+            .expect("against")
+            .build();
+
+        let result = history
+            .compare("Event-time QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .normalization(
+                ComparisonNormalizationPolicy::event_time().excluding_missing_event_time(),
+            )
+            .overlap()
+            .run();
+
+        assert!(result.is_valid);
+        assert!(result.overlap_rows.is_empty());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "MissingEventTime"
+                    && diagnostic.severity == DiagnosticSeverity::Warning)
+        );
+    }
+
+    #[test]
+    fn event_time_normalization_rejects_position_only_windows_by_default() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .build();
+
+        let result = history
+            .compare("Event-time QA")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .scope_window("DeviceOffline")
+            .normalization(ComparisonNormalizationPolicy::event_time())
+            .overlap()
+            .run();
+
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "MissingEventTime"
+                    && diagnostic.severity == DiagnosticSeverity::Error)
         );
     }
 
@@ -2884,13 +4734,24 @@ mod tests {
                     sources: vec!["source-b".to_owned(), "source-c".to_owned()],
                     activity: CohortActivity::All,
                 },
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("SelectionPriced".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![Comparator::Residual],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );

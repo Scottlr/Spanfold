@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spanfold API reference with classes, methods, comparison builders, exports, temporal types, and testing helpers.">
+  <meta name="description" content="Spanfold API reference for C#, Python, and Rust with comparison builders, selectors, exports, temporal types, and testing helpers.">
   <title>Spanfold API reference</title>
   <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -63,6 +63,7 @@
         <div class="language-switcher" aria-label="Code language">
           <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
           <button type="button" data-language-toggle="python" aria-pressed="false">Python</button>
+          <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
         </div>
       </div>
     </div>
@@ -70,9 +71,10 @@
       <p class="eyebrow">API reference</p>
       <h1>Spanfold API reference.</h1>
       <p>
-        Static reference for the public package surface across C# and Python.
-        Python keeps the same core capabilities as the C# package while using
-        idiomatic snake-case names and dataclass result models.
+        Static reference for the public package surface across C#, Python, and
+        Rust. Python keeps the same core capabilities with snake-case names and
+        dataclass result models; Rust exposes idiomatic builders, selector-backed
+        comparison plans, deterministic exports, audit bundles, and CLI workflows.
       </p>
       <div class="language-panel" data-language="csharp">
         <pre><code>dotnet add package Spanfold
@@ -82,6 +84,12 @@ dotnet add package Spanfold.Testing</code></pre>
         <pre><code>cd packages/python
 python -m pip install -e ".[dev]"</code></pre>
         <p class="language-note">The Python package includes the core runtime, comparison, export, testing, and fixture CLI surfaces.</p>
+      </div>
+      <div class="language-panel" data-language="rust">
+        <pre><code>cd packages/rust
+cargo test --workspace
+cargo run -p spanfold-cli -- --help</code></pre>
+        <p class="language-note">The Rust package includes the core runtime, selector-backed comparison API, deterministic exports, testing helpers, audit bundles, and CLI surfaces.</p>
       </div>
     </section>
 
@@ -148,6 +156,7 @@ python -m pip install -e ".[dev]"</code></pre>
         <details open>
           <summary>Spanfold.Comparison</summary>
           <a class="type-link" href="#PythonParity">Python parity surface</a>
+          <a class="type-link" href="#RustApi">Rust API surface</a>
           <a class="type-link" href="#WindowComparisonBuilder">WindowComparisonBuilder</a>
           <a class="member-link" href="#WindowComparisonBuilder">Target(...)</a>
           <a class="member-link" href="#WindowComparisonBuilder">Against(...)</a>
@@ -245,6 +254,51 @@ result = (
 
 prepared = result.prepared
 aligned = prepared.align() if prepared is not None else None</code></pre>
+          </div>
+        </section>
+
+        <section class="api-member" id="RustApi">
+          <p class="member-kind">rust package</p>
+          <h2>Rust API surface</h2>
+          <p>
+            The Rust package supports the core comparison contract with
+            idiomatic snake-case builders, typed temporal records, selector-backed
+            comparison plans, deterministic JSON/JSON Lines/Markdown/debug HTML
+            and LLM context exports, audit bundles, fixture parsing, testing
+            helpers, and the <code>spanfold-cli</code> command surface.
+          </p>
+          <table class="member-table">
+            <tr><th>Rust member</th><th>C# equivalent</th></tr>
+            <tr><td><code>spanfold::for_events::&lt;T&gt;()</code></td><td><code>Spanfold.For&lt;TEvent&gt;()</code></td></tr>
+            <tr><td><code>EventPipelineBuilder::record_windows()</code></td><td><code>EventPipelineBuilder.RecordWindows()</code></td></tr>
+            <tr><td><code>EventPipelineBuilder::track_window(...)</code></td><td><code>EventPipelineBuilder.TrackWindow(...)</code></td></tr>
+            <tr><td><code>WindowHistory::compare(...)</code></td><td><code>WindowHistory.Compare(...)</code></td></tr>
+            <tr><td><code>WindowComparisonBuilder::target_source(...)</code></td><td><code>WindowComparisonBuilder.Target(...)</code></td></tr>
+            <tr><td><code>WindowComparisonBuilder::target_selector(...)</code></td><td><code>WindowComparisonBuilder.Target(... selector ...)</code></td></tr>
+            <tr><td><code>WindowComparisonBuilder::prepare()</code></td><td><code>WindowComparisonBuilder.Prepare()</code></td></tr>
+            <tr><td><code>WindowComparisonBuilder::run()</code></td><td><code>WindowComparisonBuilder.Run()</code></td></tr>
+            <tr><td><code>export_result_llm_context(...)</code></td><td><code>ComparisonResult.ExportLlmContext(...)</code></td></tr>
+          </table>
+          <div class="language-panel" data-language="rust">
+            <pre><code>use spanfold::{for_events, export_result_json_lines};
+
+let mut pipeline = for_events::&lt;DeviceStatus&gt;()
+    .record_windows()
+    .track_window("DeviceOffline", |event| event.device_id.clone(), |event| !event.is_online)
+    .build();
+
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .coverage()
+    .run();
+
+let rows = export_result_json_lines(&result)?;</code></pre>
           </div>
         </section>
 
@@ -431,6 +485,18 @@ aligned = prepared.align() if prepared is not None else None</code></pre>
 )</code></pre>
             <p class="language-note">Python exposes the same comparison stages with snake-case method names.</p>
           </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code>let result = history
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .run();</code></pre>
+            <p class="language-note">Rust exposes the same comparison stages with idiomatic snake-case builder methods.</p>
+          </div>
           <table class="member-table">
             <tr><th>Member</th><th>Purpose</th></tr>
             <tr><td><code>Target(...)</code>, <code>Against(...)</code></td><td>Select comparison sides.</td></tr>
@@ -446,6 +512,22 @@ aligned = prepared.align() if prepared is not None else None</code></pre>
           <p class="member-kind">sealed class</p>
           <h2>ComparisonSelectorBuilder</h2>
           <p>Creates serializable or runtime selectors for target and comparison sides.</p>
+          <div class="language-panel" data-language="rust">
+            <pre><code>use spanfold::ComparisonSelector;
+
+let target = ComparisonSelector::for_source("provider-a")
+    .and(ComparisonSelector::for_key("device-17"));
+let against = ComparisonSelector::for_source("provider-b");
+
+let result = history
+    .compare("Provider QA")
+    .target_selector(target)
+    .against_selector(against)
+    .scope_window("DeviceOffline")
+    .overlap()
+    .run();</code></pre>
+            <p class="language-note">Rust selectors can be serializable descriptors or runtime-only predicates. Portable exports reject runtime-only selector plans.</p>
+          </div>
           <table class="member-table">
             <tr><th>Member</th><th>Purpose</th></tr>
             <tr><td><code>WindowName(...)</code>, <code>Key(...)</code>, <code>Source(...)</code></td><td>Select by identity.</td></tr>

@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Deterministic window record identifier.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct WindowRecordId(String);
 
 impl WindowRecordId {
@@ -380,6 +380,8 @@ pub struct WindowAnnotation {
 pub struct WindowHistory {
     closed: Vec<ClosedWindow>,
     open: Vec<OpenWindow>,
+    #[serde(skip)]
+    open_indexes: BTreeMap<WindowRecordId, usize>,
     annotations: Vec<WindowAnnotation>,
 }
 
@@ -390,6 +392,7 @@ impl WindowHistory {
         Self {
             closed: Vec::new(),
             open: Vec::new(),
+            open_indexes: BTreeMap::new(),
             annotations: Vec::new(),
         }
     }
@@ -601,11 +604,17 @@ impl WindowHistory {
     }
 
     pub(crate) fn push_open(&mut self, window: OpenWindow) {
+        self.open_indexes.insert(window.id.clone(), self.open.len());
         self.open.push(window);
     }
 
-    pub(crate) fn open_windows_mut(&mut self) -> &mut Vec<OpenWindow> {
-        &mut self.open
+    pub(crate) fn remove_open(&mut self, id: &WindowRecordId) -> Option<OpenWindow> {
+        let index = self.open_indexes.remove(id)?;
+        let removed = self.open.swap_remove(index);
+        if index < self.open.len() {
+            self.open_indexes.insert(self.open[index].id.clone(), index);
+        }
+        Some(removed)
     }
 }
 

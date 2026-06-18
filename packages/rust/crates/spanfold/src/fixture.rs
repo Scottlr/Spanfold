@@ -4,8 +4,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    AgainstSelection, CohortActivity, Comparator, ComparisonPlan, OpenWindowPolicy, PrimitiveValue,
-    WindowFilter, WindowHistory, WindowHistoryFixture, compare,
+    AgainstSelection, CohortActivity, Comparator, ComparisonDuplicateWindowPolicy, ComparisonPlan,
+    OpenWindowPolicy, PrimitiveValue, WindowFilter, WindowHistory, WindowHistoryFixture, compare,
 };
 
 /// Fixture loading and validation error.
@@ -151,6 +151,10 @@ struct RawPlan {
     against_cohort: Option<RawAgainstCohort>,
     #[serde(rename = "scopeWindow")]
     scope_window: Option<String>,
+    #[serde(rename = "scopeKey")]
+    scope_key: Option<String>,
+    #[serde(rename = "scopePartition")]
+    scope_partition: Option<String>,
     #[serde(rename = "scopeSegments", default)]
     scope_segments: Vec<RawNamedValue>,
     #[serde(rename = "scopeTags", default)]
@@ -162,6 +166,10 @@ struct RawPlan {
     live_horizon_position: Option<i64>,
     #[serde(rename = "openWindowHorizonPosition")]
     open_window_horizon_position: Option<i64>,
+    #[serde(rename = "coalesceAdjacentWindows", default)]
+    coalesce_adjacent_windows: bool,
+    #[serde(rename = "duplicateWindowPolicy")]
+    duplicate_window_policy: Option<String>,
     strict: bool,
 }
 
@@ -222,10 +230,18 @@ impl TryFrom<RawPlan> for ComparisonPlan {
             name: value.name,
             target_source: value.target_source,
             against,
+            target_selector: None,
+            against_selectors: Vec::new(),
             scope_window: value.scope_window,
+            scope_key: value.scope_key,
+            scope_partition: value.scope_partition,
             scope_segments: into_filters(value.scope_segments),
             scope_tags: into_filters(value.scope_tags),
             comparators,
+            require_closed_windows: open_window_horizon.is_none(),
+            use_half_open_ranges: true,
+            time_axis: crate::TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
             known_at: value.known_at_position.map(crate::TemporalPoint::position),
             open_window_policy: if open_window_horizon.is_some() {
                 OpenWindowPolicy::ClipToHorizon
@@ -233,8 +249,25 @@ impl TryFrom<RawPlan> for ComparisonPlan {
                 OpenWindowPolicy::RequireClosed
             },
             open_window_horizon: open_window_horizon.map(crate::TemporalPoint::position),
+            coalesce_adjacent_windows: value.coalesce_adjacent_windows,
+            duplicate_window_policy: parse_duplicate_window_policy(
+                value.duplicate_window_policy.as_deref(),
+            )?,
+            output: crate::ComparisonOutputOptions::default_options(),
             strict: value.strict,
         })
+    }
+}
+
+fn parse_duplicate_window_policy(
+    value: Option<&str>,
+) -> Result<ComparisonDuplicateWindowPolicy, FixtureError> {
+    match value.unwrap_or("Preserve") {
+        "Preserve" | "preserve" => Ok(ComparisonDuplicateWindowPolicy::Preserve),
+        "Reject" | "reject" => Ok(ComparisonDuplicateWindowPolicy::Reject),
+        value => Err(FixtureError::Validation(format!(
+            "$.plan.duplicateWindowPolicy '{value}' is not supported."
+        ))),
     }
 }
 
@@ -321,6 +354,74 @@ mod tests {
         assert_eq!(result.residual_rows.len(), 1);
         assert_eq!(result.residual_rows[0].range.start, 1);
         assert_eq!(result.residual_rows[0].range.end, 5);
+    }
+
+    #[test]
+    fn fixture_plan_accepts_key_and_partition_scope() {
+        let fixture = ContractFixture::parse_json(
+            r#"{
+  "schema": "spanfold.contract-fixture",
+  "schemaVersion": 1,
+  "name": "key-partition-scope",
+  "windows": [
+    {
+      "windowName": "DeviceOffline",
+      "key": "device-1",
+      "source": "provider-a",
+      "partition": "fleet-a",
+      "startPosition": 1,
+      "endPosition": 5
+    },
+    {
+      "windowName": "DeviceOffline",
+      "key": "device-1",
+      "source": "provider-b",
+      "partition": "fleet-a",
+      "startPosition": 3,
+      "endPosition": 6
+    },
+    {
+      "windowName": "DeviceOffline",
+      "key": "device-2",
+      "source": "provider-a",
+      "partition": "fleet-a",
+      "startPosition": 1,
+      "endPosition": 5
+    }
+  ],
+  "plan": {
+    "name": "key-partition-scope",
+    "targetSource": "provider-a",
+    "againstSources": ["provider-b"],
+    "scopeWindow": "DeviceOffline",
+    "scopeKey": "device-1",
+    "scopePartition": "fleet-a",
+    "coalesceAdjacentWindows": true,
+    "duplicateWindowPolicy": "Reject",
+    "comparators": ["overlap"],
+    "strict": false
+  },
+  "expect": {
+    "isValid": true,
+    "rowCounts": {
+      "overlap": 1
+    },
+    "diagnostics": []
+  }
+}"#,
+        )
+        .expect("fixture should parse");
+        let result = fixture.execute();
+
+        assert!(result.is_valid);
+        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows[0].key, "device-1");
+        assert_eq!(result.overlap_rows[0].partition.as_deref(), Some("fleet-a"));
+        assert!(fixture.plan().coalesce_adjacent_windows);
+        assert_eq!(
+            fixture.plan().duplicate_window_policy,
+            ComparisonDuplicateWindowPolicy::Reject
+        );
     }
 
     #[test]

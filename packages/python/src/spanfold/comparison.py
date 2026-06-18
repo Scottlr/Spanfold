@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import timedelta
 from enum import Enum
@@ -1797,7 +1797,16 @@ class ComparisonResult:
 
         if self.plan is not None:
             _ensure_exportable(self.plan)
-        lines = [_result_summary_line_payload(self)]
+        text = "\n".join(self.iter_export_json_lines())
+        _write_text_if_requested(path, text + ("\n" if text else ""))
+        return text
+
+    def iter_export_json_lines(self) -> Iterator[str]:
+        """Yield deterministic JSON Lines for LLM and artifact pipelines."""
+
+        if self.plan is not None:
+            _ensure_exportable(self.plan)
+        yield json.dumps(_result_summary_line_payload(self), sort_keys=True)
         for row_type, values in _result_row_groups(self):
             export_type = _export_row_type(row_type)
             for index, row in enumerate(values):
@@ -1809,10 +1818,7 @@ class ComparisonResult:
                     "rowId": f"{export_type}[{index}]",
                     **_row_export_fields(row),
                 }
-                lines.append(payload)
-        text = "\n".join(json.dumps(row, sort_keys=True) for row in lines)
-        _write_text_if_requested(path, text + ("\n" if text else ""))
-        return text
+                yield json.dumps(payload, sort_keys=True)
 
     def to_markdown(self, path: str | Path | None = None) -> str:
         """Return a compact Markdown explanation of comparison output."""
@@ -1862,6 +1868,7 @@ class ComparisonResult:
     def to_debug_html(self, path: str | Path | None = None) -> str:
         """Return a self-contained debug HTML visualiser."""
 
+        max_rows_per_type = 200
         row_blocks: list[str] = []
         for label, color, rows in (
             ("Overlap", "#2f7d32", self.overlap_rows),
@@ -1874,8 +1881,13 @@ class ComparisonResult:
             ("Lead/Lag", "#8f4b00", self.lead_lag_rows),
             ("As-Of", "#6d5dfc", self.as_of_rows),
         ):
-            for row in rows:
+            for row in rows[:max_rows_per_type]:
                 row_blocks.append(_html_row(label, color, row))
+            if len(rows) > max_rows_per_type:
+                row_blocks.append(
+                    f'<p style="color:#6b7280;font-style:italic">'
+                    f"{html.escape(label)}: showing {max_rows_per_type} of {len(rows)} rows.</p>"
+                )
         body = "\n".join(row_blocks) or "<p>No comparison rows.</p>"
         summary_rows = "".join(
             f"<tr><td>{html.escape(summary.comparator)}</td>"
@@ -1891,6 +1903,22 @@ class ComparisonResult:
             f"<h2>Extension metadata</h2><ul>{extension_rows}</ul>"
             if extension_rows
             else ""
+        )
+        diagnostics_block = _debug_html_json_section(
+            "Diagnostics",
+            self.diagnostics,
+            "No diagnostics.",
+            limit=120,
+        )
+        prepared_block = _debug_html_json_section(
+            "Prepared",
+            self.prepared,
+            "No prepared comparison artifact.",
+        )
+        aligned_block = _debug_html_json_section(
+            "Aligned Segments",
+            self.aligned,
+            "No aligned comparison artifact.",
         )
         text = f"""<!doctype html>
 <html lang="en">
@@ -1913,6 +1941,10 @@ body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #17202a; }}
 }}
 .bar {{ position: absolute; top: 0; bottom: 0; min-width: 2px; }}
 .meta {{ font-size: .9rem; }}
+pre {{
+  white-space: pre-wrap; word-break: break-word; background: #17202a;
+  color: #eef2f6; padding: .75rem; border-radius: 4px;
+}}
 </style>
 </head>
 <body>
@@ -1921,6 +1953,9 @@ body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #17202a; }}
 {summary_rows}
 </table>
 {extension_block}
+{diagnostics_block}
+{prepared_block}
+{aligned_block}
 {body}
 </body>
 </html>
@@ -2049,6 +2084,17 @@ class _NormalizedWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class _ExecutionSegment:
+    window_name: str
+    key: Any
+    partition: Any
+    range: TemporalRange
+    target_record_ids: tuple[WindowRecordId, ...]
+    against_record_ids: tuple[WindowRecordId, ...]
+    finality: ComparisonFinality
+
+
+@dataclass(frozen=True, slots=True)
 class _CohortDefinition:
     name: str
     sources: tuple[Any, ...]
@@ -2098,6 +2144,7 @@ class WindowComparisonBuilder:
         self._missing_event_time_policy = "reject"
         self._coalesce_adjacent = False
         self._duplicate_windows = "preserve"
+        self._output = ComparisonOutputOptions.default()
         self._strict = False
         self._extension_metadata: list[ComparisonExtensionMetadata] = []
 
@@ -2263,6 +2310,13 @@ class WindowComparisonBuilder:
         )
         return self
 
+    def output(self, options: ComparisonOutputOptions) -> WindowComparisonBuilder:
+        """Set comparison result output preferences."""
+
+        _require_not_none(options, "Output options")
+        self._output = options
+        return self
+
     def strict(self) -> WindowComparisonBuilder:
         """Promote warning diagnostics to blocking errors for this comparison."""
 
@@ -2292,7 +2346,12 @@ class WindowComparisonBuilder:
     def prepare_live(self, horizon: TemporalPoint) -> PreparedComparison:
         """Prepare the comparison with open windows clipped to an evaluation horizon."""
 
-        return self.normalize(axis=horizon.axis, horizon=horizon).prepare()
+        previous = self._normalization_state()
+        try:
+            self.normalize(axis=horizon.axis, horizon=horizon)
+            return self.prepare()
+        finally:
+            self._restore_normalization_state(previous)
 
     def run(
         self,
@@ -2373,11 +2432,59 @@ class WindowComparisonBuilder:
     ) -> ComparisonResult:
         """Run the comparison with open windows clipped to an evaluation horizon."""
 
-        return self.normalize(axis=horizon.axis, horizon=horizon).run(
-            export,
-            debug_html=debug_html,
-            llm_context=llm_context,
+        previous = self._normalization_state()
+        try:
+            self.normalize(axis=horizon.axis, horizon=horizon)
+            return self.run(
+                export,
+                debug_html=debug_html,
+                llm_context=llm_context,
+            )
+        finally:
+            self._restore_normalization_state(previous)
+
+    def _normalization_state(
+        self,
+    ) -> tuple[
+        TemporalAxis,
+        TemporalPoint | None,
+        TemporalPoint | None,
+        str,
+        bool,
+        str,
+        ComparisonOutputOptions,
+    ]:
+        return (
+            self._axis,
+            self._horizon,
+            self._known_at,
+            self._missing_event_time_policy,
+            self._coalesce_adjacent,
+            self._duplicate_windows,
+            self._output,
         )
+
+    def _restore_normalization_state(
+        self,
+        state: tuple[
+            TemporalAxis,
+            TemporalPoint | None,
+            TemporalPoint | None,
+            str,
+            bool,
+            str,
+            ComparisonOutputOptions,
+        ],
+    ) -> None:
+        (
+            self._axis,
+            self._horizon,
+            self._known_at,
+            self._missing_event_time_policy,
+            self._coalesce_adjacent,
+            self._duplicate_windows,
+            self._output,
+        ) = state
 
     def _select(
         self,
@@ -2442,6 +2549,14 @@ class WindowComparisonBuilder:
             _try_parse_as_of(comparator) is not None for comparator in self._comparators
         ):
             diagnostics.append("future_leakage_risk")
+        if (
+            self._horizon is not None
+            and self._known_at is not None
+            and self._horizon.axis is TemporalAxis.TIMESTAMP
+            and self._known_at.axis is TemporalAxis.TIMESTAMP
+            and self._horizon.clock != self._known_at.clock
+        ):
+            diagnostics.append("mixed_clock_risk")
         return diagnostics
 
     def _is_known_at(self, window: WindowRecord) -> bool:
@@ -2465,6 +2580,7 @@ class WindowComparisonBuilder:
             return
         if not window.is_closed and self._horizon is None:
             _append_once(diagnostics, "open_windows_without_policy")
+            _append_once(diagnostics, "unbounded_open_duration")
 
     def _postprocess_normalized(
         self,
@@ -2494,7 +2610,7 @@ class WindowComparisonBuilder:
             scope,
             self._normalization_policy(),
             self._comparators,
-            ComparisonOutputOptions.default(),
+            self._output,
             self._strict,
         )
 
@@ -2588,83 +2704,63 @@ def _run_comparison(
         if as_of_option is not None:
             as_of_options.append((comparator, as_of_option))
 
+    execution_segments = _execution_segments_by_scope(scopes, target_groups, against_groups)
     for scope in scopes:
         target_items = sorted(target_groups.get(scope, ()), key=lambda item: item.range.start)
         against_items = sorted(against_groups.get(scope, ()), key=lambda item: item.range.start)
         window_name, key, partition = scope
+        scope_segments = execution_segments.get(scope, ())
 
         if "overlap" in comparators or "coverage" in comparators:
-            for target in target_items:
-                overlapping_against: list[_NormalizedWindow] = []
-                for candidate in against_items:
-                    intersection = target.range.intersection(candidate.range)
-                    if intersection is None:
-                        continue
-                    overlapping_against.append(candidate)
-                    if "overlap" in comparators:
-                        overlap_rows.append(
-                            OverlapRow(
-                                window_name,
-                                key,
-                                partition,
-                                intersection,
-                                _record_ids(target),
-                                _record_ids(candidate),
-                                _finality(target, candidate),
-                            )
+            if "overlap" in comparators:
+                overlap_rows.extend(_overlap_rows_from_segments(scope_segments))
+            if "coverage" in comparators:
+                coverage_by_target = _coverage_by_target_id(scope_segments)
+                against_ids_by_target = _against_ids_by_target_id(scope_segments)
+                for target in target_items:
+                    target_ids = _record_ids(target)
+                    covered = sum(
+                        coverage_by_target.get(record_id, 0.0) for record_id in target_ids
+                    )
+                    target_against_ids = tuple(
+                        dict.fromkeys(
+                            record_id
+                            for target_id in target_ids
+                            for record_id in against_ids_by_target.get(target_id, ())
                         )
-                if "coverage" in comparators:
+                    )
                     coverage_rows.append(
-                        _coverage_row(window_name, key, partition, target, overlapping_against)
+                        CoverageRow(
+                            window_name,
+                            key,
+                            partition,
+                            target.range,
+                            target.range.magnitude(),
+                            covered,
+                            target_ids,
+                            target_against_ids,
+                            ComparisonFinality.PROVISIONAL
+                            if target.finality is ComparisonFinality.PROVISIONAL
+                            or _contains_provisional_against(target_against_ids, against_items)
+                            else ComparisonFinality.FINAL,
+                        )
                     )
 
         if "residual" in comparators:
-            against_ranges = [item.range for item in against_items]
-            for target in target_items:
-                for temporal_range in target.range.residual(against_ranges):
-                    residual_rows.append(
-                        ResidualRow(
-                            window_name,
-                            key,
-                            partition,
-                            temporal_range,
-                            _record_ids(target),
-                            target.finality,
-                        )
-                    )
+            residual_rows.extend(_residual_rows_from_segments(scope_segments))
 
         if "missing" in comparators:
-            target_ranges = [item.range for item in target_items]
-            for item in against_items:
-                for temporal_range in item.range.residual(target_ranges):
-                    missing_rows.append(
-                        MissingRow(
-                            window_name,
-                            key,
-                            partition,
-                            temporal_range,
-                            _record_ids(item),
-                            item.finality,
-                        )
-                    )
+            missing_rows.extend(_missing_rows_from_segments(scope_segments))
 
         if "gap" in comparators:
-            gap_rows.extend(_gap_rows(window_name, key, partition, target_items, against_items))
+            gap_rows.extend(_gap_rows_from_segments(scope_segments))
 
         if "symmetric_difference" in comparators:
-            symmetric_difference_rows.extend(
-                _symmetric_difference_rows(
-                    window_name,
-                    key,
-                    partition,
-                    target_items,
-                    against_items,
-                )
-            )
+            symmetric_difference_rows.extend(_symmetric_difference_rows_from_segments(scope_segments))
 
         if "containment" in comparators:
             containment_rows.extend(
-                _containment_rows(window_name, key, partition, target_items, against_items)
+                _containment_rows_from_segments(scope_segments, target_items)
             )
 
     lead_lag_counts: dict[str, int] = {}
@@ -3192,6 +3288,253 @@ def _coverage_row(
         or any(item.finality is ComparisonFinality.PROVISIONAL for item in against)
         else ComparisonFinality.FINAL,
     )
+
+
+def _execution_segments_by_scope(
+    scopes: Iterable[tuple[str, Any, Any]],
+    target_groups: Mapping[tuple[str, Any, Any], list[_NormalizedWindow]],
+    against_groups: Mapping[tuple[str, Any, Any], list[_NormalizedWindow]],
+) -> dict[tuple[str, Any, Any], tuple[_ExecutionSegment, ...]]:
+    return {
+        scope: tuple(
+            _execution_segments(
+                scope,
+                target_groups.get(scope, ()),
+                against_groups.get(scope, ()),
+            )
+        )
+        for scope in scopes
+    }
+
+
+def _execution_segments(
+    scope: tuple[str, Any, Any],
+    targets: Iterable[_NormalizedWindow],
+    against: Iterable[_NormalizedWindow],
+) -> Iterator[_ExecutionSegment]:
+    target_items = tuple(targets)
+    against_items = tuple(against)
+    boundaries = sorted(
+        {
+            point
+            for item in (*target_items, *against_items)
+            if item.range.end is not None
+            for point in (item.range.start, item.range.end)
+        }
+    )
+    window_name, key, partition = scope
+    for start, end in zip(boundaries, boundaries[1:], strict=False):
+        if start >= end:
+            continue
+        active_targets = tuple(
+            item
+            for item in target_items
+            if item.range.end is not None and item.range.start <= start and end <= item.range.end
+        )
+        active_against = tuple(
+            item
+            for item in against_items
+            if item.range.end is not None and item.range.start <= start and end <= item.range.end
+        )
+        yield _ExecutionSegment(
+            window_name,
+            key,
+            partition,
+            TemporalRange.closed(start, end),
+            tuple(record_id for item in active_targets for record_id in _record_ids(item)),
+            tuple(record_id for item in active_against for record_id in _record_ids(item)),
+            ComparisonFinality.PROVISIONAL
+            if any(
+                item.finality is ComparisonFinality.PROVISIONAL
+                for item in (*active_targets, *active_against)
+            )
+            else ComparisonFinality.FINAL,
+        )
+
+
+def _overlap_rows_from_segments(segments: Iterable[_ExecutionSegment]) -> list[OverlapRow]:
+    return [
+        OverlapRow(
+            segment.window_name,
+            segment.key,
+            segment.partition,
+            segment.range,
+            segment.target_record_ids,
+            segment.against_record_ids,
+            segment.finality,
+        )
+        for segment in segments
+        if segment.target_record_ids and segment.against_record_ids
+    ]
+
+
+def _coverage_by_target_id(
+    segments: Iterable[_ExecutionSegment],
+) -> dict[WindowRecordId, float]:
+    coverage: dict[WindowRecordId, float] = defaultdict(float)
+    for segment in segments:
+        if not segment.against_record_ids:
+            continue
+        magnitude = segment.range.magnitude()
+        for record_id in segment.target_record_ids:
+            coverage[record_id] += magnitude
+    return coverage
+
+
+def _against_ids_by_target_id(
+    segments: Iterable[_ExecutionSegment],
+) -> dict[WindowRecordId, tuple[WindowRecordId, ...]]:
+    against_ids: dict[WindowRecordId, dict[WindowRecordId, None]] = defaultdict(dict)
+    for segment in segments:
+        if not segment.against_record_ids:
+            continue
+        for target_id in segment.target_record_ids:
+            for against_id in segment.against_record_ids:
+                against_ids[target_id][against_id] = None
+    return {target_id: tuple(ids) for target_id, ids in against_ids.items()}
+
+
+def _contains_provisional_against(
+    record_ids: Iterable[WindowRecordId],
+    against: Iterable[_NormalizedWindow],
+) -> bool:
+    provisional_ids = {
+        record_id
+        for item in against
+        if item.finality is ComparisonFinality.PROVISIONAL
+        for record_id in _record_ids(item)
+    }
+    return any(record_id in provisional_ids for record_id in record_ids)
+
+
+def _residual_rows_from_segments(segments: Iterable[_ExecutionSegment]) -> list[ResidualRow]:
+    return [
+        ResidualRow(
+            segment.window_name,
+            segment.key,
+            segment.partition,
+            segment.range,
+            segment.target_record_ids,
+            segment.finality,
+        )
+        for segment in segments
+        if segment.target_record_ids and not segment.against_record_ids
+    ]
+
+
+def _missing_rows_from_segments(segments: Iterable[_ExecutionSegment]) -> list[MissingRow]:
+    return [
+        MissingRow(
+            segment.window_name,
+            segment.key,
+            segment.partition,
+            segment.range,
+            segment.against_record_ids,
+            segment.finality,
+        )
+        for segment in segments
+        if segment.against_record_ids and not segment.target_record_ids
+    ]
+
+
+def _gap_rows_from_segments(segments: Iterable[_ExecutionSegment]) -> list[GapRow]:
+    return [
+        GapRow(segment.window_name, segment.key, segment.partition, segment.range)
+        for segment in segments
+        if not segment.target_record_ids and not segment.against_record_ids
+    ]
+
+
+def _symmetric_difference_rows_from_segments(
+    segments: Iterable[_ExecutionSegment],
+) -> list[SymmetricDifferenceRow]:
+    rows = [
+        SymmetricDifferenceRow(
+            segment.window_name,
+            segment.key,
+            segment.partition,
+            segment.range,
+            ComparisonSide.TARGET if segment.target_record_ids else ComparisonSide.AGAINST,
+            segment.target_record_ids,
+            segment.against_record_ids,
+            segment.finality,
+        )
+        for segment in segments
+        if bool(segment.target_record_ids) != bool(segment.against_record_ids)
+    ]
+    return sorted(rows, key=_row_sort_key)
+
+
+def _containment_rows_from_segments(
+    segments: Iterable[_ExecutionSegment],
+    targets: Iterable[_NormalizedWindow],
+) -> list[ContainmentRow]:
+    scope_segments = tuple(segments)
+    target_ids = {
+        record_id
+        for target in targets
+        for record_id in _record_ids(target)
+    }
+    contained_ranges: dict[WindowRecordId, list[TemporalRange]] = defaultdict(list)
+    for segment in scope_segments:
+        if not segment.against_record_ids:
+            continue
+        for record_id in segment.target_record_ids:
+            contained_ranges[record_id].append(segment.range)
+
+    rows: list[ContainmentRow] = []
+    for segment in scope_segments:
+        if not segment.target_record_ids:
+            continue
+        if segment.against_record_ids:
+            rows.append(
+                ContainmentRow(
+                    segment.window_name,
+                    segment.key,
+                    segment.partition,
+                    segment.range,
+                    ContainmentStatus.CONTAINED,
+                    segment.target_record_ids,
+                    segment.against_record_ids,
+                    segment.finality,
+                )
+            )
+            continue
+        for record_id in segment.target_record_ids:
+            if record_id not in target_ids:
+                continue
+            rows.append(
+                ContainmentRow(
+                    segment.window_name,
+                    segment.key,
+                    segment.partition,
+                    segment.range,
+                    _containment_status_for_segment(
+                        segment.range,
+                        contained_ranges.get(record_id, ()),
+                    ),
+                    (record_id,),
+                    (),
+                    segment.finality,
+                )
+            )
+    return sorted(rows, key=_row_sort_key)
+
+
+def _containment_status_for_segment(
+    temporal_range: TemporalRange,
+    contained_ranges: Iterable[TemporalRange],
+) -> ContainmentStatus:
+    contained = tuple(contained_ranges)
+    if not contained:
+        return ContainmentStatus.NOT_CONTAINED
+    first_contained_start = min(item.start for item in contained)
+    last_contained_end = max(item.require_end() for item in contained)
+    if temporal_range.require_end() <= first_contained_start:
+        return ContainmentStatus.LEFT_OVERHANG
+    if temporal_range.start >= last_contained_end:
+        return ContainmentStatus.RIGHT_OVERHANG
+    return ContainmentStatus.NOT_CONTAINED
 
 
 def _aggregate_coverage_ratio(rows: tuple[CoverageRow, ...]) -> float | None:
@@ -3815,6 +4158,8 @@ def _diagnostic_severity(code: str) -> ComparisonDiagnosticSeverity:
         "duplicate_window",
         "future_leakage_risk",
         "future_window_excluded",
+        "mixed_clock_risk",
+        "unbounded_open_duration",
     }:
         return ComparisonDiagnosticSeverity.WARNING
     return ComparisonDiagnosticSeverity.ERROR
@@ -3831,8 +4176,12 @@ _DIAGNOSTIC_MESSAGES = {
     "known_at_requires_processing_position": (
         "Known-at filtering currently requires processing-position availability."
     ),
+    "mixed_clock_risk": "Timestamp horizon and known-at point use different clock identities.",
     "missing_event_time": "Event-time comparison requires recorded event timestamps.",
     "open_windows_without_policy": "Open windows require an explicit evaluation horizon.",
+    "unbounded_open_duration": (
+        "An open window was excluded because the plan did not bound its duration."
+    ),
     "unknown_comparator": "Comparator declaration is not registered.",
 }
 
@@ -3844,8 +4193,10 @@ _DIAGNOSTIC_PATHS = {
     "future_window_excluded": "normalization.known_at",
     "invalid_range_duration": "normalization.horizon",
     "known_at_requires_processing_position": "normalization.known_at",
+    "mixed_clock_risk": "normalization",
     "missing_event_time": "normalization.axis",
     "open_windows_without_policy": "normalization.horizon",
+    "unbounded_open_duration": "normalization.open_window_policy",
     "unknown_comparator": "comparators",
 }
 
@@ -4469,6 +4820,28 @@ def _html_row(label: str, color: str, row: Any) -> str:
         f'<div class="bar" style="left:{left}%;width:{bar_width}%;background:{color}"></div>'
         "</div></div>"
     )
+
+
+def _debug_html_json_section(
+    title: str,
+    value: Any,
+    empty_text: str,
+    *,
+    limit: int | None = None,
+) -> str:
+    if value is None or value == () or value == []:
+        return f"<h2>{html.escape(title)}</h2><p>{html.escape(empty_text)}</p>"
+    if limit is not None and isinstance(value, tuple | list):
+        shown = value[:limit]
+        suffix = (
+            f"<p>{html.escape(title)}: showing {limit} of {len(value)} rows.</p>"
+            if len(value) > limit
+            else ""
+        )
+        payload = json.dumps(_to_jsonable(shown), indent=2, sort_keys=True)
+        return f"<h2>{html.escape(title)}</h2><pre>{html.escape(payload)}</pre>{suffix}"
+    payload = json.dumps(_to_jsonable(value), indent=2, sort_keys=True)
+    return f"<h2>{html.escape(title)}</h2><pre>{html.escape(payload)}</pre>"
 
 
 def _point_label(point: TemporalPoint) -> str:

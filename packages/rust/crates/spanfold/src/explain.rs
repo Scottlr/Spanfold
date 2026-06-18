@@ -36,8 +36,24 @@ impl ComparisonPlan {
         write_item(&mut out, "target", &self.target_source);
         write_item(&mut out, "against", &format!("{:?}", self.against));
         write_item(&mut out, "scopeWindow", &format!("{:?}", self.scope_window));
+        write_item(&mut out, "scopeKey", &format!("{:?}", self.scope_key));
+        write_item(
+            &mut out,
+            "scopePartition",
+            &format!("{:?}", self.scope_partition),
+        );
         write_item(&mut out, "comparators", &format!("{:?}", self.comparators));
         write_item(&mut out, "knownAt", &format!("{:?}", self.known_at));
+        write_item(
+            &mut out,
+            "coalesceAdjacentWindows",
+            &self.coalesce_adjacent_windows.to_string(),
+        );
+        write_item(
+            &mut out,
+            "duplicateWindowPolicy",
+            &format!("{:?}", self.duplicate_window_policy),
+        );
         write_item(
             &mut out,
             "openWindowHorizon",
@@ -99,8 +115,8 @@ impl PreparedComparison {
                     window.record_id,
                     window.side,
                     window.selector_name,
-                    window.range.start,
-                    window.range.end
+                    window.range.start().magnitude(),
+                    window.range.end().magnitude()
                 ),
             );
         }
@@ -241,6 +257,33 @@ impl ComparisonResult {
             .collect()
     }
 
+    /// Returns only final row-finality metadata.
+    #[must_use]
+    pub fn final_row_finalities(&self) -> Vec<&crate::ComparisonRowFinality> {
+        self.row_finalities
+            .iter()
+            .filter(|row| row.finality == crate::ComparisonFinality::Final)
+            .collect()
+    }
+
+    /// Returns warning-level diagnostics.
+    #[must_use]
+    pub fn warning_diagnostics(&self) -> Vec<&crate::ComparisonDiagnostic> {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == crate::DiagnosticSeverity::Warning)
+            .collect()
+    }
+
+    /// Returns error-level diagnostics.
+    #[must_use]
+    pub fn error_diagnostics(&self) -> Vec<&crate::ComparisonDiagnostic> {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == crate::DiagnosticSeverity::Error)
+            .collect()
+    }
+
     /// Parses cohort evidence emitted in extension metadata.
     #[must_use]
     pub fn cohort_evidence(&self) -> Vec<CohortEvidenceMetadata> {
@@ -338,7 +381,7 @@ fn write_finality(out: &mut String, index: usize, finality: &ComparisonRowFinali
 
 #[cfg(test)]
 mod tests {
-    use crate::{WindowHistoryFixture, compare};
+    use crate::{ComparisonDuplicateWindowPolicy, WindowHistoryFixture, compare};
 
     #[test]
     fn result_explain_includes_row_ids_and_extension_metadata() {
@@ -358,13 +401,24 @@ mod tests {
                 name: "Provider QA".to_owned(),
                 target_source: "provider-a".to_owned(),
                 against: crate::AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+                target_selector: None,
+                against_selectors: Vec::new(),
                 scope_window: Some("DeviceOffline".to_owned()),
+                scope_key: None,
+                scope_partition: None,
                 scope_segments: Vec::new(),
                 scope_tags: Vec::new(),
                 comparators: vec![crate::Comparator::Overlap],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: crate::TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: crate::OpenWindowPolicy::RequireClosed,
                 open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
                 strict: false,
             },
         );
@@ -372,5 +426,49 @@ mod tests {
         let explanation = result.explain();
         assert!(explanation.contains("overlap[0]"));
         assert!(explanation.contains("finality[0]"));
+        assert_eq!(result.final_row_finalities().len(), 1);
+        assert!(result.provisional_row_finalities().is_empty());
+        assert!(result.warning_diagnostics().is_empty());
+        assert!(result.error_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn result_helpers_filter_diagnostics_by_severity() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
+                w.source("provider-a")
+            })
+            .expect("target")
+            .build();
+        let result = compare(
+            &history,
+            &crate::ComparisonPlan {
+                name: "Strict broad QA".to_owned(),
+                target_source: "provider-a".to_owned(),
+                against: crate::AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+                target_selector: None,
+                against_selectors: Vec::new(),
+                scope_window: None,
+                scope_key: None,
+                scope_partition: None,
+                scope_segments: Vec::new(),
+                scope_tags: Vec::new(),
+                comparators: vec![crate::Comparator::Overlap],
+                require_closed_windows: true,
+                use_half_open_ranges: true,
+                time_axis: crate::TemporalAxis::ProcessingPosition,
+                null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
+                known_at: None,
+                open_window_policy: crate::OpenWindowPolicy::RequireClosed,
+                open_window_horizon: None,
+                coalesce_adjacent_windows: false,
+                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                output: crate::ComparisonOutputOptions::default_options(),
+                strict: true,
+            },
+        );
+
+        assert!(result.warning_diagnostics().is_empty());
+        assert_eq!(result.error_diagnostics().len(), 1);
     }
 }

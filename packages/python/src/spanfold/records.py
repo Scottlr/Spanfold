@@ -359,6 +359,10 @@ class WindowHistory:
     def __init__(self, *, enabled: bool = True) -> None:
         self.enabled = enabled
         self._open: dict[tuple[str, Any, Any, Any, tuple[WindowSegment, ...]], OpenWindow] = {}
+        self._open_lookup: dict[
+            tuple[str, Any, Any, Any],
+            tuple[str, Any, Any, Any, tuple[WindowSegment, ...]],
+        ] = {}
         self._closed: list[ClosedWindow] = []
         self._annotations: list[WindowAnnotation] = []
 
@@ -391,7 +395,11 @@ class WindowHistory:
 
         if not self.enabled:
             return
-        self._open[_recording_key(window)] = window
+        recording_key = _recording_key(window)
+        self._open[recording_key] = window
+        self._open_lookup[
+            (window.window_name, window.key, window.source, window.partition)
+        ] = recording_key
 
     def record_close(
         self,
@@ -409,14 +417,7 @@ class WindowHistory:
 
         if not self.enabled:
             return None
-        open_key = next(
-            (
-                candidate
-                for candidate in self._open
-                if candidate[:4] == (window_name, key, source, partition)
-            ),
-            None,
-        )
+        open_key = self._open_lookup.pop((window_name, key, source, partition), None)
         open_window = self._open.pop(open_key, None) if open_key is not None else None
         if open_window is None:
             return None

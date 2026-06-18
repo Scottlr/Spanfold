@@ -183,6 +183,56 @@ fn audit_events_writes_artifact_bundle() {
     );
 }
 
+#[test]
+fn audit_windows_accepts_custom_comparison_options() {
+    let workspace = tempdir().expect("tempdir");
+    let windows = workspace.path().join("windows.jsonl");
+    let out = workspace.path().join("audit");
+    fs::write(
+        &windows,
+        [
+            r#"{"key":"device-1","source":"provider-a","startPosition":1}"#,
+            r#"{"key":"device-1","source":"provider-b","startPosition":3,"endPosition":7}"#,
+        ]
+        .join("\n"),
+    )
+    .expect("windows file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "audit-windows",
+            windows.to_str().expect("utf8 windows path"),
+            "--window",
+            "DeviceOffline",
+            "--target",
+            "provider-a",
+            "--against",
+            "provider-b",
+            "--name",
+            "Live audit",
+            "--comparators",
+            "residual",
+            "--strict",
+            "--live-horizon-position",
+            "10",
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"planName\": \"Live audit\""));
+
+    let comparison = fs::read_to_string(out.join("comparison.json")).expect("comparison json");
+    let comparison: serde_json::Value =
+        serde_json::from_str(&comparison).expect("comparison json parse");
+    assert_eq!(
+        comparison["comparatorSummaries"][0]["comparatorName"],
+        "residual"
+    );
+    assert_eq!(comparison["rowFinalities"][0]["finality"], "Provisional");
+}
+
 fn write_event_import_files(events: &PathBuf, map: &PathBuf) {
     fs::write(
         events,

@@ -561,7 +561,11 @@ def test_exports_are_deterministic() -> None:
     assert json_lines[1]["artifact"] == "result-row"
     assert json_lines[1]["row_id"] == "overlap[0]"
     assert "| overlap | 1 |" in result.to_markdown()
-    assert "<html" in result.to_debug_html()
+    debug_html = result.to_debug_html()
+    assert "<html" in debug_html
+    assert "Diagnostics" in debug_html
+    assert "Prepared" in debug_html
+    assert "Aligned Segments" in debug_html
     assert "# Comparison Explain: Provider QA" in result.explain()
     assert str(result.overlap_rows[0].target_record_ids[0]) in result.explain()
 
@@ -602,6 +606,30 @@ def test_portable_exports_and_llm_context_are_deterministic(tmp_path) -> None:
     destination = tmp_path / "nested" / "comparison.llm.json"
     result.to_llm_context(destination)
     assert "spanfold.comparison.llm-context" in destination.read_text(encoding="utf-8")
+
+
+def test_builder_can_export_custom_output_options() -> None:
+    pipeline = _pipeline()
+    result = (
+        pipeline.history.compare("Output QA")
+        .target("provider-a")
+        .against("provider-b")
+        .within(window_name="DeviceOffline")
+        .output(
+            ComparisonOutputOptions(
+                include_aligned_segments=False,
+                include_explain_data=False,
+            )
+        )
+        .using("overlap")
+        .run()
+    )
+
+    plan_json = json.loads(result.plan.export_json())
+    assert plan_json["output"] == {
+        "includeAlignedSegments": False,
+        "includeExplainData": False,
+    }
 
 
 def test_builder_can_write_configured_debug_and_llm_exports(tmp_path) -> None:
@@ -1126,6 +1154,103 @@ def test_diagnostics_expose_structured_severity_and_strict_promotion() -> None:
     assert not strict.is_valid
     assert strict.diagnostic_rows[0].severity is ComparisonDiagnosticSeverity.ERROR
     assert [row.code for row in strict.error_diagnostics()] == ["future_leakage_risk"]
+
+
+def test_mixed_timestamp_clocks_are_diagnosed() -> None:
+    start = datetime(2026, 4, 20, 10, tzinfo=UTC)
+    pipeline = _pipeline()
+
+    result = (
+        pipeline.history.compare("Clock QA")
+        .target("provider-a")
+        .against("provider-b")
+        .within(window_name="DeviceOffline")
+        .normalize(
+            axis=TemporalAxis.TIMESTAMP,
+            horizon=TemporalPoint.for_timestamp(start, "provider"),
+            known_at=TemporalPoint.for_timestamp(start, "received"),
+        )
+        .using("overlap")
+        .run()
+    )
+    strict = (
+        pipeline.history.compare("Clock QA")
+        .target("provider-a")
+        .against("provider-b")
+        .within(window_name="DeviceOffline")
+        .normalize(
+            axis=TemporalAxis.TIMESTAMP,
+            horizon=TemporalPoint.for_timestamp(start, "provider"),
+            known_at=TemporalPoint.for_timestamp(start, "received"),
+        )
+        .using("overlap")
+        .strict()
+        .run()
+    )
+
+    mixed = [row for row in result.diagnostic_rows if row.code == "mixed_clock_risk"]
+    strict_mixed = [row for row in strict.diagnostic_rows if row.code == "mixed_clock_risk"]
+    assert mixed[0].severity is ComparisonDiagnosticSeverity.WARNING
+    assert strict_mixed[0].severity is ComparisonDiagnosticSeverity.ERROR
+
+
+def test_unbounded_open_window_duration_is_diagnosed() -> None:
+    pipeline = _pipeline()
+    pipeline.ingest(DeviceStatus("device-1", False), source="provider-a")
+
+    result = (
+        pipeline.history.compare("Open QA")
+        .target("provider-a")
+        .against("provider-b")
+        .within(window_name="DeviceOffline")
+        .using("overlap")
+        .run()
+    )
+
+    assert not result.is_valid
+    assert "open_windows_without_policy" in result.diagnostics
+    assert "unbounded_open_duration" in result.diagnostics
+
+
+def test_run_live_does_not_mutate_builder_normalization() -> None:
+    pipeline = _pipeline()
+    pipeline.ingest(DeviceStatus("device-1", False), source="provider-a")
+    pipeline.ingest(DeviceStatus("device-1", False), source="provider-b")
+
+    builder = (
+        pipeline.history.compare("Live QA")
+        .target("provider-a")
+        .against("provider-b")
+        .within(window_name="DeviceOffline")
+        .using(lambda comparators: comparators.residual())
+    )
+
+    builder.run_live(TemporalPoint.for_position(5))
+
+    plan = builder.build()
+    assert plan.normalization.open_window_horizon is None
+    assert plan.normalization.open_window_policy is ComparisonOpenWindowPolicy.REQUIRE_CLOSED
+
+
+def test_export_json_lines_can_be_iterated_without_materializing_payloads() -> None:
+    pipeline = _pipeline()
+    pipeline.ingest(DeviceStatus("device-1", False), source="provider-a")
+    pipeline.ingest(DeviceStatus("device-1", True), source="provider-a")
+    pipeline.ingest(DeviceStatus("device-1", False), source="provider-b")
+    pipeline.ingest(DeviceStatus("device-1", True), source="provider-b")
+
+    result = (
+        pipeline.history.compare("JSONL QA")
+        .target("provider-a")
+        .against("provider-b")
+        .within(window_name="DeviceOffline")
+        .using(lambda comparators: comparators.overlap())
+        .run()
+    )
+
+    iterated = list(result.iter_export_json_lines())
+    assert iterated == result.export_json_lines().splitlines()
+    assert json.loads(iterated[0])["artifact"] == "result-summary"
 
 
 def _ranges(rows) -> list[tuple[int, int]]:  # type: ignore[no-untyped-def]

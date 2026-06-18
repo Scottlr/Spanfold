@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Get started with Spanfold by recording temporal windows, comparing two sources, and reading the expected output.">
+  <meta name="description" content="Get started with Spanfold in C#, Python, or Rust by recording temporal windows, comparing two sources, and reading the expected output.">
   <title>Get started with Spanfold</title>
   <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -63,6 +63,7 @@
         <div class="language-switcher" aria-label="Code language">
           <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
           <button type="button" data-language-toggle="python" aria-pressed="false">Python</button>
+          <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
         </div>
       </div>
     </div>
@@ -101,6 +102,12 @@
         <pre><code>cd packages/python
 python -m pip install -e ".[dev]"</code></pre>
         <p class="language-note">The Python package includes the core runtime, comparison, export, testing, and CLI surfaces.</p>
+      </div>
+      <div class="language-panel" data-language="rust">
+        <pre><code>cd packages/rust
+cargo test --workspace
+cargo run -p spanfold-cli -- --help</code></pre>
+        <p class="language-note">The Rust package includes the core runtime, selector-backed comparison API, deterministic exports, audit bundles, testing helpers, and CLI surfaces.</p>
       </div>
     </section>
 
@@ -206,6 +213,51 @@ print(f"closed windows: {len(pipeline.history.closed_windows)}")
 print(f"overlap rows: {len(result.overlap_rows)}")
 print(f"provider-a-only rows: {len(result.residual_rows)}")
 print(f"provider-b-only rows: {len(result.missing_rows)}")</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code>use spanfold::for_events;
+
+#[derive(Clone)]
+struct DeviceStatus {
+    device_id: String,
+    is_online: bool,
+}
+
+let mut pipeline = for_events::&lt;DeviceStatus&gt;()
+    .record_windows()
+    .track_window(
+        "DeviceOffline",
+        |status| status.device_id.clone(),
+        |status| !status.is_online,
+    )
+    .build();
+
+fn status(is_online: bool) -&gt; DeviceStatus {
+    DeviceStatus { device_id: "device-17".into(), is_online }
+}
+
+pipeline.ingest(status(true), Some("provider-a"), None);  // position 1
+pipeline.ingest(status(true), Some("provider-b"), None);  // position 2
+pipeline.ingest(status(false), Some("provider-a"), None); // position 3, provider-a opens
+pipeline.ingest(status(false), Some("provider-b"), None); // position 4, provider-b opens
+pipeline.ingest(status(true), Some("provider-b"), None);  // position 5, provider-b closes
+pipeline.ingest(status(true), Some("provider-a"), None);  // position 6, provider-a closes
+
+let result = pipeline
+    .history()
+    .compare("Provider comparison")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .run();
+
+println!("closed windows: {}", pipeline.history().closed_windows().len());
+println!("overlap rows: {}", result.overlap_rows.len());
+println!("provider-a-only rows: {}", result.residual_rows.len());
+println!("provider-b-only rows: {}", result.missing_rows.len());</code></pre>
         </div>
       </div>
     </section>

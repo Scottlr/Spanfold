@@ -77,7 +77,10 @@ impl<T> Clone for WindowDefinition<T> {
 
 #[derive(Clone, Debug, PartialEq)]
 struct OpenState {
+    id: WindowRecordId,
     start: TemporalPoint,
+    source: Option<String>,
+    partition: Option<String>,
     segments: Vec<WindowSegment>,
     tags: Vec<WindowTag>,
 }
@@ -321,6 +324,7 @@ pub struct EventPipelineBuilder<T> {
     windows: Vec<WindowDefinition<T>>,
     event_time: Option<EventTimeSelector<T>>,
     emission_callbacks: Vec<EmissionCallback>,
+    record_windows: bool,
     marker: PhantomData<T>,
 }
 
@@ -330,6 +334,7 @@ impl<T> Default for EventPipelineBuilder<T> {
             windows: Vec::new(),
             event_time: None,
             emission_callbacks: Vec::new(),
+            record_windows: false,
             marker: PhantomData,
         }
     }
@@ -347,6 +352,7 @@ pub struct EventPipeline<T> {
     event_time: Option<EventTimeSelector<T>>,
     emission_callbacks: Vec<EmissionCallback>,
     window_callbacks: BTreeMap<String, WindowCallbackSet>,
+    record_windows: bool,
     history: WindowHistory,
     active: BTreeMap<RuntimeStateKey, OpenState>,
     parents: BTreeMap<RuntimeStateKey, ParentState>,
@@ -364,7 +370,8 @@ pub fn for_events<T>() -> EventPipelineBuilder<T> {
 impl<T> EventPipelineBuilder<T> {
     /// Starts recording windows for the configured event type.
     #[must_use]
-    pub fn record_windows(self) -> Self {
+    pub fn record_windows(mut self) -> Self {
+        self.record_windows = true;
         self
     }
 
@@ -638,6 +645,7 @@ impl<T> EventPipelineBuilder<T> {
             event_time: self.event_time,
             emission_callbacks: self.emission_callbacks,
             window_callbacks,
+            record_windows: self.record_windows,
             history: WindowHistory::new(),
             active: BTreeMap::new(),
             parents: BTreeMap::new(),
@@ -1146,7 +1154,7 @@ impl<T> EventPipeline<T> {
 
     fn open_window_state(&mut self, observation: WindowObservation) -> WindowEmission {
         let id = self.next_id();
-        self.history.push_open(OpenWindow {
+        let open = OpenWindow {
             id: id.clone(),
             window_name: observation.window_name.clone(),
             key: observation.key.clone(),
@@ -1156,11 +1164,17 @@ impl<T> EventPipeline<T> {
             partition: observation.partition.clone(),
             segments: observation.segments.clone(),
             tags: observation.tags.clone(),
-        });
+        };
+        if self.record_windows {
+            self.history.push_open(open);
+        }
         self.active.insert(
             observation.state_key,
             OpenState {
+                id: id.clone(),
                 start: observation.event_point,
+                source: observation.source.clone(),
+                partition: observation.partition.clone(),
                 segments: observation.segments.clone(),
                 tags: observation.tags.clone(),
             },
@@ -1188,41 +1202,37 @@ impl<T> EventPipeline<T> {
         boundary_changes: Vec<WindowBoundaryChange>,
     ) -> Option<WindowEmission> {
         let open_state = self.active.remove(state_key)?;
-        let open_windows = self.history.open_windows_mut();
-        let index = open_windows.iter().position(|window| {
-            window.window_name == state_key.0
-                && window.key == state_key.1
-                && window.source == state_key.2
-                && window.partition == state_key.3
-                && (state_key.4.is_empty() || stable_segments(&window.segments) == state_key.4)
-        })?;
-        let open = open_windows.remove(index);
         let emission = WindowEmission {
             kind: WindowTransitionKind::Closed,
-            window_name: open.window_name.clone(),
-            key: open.key.clone(),
-            record_id: open.id.clone(),
+            window_name: state_key.0.clone(),
+            key: state_key.1.clone(),
+            record_id: open_state.id.clone(),
             position: self.position,
-            source: open.source.clone(),
-            partition: open.partition.clone(),
-            segments: open.segments.clone(),
-            tags: open.tags.clone(),
+            source: open_state.source.clone(),
+            partition: open_state.partition.clone(),
+            segments: open_state.segments.clone(),
+            tags: open_state.tags.clone(),
             boundary_reason,
             boundary_changes: boundary_changes.clone(),
         };
-        self.history.push_closed(ClosedWindow {
-            id: open.id,
-            window_name: open.window_name,
-            key: open.key,
-            range: TemporalRange::new(open_state.start, event_point).expect("valid temporal range"),
-            known_at: open.known_at,
-            source: open.source,
-            partition: open.partition,
-            segments: open.segments,
-            tags: open.tags,
-            boundary_reason,
-            boundary_changes,
-        });
+        if self.record_windows
+            && let Ok(range) = TemporalRange::new(open_state.start, event_point)
+        {
+            self.history.remove_open(&open_state.id);
+            self.history.push_closed(ClosedWindow {
+                id: open_state.id,
+                window_name: state_key.0.clone(),
+                key: state_key.1.clone(),
+                range,
+                known_at: None,
+                source: open_state.source,
+                partition: open_state.partition,
+                segments: open_state.segments,
+                tags: open_state.tags,
+                boundary_reason,
+                boundary_changes,
+            });
+        }
         Some(emission)
     }
 
@@ -2070,5 +2080,44 @@ mod tests {
             result.emissions[0].boundary_reason,
             Some(WindowBoundaryReason::ActivePredicateEnded)
         );
+    }
+
+    #[test]
+    fn window_recording_is_opt_in_but_emissions_still_fire() {
+        let mut pipeline = for_events::<PriceTick>()
+            .track_window(
+                "SelectionSuspension",
+                |tick| tick.selection_id,
+                |tick| tick.price == 0.0,
+            )
+            .build();
+
+        let opened = pipeline.ingest(
+            PriceTick {
+                selection_id: "selection-1",
+                market_id: "market-1",
+                fixture_id: "fixture-1",
+                price: 0.0,
+                observed_at: 100,
+            },
+            None,
+            None,
+        );
+        let closed = pipeline.ingest(
+            PriceTick {
+                selection_id: "selection-1",
+                market_id: "market-1",
+                fixture_id: "fixture-1",
+                price: 1.1,
+                observed_at: 101,
+            },
+            None,
+            None,
+        );
+
+        assert_eq!(opened.emissions.len(), 1);
+        assert_eq!(closed.emissions.len(), 1);
+        assert!(pipeline.history().open_windows().is_empty());
+        assert!(pipeline.history().closed_windows().is_empty());
     }
 }

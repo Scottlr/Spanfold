@@ -211,8 +211,61 @@ h3 {
   width: auto;
 }
 
-.timeline-tools:has(input:checked) + .timeline-shell .timeline-canvas {
-  --timeline-width: 2600px;
+body:has(#spanfold-zoom-2x:checked) .timeline-canvas { --timeline-width: 2200px; }
+body:has(#spanfold-zoom-5x:checked) .timeline-canvas { --timeline-width: 5500px; }
+body:has(#spanfold-zoom-10x:checked) .timeline-canvas { --timeline-width: 11000px; }
+body:has(#spanfold-zoom-20x:checked) .timeline-canvas { --timeline-width: 22000px; }
+
+.zoom-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.zoom-presets legend {
+  float: left;
+  margin-right: 6px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.zoom-presets label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.zoom-presets label:has(input:checked) {
+  border-color: var(--accent-forest);
+  background: color-mix(in srgb, var(--accent-forest) 12%, var(--bg-card));
+}
+
+.zoom-presets input { width: auto; }
+
+.lane-overflow {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  z-index: 5;
+  padding: 1px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--ink-muted);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .timeline-shell {
@@ -549,21 +602,26 @@ tr:last-child td { border-bottom: 0; }
 
         if (result.Prepared?.NormalizedWindows.Count > 0 && scale is not null)
         {
+            const int MaxLanes = 200;
+            const int MaxBarsPerLane = 200;
+
             AppendTimelineTools(builder);
             builder
                 .AppendLine("  <div class=\"timeline-shell\" data-spanfold-timeline>")
                 .AppendLine("    <div class=\"timeline-canvas\">")
                 .AppendLine("      <div class=\"timeline\">");
 
-            var lanes = result.Prepared.NormalizedWindows
+            var allLanes = result.Prepared.NormalizedWindows
                 .GroupBy(static record => new TimelineLaneKey(record.Side, record.SelectorName, record.Window.WindowName))
                 .OrderBy(static group => group.Key.Side)
                 .ThenBy(static group => group.Key.SelectorName, StringComparer.Ordinal)
-                .ThenBy(static group => group.Key.WindowName, StringComparer.Ordinal);
+                .ThenBy(static group => group.Key.WindowName, StringComparer.Ordinal)
+                .ToArray();
 
-            foreach (var lane in lanes)
+            for (var i = 0; i < Math.Min(allLanes.Length, MaxLanes); i++)
             {
-                AppendWindowLane(builder, lane.Key, lane.OrderBy(static record => record.Range.Start));
+                var lane = allLanes[i];
+                AppendWindowLane(builder, lane.Key, lane.OrderBy(static record => record.Range.Start), lane.Count(), MaxBarsPerLane, scale);
             }
 
             builder
@@ -573,6 +631,17 @@ tr:last-child td { border-bottom: 0; }
                 .AppendLine("    </div>")
                 .AppendLine("  </div>");
             AppendLegend(builder, includeSegments: false);
+
+            if (allLanes.Length > MaxLanes)
+            {
+                builder
+                    .Append("  <div class=\"empty\" style=\"margin-top:18px\">Showing first ")
+                    .Append(MaxLanes.ToString(CultureInfo.InvariantCulture))
+                    .Append(" of ");
+                AppendText(builder, allLanes.Length.ToString(CultureInfo.InvariantCulture));
+                builder.AppendLine(" lane groups. Narrow the comparison scope to see more.</div>");
+            }
+
             AppendWindowDetailTable(builder, result);
         }
         else
@@ -581,71 +650,105 @@ tr:last-child td { border-bottom: 0; }
         }
 
         builder.AppendLine("</section>");
+    }
 
-        void AppendWindowLane(
-            StringBuilder laneBuilder,
-            TimelineLaneKey laneKey,
-            IOrderedEnumerable<NormalizedWindowRecord> records)
+    private static void AppendWindowLane(
+        StringBuilder laneBuilder,
+        TimelineLaneKey laneKey,
+        IOrderedEnumerable<NormalizedWindowRecord> records,
+        int totalRecords,
+        int maxBars,
+        TimelineScale scale)
+    {
+        var sideClass = laneKey.Side == ComparisonSide.Target ? "target" : "against";
+        laneBuilder
+            .AppendLine("    <div class=\"lane\">")
+            .Append("      <div class=\"lane-title\">");
+        AppendText(laneBuilder, laneKey.Side.ToString());
+        laneBuilder.Append(" / ");
+        AppendText(laneBuilder, laneKey.SelectorName);
+        laneBuilder.Append("<span class=\"lane-meta\">");
+        AppendText(laneBuilder, laneKey.WindowName);
+        if (totalRecords > maxBars)
         {
-            var sideClass = laneKey.Side == ComparisonSide.Target ? "target" : "against";
-            laneBuilder
-                .AppendLine("    <div class=\"lane\">")
-                .Append("      <div class=\"lane-title\">");
-            AppendText(laneBuilder, laneKey.Side.ToString());
-            laneBuilder.Append(" / ");
-            AppendText(laneBuilder, laneKey.SelectorName);
-            laneBuilder.Append("<span class=\"lane-meta\">");
-            AppendText(laneBuilder, laneKey.WindowName);
-            laneBuilder
-                .AppendLine("</span></div>")
-                .AppendLine("      <div class=\"track\">");
+            laneBuilder.Append(" — showing ");
+            laneBuilder.Append(maxBars.ToString(CultureInfo.InvariantCulture));
+            laneBuilder.Append(" of ");
+            AppendText(laneBuilder, totalRecords.ToString(CultureInfo.InvariantCulture));
+            laneBuilder.Append(" windows");
+        }
+        laneBuilder
+            .AppendLine("</span></div>")
+            .AppendLine("      <div class=\"track\">");
 
-            foreach (var record in records)
+        var shown = 0;
+        foreach (var record in records)
+        {
+            if (shown >= maxBars)
             {
-                if (TryGetRangeCss(record.Range, scale!, out var left, out var width))
-                {
-                    laneBuilder
-                        .Append("        <div class=\"bar ")
-                        .Append(sideClass);
-                    if (record.Range.EndStatus == TemporalRangeEndStatus.OpenAtHorizon || record.Range.EndStatus == TemporalRangeEndStatus.UnknownEnd)
-                    {
-                        laneBuilder.Append(" open");
-                    }
-
-                    laneBuilder
-                        .Append("\" style=\"left:")
-                        .Append(left)
-                        .Append("%;width:")
-                        .Append(width)
-                        .Append("%\" title=\"");
-                    AppendAttribute(laneBuilder, FormatWindowTitle(record));
-                    laneBuilder.AppendLine("\"></div>");
-                }
-
-                if (record.Range.End.HasValue
-                    && record.Window.BoundaryReason is not null
-                    && TryGetPointCss(record.Range.End.Value, scale!, out var boundaryLeft))
-                {
-                    laneBuilder
-                        .Append("        <div class=\"boundary-marker\" style=\"left:")
-                        .Append(boundaryLeft)
-                        .Append("%\" title=\"");
-                    AppendAttribute(laneBuilder, FormatBoundary(record.Window));
-                    laneBuilder.AppendLine("\"></div>");
-                }
+                break;
             }
 
-            laneBuilder
-                .AppendLine("      </div>")
-                .AppendLine("    </div>");
+            if (TryGetRangeCss(record.Range, scale, out var left, out var width))
+            {
+                laneBuilder
+                    .Append("        <div class=\"bar ")
+                    .Append(sideClass);
+                if (record.Range.EndStatus == TemporalRangeEndStatus.OpenAtHorizon || record.Range.EndStatus == TemporalRangeEndStatus.UnknownEnd)
+                {
+                    laneBuilder.Append(" open");
+                }
+
+                laneBuilder
+                    .Append("\" style=\"left:")
+                    .Append(left)
+                    .Append("%;width:")
+                    .Append(width)
+                    .Append("%\" title=\"");
+                AppendAttribute(laneBuilder, FormatWindowTitle(record));
+                laneBuilder.AppendLine("\"></div>");
+            }
+
+            if (record.Range.End.HasValue
+                && record.Window.BoundaryReason is not null
+                && TryGetPointCss(record.Range.End.Value, scale, out var boundaryLeft))
+            {
+                laneBuilder
+                    .Append("        <div class=\"boundary-marker\" style=\"left:")
+                    .Append(boundaryLeft)
+                    .Append("%\" title=\"");
+                AppendAttribute(laneBuilder, FormatBoundary(record.Window));
+                laneBuilder.AppendLine("\"></div>");
+            }
+
+            shown++;
         }
+
+        if (totalRecords > maxBars)
+        {
+            laneBuilder
+                .Append("      <div class=\"lane-overflow\">+")
+                .Append((totalRecords - maxBars).ToString(CultureInfo.InvariantCulture))
+                .AppendLine(" more</div>");
+        }
+
+        laneBuilder
+            .AppendLine("      </div>")
+            .AppendLine("    </div>");
     }
 
     private static void AppendTimelineTools(StringBuilder builder)
     {
         builder
             .AppendLine("  <div class=\"timeline-tools\">")
-            .AppendLine("    <label><input type=\"checkbox\" aria-label=\"Widen timeline\"> Widen timeline</label>")
+            .AppendLine("    <fieldset class=\"zoom-presets\">")
+            .AppendLine("      <legend>Zoom</legend>")
+            .AppendLine("      <label><input type=\"radio\" name=\"spanfold-zoom\" value=\"1x\" id=\"spanfold-zoom-1x\" checked> 1&times;</label>")
+            .AppendLine("      <label><input type=\"radio\" name=\"spanfold-zoom\" value=\"2x\" id=\"spanfold-zoom-2x\"> 2&times;</label>")
+            .AppendLine("      <label><input type=\"radio\" name=\"spanfold-zoom\" value=\"5x\" id=\"spanfold-zoom-5x\"> 5&times;</label>")
+            .AppendLine("      <label><input type=\"radio\" name=\"spanfold-zoom\" value=\"10x\" id=\"spanfold-zoom-10x\"> 10&times;</label>")
+            .AppendLine("      <label><input type=\"radio\" name=\"spanfold-zoom\" value=\"20x\" id=\"spanfold-zoom-20x\"> 20&times;</label>")
+            .AppendLine("    </fieldset>")
             .AppendLine("    <span>Scroll horizontally to inspect dense or long-running lane histories.</span>")
             .AppendLine("  </div>");
     }
@@ -833,13 +936,16 @@ tr:last-child td { border-bottom: 0; }
 
         if (result.Aligned?.Segments.Count > 0 && scale is not null)
         {
+            const int MaxSegmentLanes = 200;
+            const int MaxSegmentsPerLane = 200;
+
             AppendTimelineTools(builder);
             builder
                 .AppendLine("  <div class=\"timeline-shell\" data-spanfold-timeline>")
                 .AppendLine("    <div class=\"timeline-canvas\">")
                 .AppendLine("      <div class=\"timeline\">");
 
-            var lanes = result.Aligned.Segments
+            var allLanes = result.Aligned.Segments
                 .GroupBy(static segment => new SegmentLaneKey(
                     segment.WindowName,
                     FormatObject(segment.Key),
@@ -848,10 +954,13 @@ tr:last-child td { border-bottom: 0; }
                 .OrderBy(static group => group.Key.WindowName, StringComparer.Ordinal)
                 .ThenBy(static group => group.Key.Key, StringComparer.Ordinal)
                 .ThenBy(static group => group.Key.Partition, StringComparer.Ordinal)
-                .ThenBy(static group => group.Key.Segments, StringComparer.Ordinal);
+                .ThenBy(static group => group.Key.Segments, StringComparer.Ordinal)
+                .ToArray();
 
-            foreach (var lane in lanes)
+            for (var i = 0; i < Math.Min(allLanes.Length, MaxSegmentLanes); i++)
             {
+                var lane = allLanes[i];
+                var totalSegments = lane.Count();
                 builder
                     .AppendLine("    <div class=\"lane\">")
                     .Append("      <div class=\"lane-title\">");
@@ -870,12 +979,27 @@ tr:last-child td { border-bottom: 0; }
                     AppendText(builder, lane.Key.Segments);
                 }
 
+                if (totalSegments > MaxSegmentsPerLane)
+                {
+                    builder.Append(" — showing ");
+                    builder.Append(MaxSegmentsPerLane.ToString(CultureInfo.InvariantCulture));
+                    builder.Append(" of ");
+                    AppendText(builder, totalSegments.ToString(CultureInfo.InvariantCulture));
+                    builder.Append(" segments");
+                }
+
                 builder
                     .AppendLine("</span></div>")
                     .AppendLine("      <div class=\"track\">");
 
+                var shown = 0;
                 foreach (var segment in lane.OrderBy(static segment => segment.Range.Start))
                 {
+                    if (shown >= MaxSegmentsPerLane)
+                    {
+                        break;
+                    }
+
                     if (TryGetRangeCss(segment.Range, scale, out var left, out var width))
                     {
                         builder
@@ -889,6 +1013,16 @@ tr:last-child td { border-bottom: 0; }
                         AppendAttribute(builder, FormatSegmentTitle(segment));
                         builder.AppendLine("\"></div>");
                     }
+
+                    shown++;
+                }
+
+                if (totalSegments > MaxSegmentsPerLane)
+                {
+                    builder
+                        .Append("      <div class=\"lane-overflow\">+")
+                        .Append((totalSegments - MaxSegmentsPerLane).ToString(CultureInfo.InvariantCulture))
+                        .AppendLine(" more</div>");
                 }
 
                 builder
@@ -902,6 +1036,17 @@ tr:last-child td { border-bottom: 0; }
                 .AppendLine("    </div>")
                 .AppendLine("  </div>");
             AppendLegend(builder, includeSegments: true);
+
+            if (allLanes.Length > MaxSegmentLanes)
+            {
+                builder
+                    .Append("  <div class=\"empty\" style=\"margin-top:18px\">Showing first ")
+                    .Append(MaxSegmentLanes.ToString(CultureInfo.InvariantCulture))
+                    .Append(" of ");
+                AppendText(builder, allLanes.Length.ToString(CultureInfo.InvariantCulture));
+                builder.AppendLine(" segment lane groups. Narrow the comparison scope to see more.</div>");
+            }
+
             AppendSegmentTable(builder, result);
         }
         else

@@ -26,23 +26,26 @@ pub use analytics::{
     HierarchyComparisonResult, HierarchyComparisonRow, HierarchyComparisonRowKind,
     SourceMatrixCell, SourceMatrixResult, compare_hierarchy, compare_sources,
 };
-pub use builders::WindowComparisonBuilder;
+pub use builders::{ComparisonSelectorBuilder, WindowComparisonBuilder};
 pub use changelog::{ComparisonChangelogEntry, create_changelog, replay_changelog};
 pub use comparison::{
     AgainstSelection, AlignedComparison, AlignedSegmentArtifact, AsOfDirection, AsOfMatchStatus,
     AsOfRow, CohortActivity, Comparator, ComparatorSummary, ComparisonDiagnostic,
-    ComparisonFinality, ComparisonPlan, ComparisonResult, ComparisonRowFinality, ComparisonRows,
-    ComparisonSide, ContainmentRow, ContainmentStatus, CoverageRow, CoverageSummary,
-    DiagnosticSeverity, ExcludedWindowRecord, GapRow, LeadLagDirection, LeadLagRow, LeadLagSummary,
-    LeadLagTransition, MissingRow, NormalizedWindowRecord, OpenWindowPolicy, OverlapRow,
-    PreparedComparison, ResidualRow, RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact,
-    WindowFilter, align, compare, compare_live, prepare, prepare_live,
+    ComparisonDuplicateWindowPolicy, ComparisonFinality, ComparisonNormalizationPolicy,
+    ComparisonNullTimestampPolicy, ComparisonOutputOptions, ComparisonPlan, ComparisonResult,
+    ComparisonRowFinality, ComparisonRows, ComparisonScope, ComparisonSelector,
+    ComparisonSelectorError, ComparisonSide, ContainmentRow, ContainmentStatus, CoverageRow,
+    CoverageSummary, DiagnosticSeverity, ExcludedWindowRecord, GapRow, LeadLagDirection,
+    LeadLagRow, LeadLagSummary, LeadLagTransition, MissingRow, NormalizedWindowRecord,
+    OpenWindowPolicy, OverlapRow, PreparedComparison, ResidualRow, RowPoint, RowRange,
+    SymmetricDifferenceRow, WindowArtifact, WindowFilter, align, compare, compare_live, prepare,
+    prepare_live,
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
     ComparisonDebugHtmlOptions, ComparisonExportError, ComparisonLlmContextOptions,
     export_plan_json, export_result_debug_html, export_result_json, export_result_json_lines,
-    export_result_llm_context, export_result_markdown,
+    export_result_llm_context, export_result_markdown, write_result_json_lines,
 };
 pub use extensions::{
     CohortEvidenceMetadata, ComparisonExtensionBuilder, ComparisonExtensionComparator,

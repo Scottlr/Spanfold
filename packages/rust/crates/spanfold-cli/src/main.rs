@@ -5,9 +5,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 use spanfold::{
-    AgainstSelection, Comparator, ComparisonFinality, ComparisonPlan, ContractFixture,
-    OpenWindowPolicy, PrimitiveValue, WindowHistoryFixture, compare, export_result_debug_html,
-    export_result_json, export_result_llm_context, export_result_markdown,
+    AgainstSelection, Comparator, ComparisonDuplicateWindowPolicy, ComparisonFinality,
+    ComparisonPlan, ContractFixture, OpenWindowPolicy, PrimitiveValue, TemporalPoint,
+    WindowHistoryFixture, compare, compare_live, export_result_debug_html, export_result_json,
+    export_result_llm_context, export_result_markdown, write_result_json_lines,
 };
 use std::{
     collections::BTreeMap,
@@ -67,6 +68,18 @@ enum Command {
         /// Against source. May be repeated.
         #[arg(long)]
         against: Vec<String>,
+        /// Comparison plan name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Comparator declaration. May be repeated.
+        #[arg(long)]
+        comparators: Vec<String>,
+        /// Promote strict validation diagnostics.
+        #[arg(long)]
+        strict: bool,
+        /// Include open windows by clipping them to this processing-position horizon.
+        #[arg(long = "live-horizon-position")]
+        live_horizon_position: Option<i64>,
         /// Output directory.
         #[arg(long)]
         out: String,
@@ -184,9 +197,22 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             window,
             target,
             against,
+            name,
+            comparators,
+            strict,
+            live_horizon_position,
             out,
         } => {
-            let result = compare_windows_jsonl(&windows, window.as_deref(), &target, &against)?;
+            let options = WindowAuditOptions {
+                default_window_name: window.as_deref(),
+                target: &target,
+                against: &against,
+                name: name.as_deref().unwrap_or("Spanfold Window Audit"),
+                comparators: &comparators,
+                strict,
+                live_horizon_position,
+            };
+            let result = compare_windows_jsonl(&windows, options)?;
             write_audit_bundle(&result, &out)?;
             Ok(if result.is_valid {
                 ExitCode::SUCCESS
@@ -233,6 +259,9 @@ fn write_audit_bundle(result: &spanfold::ComparisonResult, out: &str) -> Result<
     fs::write(format!("{out}/comparison.md"), &markdown).map_err(|error| error.to_string())?;
     fs::write(format!("{out}/comparison.llm.json"), &llm).map_err(|error| error.to_string())?;
     fs::write(format!("{out}/comparison.html"), html).map_err(|error| error.to_string())?;
+    let jsonl = fs::File::create(format!("{out}/comparison.rows.jsonl"))
+        .map_err(|error| error.to_string())?;
+    write_result_json_lines(result, jsonl).map_err(|error| error.to_string())?;
     let manifest = serde_json::json!({
         "schema": "spanfold.audit.bundle",
         "schemaVersion": 0,
@@ -244,6 +273,7 @@ fn write_audit_bundle(result: &spanfold::ComparisonResult, out: &str) -> Result<
         "rowCounts": row_counts_json(result),
         "artifacts": {
             "json": "comparison.json",
+            "jsonLines": "comparison.rows.jsonl",
             "markdown": "comparison.md",
             "debugHtml": "comparison.html",
             "llmContext": "comparison.llm.json",
@@ -270,15 +300,24 @@ fn row_counts_json(result: &spanfold::ComparisonResult) -> serde_json::Value {
     })
 }
 
+struct WindowAuditOptions<'a> {
+    default_window_name: Option<&'a str>,
+    target: &'a str,
+    against: &'a [String],
+    name: &'a str,
+    comparators: &'a [String],
+    strict: bool,
+    live_horizon_position: Option<i64>,
+}
+
 fn compare_windows_jsonl(
     path: &str,
-    default_window_name: Option<&str>,
-    target: &str,
-    against: &[String],
+    options: WindowAuditOptions<'_>,
 ) -> Result<spanfold::ComparisonResult, String> {
-    if against.is_empty() {
+    if options.against.is_empty() {
         return Err("audit-windows requires at least one --against value".to_owned());
     }
+    let comparators = parse_comparators(options.comparators)?;
     let lines = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut builder = WindowHistoryFixture::new();
     for (index, line) in lines.lines().enumerate() {
@@ -290,7 +329,7 @@ fn compare_windows_jsonl(
         let window_name = row
             .window_name
             .as_deref()
-            .or(default_window_name)
+            .or(options.default_window_name)
             .ok_or_else(|| {
                 format!(
                     "{path}:{}: windowName missing and --window not supplied",
@@ -317,26 +356,56 @@ fn compare_windows_jsonl(
     }
     let history = builder.build();
     let plan = ComparisonPlan {
-        name: "Spanfold Window Audit".to_owned(),
-        target_source: target.to_owned(),
-        against: AgainstSelection::Sources(against.to_vec()),
-        scope_window: default_window_name.map(str::to_owned),
+        name: options.name.to_owned(),
+        target_source: options.target.to_owned(),
+        against: AgainstSelection::Sources(options.against.to_vec()),
+        target_selector: None,
+        against_selectors: Vec::new(),
+        scope_window: options.default_window_name.map(str::to_owned),
+        scope_key: None,
+        scope_partition: None,
         scope_segments: Vec::new(),
         scope_tags: Vec::new(),
-        comparators: vec![
-            Comparator::Overlap,
-            Comparator::Residual,
-            Comparator::Missing,
-            Comparator::Coverage,
-            Comparator::Gap,
-            Comparator::SymmetricDifference,
-        ],
+        comparators,
+        require_closed_windows: options.live_horizon_position.is_none(),
+        use_half_open_ranges: true,
+        time_axis: spanfold::TemporalAxis::ProcessingPosition,
+        null_timestamp_policy: spanfold::ComparisonNullTimestampPolicy::Reject,
         known_at: None,
-        open_window_policy: OpenWindowPolicy::RequireClosed,
-        open_window_horizon: None,
-        strict: false,
+        open_window_policy: if options.live_horizon_position.is_some() {
+            OpenWindowPolicy::ClipToHorizon
+        } else {
+            OpenWindowPolicy::RequireClosed
+        },
+        open_window_horizon: options.live_horizon_position.map(TemporalPoint::position),
+        coalesce_adjacent_windows: false,
+        duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+        output: spanfold::ComparisonOutputOptions::default_options(),
+        strict: options.strict,
     };
-    Ok(compare(&history, &plan))
+    Ok(if let Some(horizon) = options.live_horizon_position {
+        compare_live(&history, &plan, TemporalPoint::position(horizon))
+    } else {
+        compare(&history, &plan)
+    })
+}
+
+fn parse_comparators(values: &[String]) -> Result<Vec<Comparator>, String> {
+    let declarations = if values.is_empty() {
+        vec![
+            "overlap".to_owned(),
+            "residual".to_owned(),
+            "coverage".to_owned(),
+        ]
+    } else {
+        values.to_vec()
+    };
+    declarations
+        .into_iter()
+        .map(|value| {
+            Comparator::parse(&value).ok_or_else(|| format!("unknown comparator: {value}"))
+        })
+        .collect()
 }
 
 fn import_events(path: &str, map_path: &str) -> Result<Vec<ImportedWindow>, String> {
@@ -551,7 +620,11 @@ fn compare_imported_windows(
         name: "Spanfold Event Audit".to_owned(),
         target_source: target.to_owned(),
         against: AgainstSelection::Sources(against.to_vec()),
+        target_selector: None,
+        against_selectors: Vec::new(),
         scope_window: None,
+        scope_key: None,
+        scope_partition: None,
         scope_segments: Vec::new(),
         scope_tags: Vec::new(),
         comparators: vec![
@@ -562,9 +635,16 @@ fn compare_imported_windows(
             Comparator::Gap,
             Comparator::SymmetricDifference,
         ],
+        require_closed_windows: true,
+        use_half_open_ranges: true,
+        time_axis: spanfold::TemporalAxis::ProcessingPosition,
+        null_timestamp_policy: spanfold::ComparisonNullTimestampPolicy::Reject,
         known_at: None,
         open_window_policy: OpenWindowPolicy::RequireClosed,
         open_window_horizon: None,
+        coalesce_adjacent_windows: false,
+        duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+        output: spanfold::ComparisonOutputOptions::default_options(),
         strict: false,
     };
     Ok(compare(&history, &plan))
@@ -1082,9 +1162,15 @@ mod tests {
 
         let result = compare_windows_jsonl(
             file.path().to_str().expect("utf8 path"),
-            Some("DeviceOffline"),
-            "provider-a",
-            &[String::from("provider-b")],
+            WindowAuditOptions {
+                default_window_name: Some("DeviceOffline"),
+                target: "provider-a",
+                against: &[String::from("provider-b")],
+                name: "Spanfold Window Audit",
+                comparators: &[],
+                strict: false,
+                live_horizon_position: None,
+            },
         )
         .expect("jsonl compare");
 
@@ -1092,8 +1178,46 @@ mod tests {
         assert_eq!(result.overlap_rows.len(), 1);
         assert_eq!(result.residual_rows.len(), 1);
         assert_eq!(result.coverage_rows.len(), 2);
-        assert_eq!(result.missing_rows.len(), 1);
+        assert_eq!(result.missing_rows.len(), 0);
         assert_eq!(result.gap_rows.len(), 0);
-        assert_eq!(result.symmetric_difference_rows.len(), 2);
+        assert_eq!(result.symmetric_difference_rows.len(), 0);
+    }
+
+    #[test]
+    fn audit_windows_supports_custom_comparators_name_and_live_horizon() {
+        let mut file = NamedTempFile::new().expect("temp file");
+        writeln!(
+            file,
+            "{{\"key\":\"device-1\",\"source\":\"provider-a\",\"startPosition\":1}}"
+        )
+        .expect("write first row");
+        writeln!(
+            file,
+            "{{\"key\":\"device-1\",\"source\":\"provider-b\",\"startPosition\":3,\"endPosition\":7}}"
+        )
+        .expect("write second row");
+        let against = vec![String::from("provider-b")];
+        let comparators = vec![String::from("residual")];
+
+        let result = compare_windows_jsonl(
+            file.path().to_str().expect("utf8 path"),
+            WindowAuditOptions {
+                default_window_name: Some("DeviceOffline"),
+                target: "provider-a",
+                against: &against,
+                name: "Live audit",
+                comparators: &comparators,
+                strict: true,
+                live_horizon_position: Some(10),
+            },
+        )
+        .expect("jsonl compare");
+
+        assert!(result.is_valid);
+        assert_eq!(result.plan_name, "Live audit");
+        assert_eq!(result.comparator_summaries.len(), 1);
+        assert_eq!(result.comparator_summaries[0].comparator_name, "residual");
+        assert_eq!(result.residual_rows.len(), 2);
+        assert!(result.has_provisional_rows());
     }
 }

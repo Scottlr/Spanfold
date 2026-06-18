@@ -1,9 +1,16 @@
 # OS / editor
 .DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
+.claude/
+.codex/
 *.swp
 *.swo
+*~
 
 # Local environments and secrets
 .env
@@ -13,6 +20,16 @@
 venv/
 env/
 
+# Logs and local runtime files
+*.log
+logs/
+*.pid
+*.seed
+*.tmp
+*.temp
+tmp/
+temp/
+
 # Build outputs and generated artifacts
 artifacts/
 dist/
@@ -20,6 +37,9 @@ build/
 coverage/
 htmlcov/
 TestResults/
+reports/
+out/
+*.sarif
 
 # Rust
 target/
@@ -51,6 +71,8 @@ pip-wheel-metadata/
 .eggs/
 site/
 wheelhouse/
+.python-version
+.ipynb_checkpoints/
 
 # .NET / C#
 bin/
@@ -68,6 +90,11 @@ TestResults/
 *.snupkg
 *.pidb
 *.svclog
+*.trx
+*.coverage
+*.coveragexml
+*.binlog
+BenchmarkDotNet.Artifacts/
 
 # Repo-specific generated/spec paths
 /discovery/

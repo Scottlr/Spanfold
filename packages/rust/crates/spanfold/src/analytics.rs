@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use crate::{
-    AgainstSelection, Comparator, ComparisonDiagnostic, ComparisonPlan, RowRange, WindowHistory,
-    compare,
+    AgainstSelection, Comparator, ComparisonDiagnostic, ComparisonDuplicateWindowPolicy,
+    ComparisonPlan, RowRange, WindowHistory, compare,
 };
 
 /// One directional source-matrix cell.
@@ -159,7 +159,11 @@ pub fn compare_sources(
                     name: format!("{name} {target_source} vs {against_source}"),
                     target_source: target_source.clone(),
                     against: AgainstSelection::Sources(vec![against_source.clone()]),
+                    target_selector: None,
+                    against_selectors: Vec::new(),
                     scope_window: Some(window_name.to_owned()),
+                    scope_key: None,
+                    scope_partition: None,
                     scope_segments: Vec::new(),
                     scope_tags: Vec::new(),
                     comparators: vec![
@@ -168,9 +172,16 @@ pub fn compare_sources(
                         Comparator::Missing,
                         Comparator::Coverage,
                     ],
+                    require_closed_windows: true,
+                    use_half_open_ranges: true,
+                    time_axis: crate::TemporalAxis::ProcessingPosition,
+                    null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
                     known_at: None,
                     open_window_policy: crate::OpenWindowPolicy::RequireClosed,
                     open_window_horizon: None,
+                    coalesce_adjacent_windows: false,
+                    duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+                    output: crate::ComparisonOutputOptions::default_options(),
                     strict: false,
                 },
             );

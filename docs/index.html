@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spanfold records temporal state windows and compares them across sources, providers, or pipeline stages.">
+  <meta name="description" content="Spanfold records temporal state windows and compares them across sources, providers, or pipeline stages in C#, Python, and Rust.">
   <title>Spanfold - temporal state-window comparison</title>
   <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -79,6 +79,7 @@
             <div class="language-switcher" aria-label="Code language">
               <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
               <button type="button" data-language-toggle="python" aria-pressed="false">Python</button>
+              <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
             </div>
           </div>
         </div>
@@ -118,6 +119,24 @@ python -m pip install -e ".[dev]"</code></pre>
             </article>
           </div>
           <p class="language-note">Python tracks the core API surface with idiomatic snake-case names.</p>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <div class="install-methods">
+            <article>
+              <h3>Cargo workspace</h3>
+              <pre><code>cd packages/rust
+cargo test --workspace</code></pre>
+            </article>
+            <article>
+              <h3>Local path</h3>
+              <pre><code>cargo add spanfold --path packages/rust/crates/spanfold</code></pre>
+            </article>
+            <article>
+              <h3>CLI</h3>
+              <pre><code>cargo run -p spanfold-cli -- --help</code></pre>
+            </article>
+          </div>
+          <p class="language-note">Rust supports the core API, selector-backed comparisons, exports, audit bundles, and CLI workflows.</p>
         </div>
       </div>
     </section>
@@ -296,6 +315,11 @@ dotnet add package Spanfold.Testing</code></pre>
 python -m pip install -e ".[dev]"</code></pre>
             <p class="language-note">The Python package now tracks the C# core API surface with idiomatic snake-case names.</p>
           </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code>cd packages/rust
+cargo test --workspace</code></pre>
+            <p class="language-note">The Rust package supports the core comparison API, selector-backed plans, deterministic exports, audit bundles, and CLI workflows.</p>
+          </div>
         </article>
         <article>
           <h3>Record windows</h3>
@@ -340,6 +364,35 @@ pipeline = (
 pipeline.ingest(DeviceSignal("device-17", False), source="provider-a")
 pipeline.ingest(DeviceSignal("device-17", True), source="provider-a")</code></pre>
           </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code>use spanfold::for_events;
+
+#[derive(Clone)]
+struct DeviceSignal {
+    device_id: String,
+    is_online: bool,
+}
+
+let mut pipeline = for_events::&lt;DeviceSignal&gt;()
+    .record_windows()
+    .track_window(
+        "DeviceOffline",
+        |signal| signal.device_id.clone(),
+        |signal| !signal.is_online,
+    )
+    .build();
+
+pipeline.ingest(
+    DeviceSignal { device_id: "device-17".into(), is_online: false },
+    Some("provider-a"),
+    None,
+);
+pipeline.ingest(
+    DeviceSignal { device_id: "device-17".into(), is_online: true },
+    Some("provider-a"),
+    None,
+);</code></pre>
+          </div>
         </article>
       </div>
 
@@ -373,6 +426,26 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
 
 result.export_debug_html("artifacts/provider-qa.html")
 result.export_llm_context("artifacts/provider-qa.llm.json")</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code>use spanfold::{export_result_llm_context, ComparisonDebugHtmlOptions, ComparisonLlmContextOptions};
+
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .coverage()
+    .run_with_exports(
+        &ComparisonDebugHtmlOptions::to_file("artifacts/provider-qa.html"),
+        &ComparisonLlmContextOptions::to_file("artifacts/provider-qa.llm.json"),
+    )?;
+
+let llm_json = export_result_llm_context(&result)?;</code></pre>
         </div>
       </article>
     </section>

@@ -15,6 +15,8 @@ pub enum TemporalAxis {
 pub struct TemporalPoint {
     axis: TemporalAxis,
     magnitude: i64,
+    #[serde(skip_deserializing)]
+    clock: Option<&'static str>,
 }
 
 impl TemporalPoint {
@@ -24,6 +26,7 @@ impl TemporalPoint {
         Self {
             axis: TemporalAxis::ProcessingPosition,
             magnitude: position,
+            clock: None,
         }
     }
 
@@ -33,6 +36,17 @@ impl TemporalPoint {
         Self {
             axis: TemporalAxis::Timestamp,
             magnitude: ticks,
+            clock: None,
+        }
+    }
+
+    /// Creates a timestamp point from ticks and a stable clock identity.
+    #[must_use]
+    pub const fn timestamp_ticks_with_clock(ticks: i64, clock: &'static str) -> Self {
+        Self {
+            axis: TemporalAxis::Timestamp,
+            magnitude: ticks,
+            clock: Some(clock),
         }
     }
 
@@ -46,6 +60,12 @@ impl TemporalPoint {
     #[must_use]
     pub const fn magnitude(self) -> i64 {
         self.magnitude
+    }
+
+    /// Returns the point clock identity, when any.
+    #[must_use]
+    pub const fn clock(self) -> Option<&'static str> {
+        self.clock
     }
 }
 
@@ -131,6 +151,15 @@ mod tests {
         assert_eq!(range.start(), TemporalPoint::position(10));
         assert_eq!(range.end(), TemporalPoint::position(14));
         assert_eq!(range.magnitude(), 4);
+    }
+
+    #[test]
+    fn timestamp_points_can_carry_clock_identity() {
+        let point = TemporalPoint::timestamp_ticks_with_clock(10, "provider");
+
+        assert_eq!(point.axis(), TemporalAxis::Timestamp);
+        assert_eq!(point.magnitude(), 10);
+        assert_eq!(point.clock(), Some("provider"));
     }
 
     #[test]
