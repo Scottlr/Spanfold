@@ -9,9 +9,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    ComparisonExtensionMetadata, PrimitiveValue, TemporalAxis, WindowHistory, WindowSegment,
-    WindowTag,
+    ComparisonExtensionMetadata, PrimitiveValue, TemporalAxis, TemporalPoint, WindowHistory,
+    WindowSegment, WindowTag,
 };
+
+mod rows;
+use rows::RowAccumulator;
+pub use rows::*;
+mod comparators;
+use comparators::*;
+mod finality;
+pub(crate) use finality::stable_row_id_for_export;
+use finality::*;
 
 /// Comparator family supported by the Rust implementation.
 #[non_exhaustive]
@@ -254,7 +263,7 @@ impl ComparisonSelectorKind {
 #[derive(Clone, Debug)]
 pub struct ComparisonSelector {
     /// Stable selector name used in output and diagnostics.
-    pub name: String,
+    pub(crate) name: String,
     /// Human-readable selector description.
     pub description: String,
     /// Whether this selector can be exported as plan data.
@@ -856,55 +865,123 @@ impl ComparisonOutputOptions {
 }
 
 /// Typed comparison plan.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComparisonPlan {
     /// Comparison name.
     pub name: String,
     /// Target source.
-    pub target_source: String,
+    pub(crate) target_source: String,
     /// Comparison side selection.
-    pub against: AgainstSelection,
+    pub(crate) against: AgainstSelection,
     /// Optional selector object for the target side.
-    pub target_selector: Option<ComparisonSelector>,
+    pub(crate) target_selector: Option<ComparisonSelector>,
     /// Optional selector objects for the comparison side.
-    pub against_selectors: Vec<ComparisonSelector>,
+    pub(crate) against_selectors: Vec<ComparisonSelector>,
     /// Optional window family scope.
-    pub scope_window: Option<String>,
+    pub(crate) scope_window: Option<String>,
     /// Optional logical key scope.
-    pub scope_key: Option<String>,
+    pub(crate) scope_key: Option<String>,
     /// Optional partition scope.
-    pub scope_partition: Option<String>,
+    pub(crate) scope_partition: Option<String>,
     /// Segment filters.
-    pub scope_segments: Vec<WindowFilter>,
+    pub(crate) scope_segments: Vec<WindowFilter>,
     /// Tag filters.
-    pub scope_tags: Vec<WindowFilter>,
+    pub(crate) scope_tags: Vec<WindowFilter>,
     /// Comparator declarations.
-    pub comparators: Vec<Comparator>,
+    pub(crate) comparators: Vec<Comparator>,
     /// Whether open windows must be closed during normalization.
-    pub require_closed_windows: bool,
+    pub(crate) require_closed_windows: bool,
     /// Whether ranges use start-inclusive/end-exclusive semantics.
-    pub use_half_open_ranges: bool,
+    pub(crate) use_half_open_ranges: bool,
     /// Temporal axis requested for normalization.
-    pub time_axis: TemporalAxis,
+    pub(crate) time_axis: TemporalAxis,
     /// Missing timestamp handling in event-time mode.
-    pub null_timestamp_policy: ComparisonNullTimestampPolicy,
+    pub(crate) null_timestamp_policy: ComparisonNullTimestampPolicy,
     /// Availability point used for known-at filtering.
-    pub known_at: Option<crate::TemporalPoint>,
+    pub(crate) known_at: Option<crate::TemporalPoint>,
     /// How open windows are handled.
-    pub open_window_policy: OpenWindowPolicy,
+    pub(crate) open_window_policy: OpenWindowPolicy,
     /// Exclusive horizon used when clipping open windows.
-    pub open_window_horizon: Option<crate::TemporalPoint>,
+    pub(crate) open_window_horizon: Option<crate::TemporalPoint>,
     /// Whether adjacent normalized windows can be coalesced.
-    pub coalesce_adjacent_windows: bool,
+    pub(crate) coalesce_adjacent_windows: bool,
     /// Duplicate normalized-window handling.
-    pub duplicate_window_policy: ComparisonDuplicateWindowPolicy,
+    pub(crate) duplicate_window_policy: ComparisonDuplicateWindowPolicy,
     /// Result output preferences.
-    pub output: ComparisonOutputOptions,
+    pub(crate) output: ComparisonOutputOptions,
     /// Whether strict validation is enabled.
-    pub strict: bool,
+    pub(crate) strict: bool,
 }
 
 impl ComparisonPlan {
+    /// Creates a comparison plan with validated-shape defaults.
+    #[must_use]
+    pub fn new(
+        name: impl Into<String>,
+        target_source: impl Into<String>,
+        against: AgainstSelection,
+        comparators: Vec<Comparator>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            target_source: target_source.into(),
+            against,
+            target_selector: None,
+            against_selectors: Vec::new(),
+            scope_window: None,
+            scope_key: None,
+            scope_partition: None,
+            scope_segments: Vec::new(),
+            scope_tags: Vec::new(),
+            comparators,
+            require_closed_windows: true,
+            use_half_open_ranges: true,
+            time_axis: TemporalAxis::ProcessingPosition,
+            null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
+            known_at: None,
+            open_window_policy: OpenWindowPolicy::RequireClosed,
+            open_window_horizon: None,
+            coalesce_adjacent_windows: false,
+            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
+            output: ComparisonOutputOptions::default_options(),
+            strict: false,
+        }
+    }
+
+    /// Restricts the plan to one window family.
+    #[must_use]
+    pub fn with_scope_window(mut self, window_name: Option<String>) -> Self {
+        self.scope_window = window_name;
+        self
+    }
+
+    /// Configures whether open windows are allowed during normalization.
+    #[must_use]
+    pub fn with_require_closed_windows(mut self, require_closed_windows: bool) -> Self {
+        self.require_closed_windows = require_closed_windows;
+        self
+    }
+
+    /// Configures open-window handling and its optional clipping horizon.
+    #[must_use]
+    pub fn with_open_window_policy(
+        mut self,
+        policy: OpenWindowPolicy,
+        horizon: Option<TemporalPoint>,
+    ) -> Self {
+        self.open_window_policy = policy;
+        self.open_window_horizon = horizon;
+        self
+    }
+
+    /// Enables strict validation diagnostics.
+    #[must_use]
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
+    }
+
     pub(crate) fn effective_target_selector(&self) -> ComparisonSelector {
         self.target_selector
             .clone()
@@ -1189,564 +1266,6 @@ pub enum ComparisonDuplicateWindowPolicy {
 /// Diagnostic severity.
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum DiagnosticSeverity {
-    /// Warning-level diagnostic.
-    Warning,
-    /// Error-level diagnostic.
-    Error,
-}
-
-/// Structured comparison diagnostic.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ComparisonDiagnostic {
-    /// Diagnostic code.
-    pub code: String,
-    /// Diagnostic severity.
-    pub severity: DiagnosticSeverity,
-}
-
-impl ComparisonDiagnostic {
-    /// Returns an actionable remediation hint for this diagnostic code.
-    #[must_use]
-    pub fn message(&self) -> &'static str {
-        match self.code.as_str() {
-            "MissingName" => "set a non-empty comparison plan name",
-            "MissingTarget" => "configure a target source or selector",
-            "MissingAgainst" => "configure at least one comparison source or selector",
-            "MissingComparator" => "configure at least one comparator",
-            "FutureWindowExcluded" => "advance known-at or provide an earlier-available window",
-            "MissingEventTime" => {
-                "provide event timestamps or choose processing-position normalization"
-            }
-            "TemporalAxisMismatch" => "align the plan axis with the recorded window axis",
-            "SelfComparison" => "make target and comparison selectors disjoint",
-            "RuntimeNonSerializablePlan" => "use serializable selectors for portable execution",
-            _ => "inspect the prepared artifact and plan fields for the invalid contract",
-        }
-    }
-}
-
-/// Comparator summary.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ComparatorSummary {
-    /// Comparator name.
-    #[serde(rename = "comparatorName")]
-    pub comparator_name: String,
-    /// Row count.
-    #[serde(rename = "rowCount")]
-    pub row_count: usize,
-}
-
-/// Exported range for a row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct RowRange {
-    /// Inclusive start magnitude.
-    pub start: i64,
-    /// Exclusive end magnitude.
-    pub end: i64,
-    /// Temporal axis governing the magnitudes.
-    pub axis: TemporalAxis,
-    /// Timestamp clock identity, when applicable.
-    pub clock: Option<String>,
-}
-
-/// Exported point for transition-based rows.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct RowPoint {
-    /// Point axis.
-    pub axis: TemporalAxis,
-    /// Scalar point magnitude.
-    pub magnitude: i64,
-    /// Clock identity for timestamp points.
-    pub clock: Option<String>,
-}
-
-/// The active side for a disagreement segment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum ComparisonSide {
-    /// Target side.
-    Target,
-    /// Comparison side.
-    Against,
-}
-
-/// Containment classification for one target-active segment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum ContainmentStatus {
-    /// Segment is covered by at least one comparison window.
-    Contained,
-    /// Segment is not covered by comparison windows.
-    NotContained,
-    /// Segment starts at the left edge of the target without coverage.
-    LeftOverhang,
-    /// Segment ends at the right edge of the target without coverage.
-    RightOverhang,
-}
-
-/// Transition point used for lead/lag measurement.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum LeadLagTransition {
-    /// Compare start transitions.
-    Start,
-    /// Compare end transitions.
-    End,
-}
-
-/// Lead/lag direction.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum LeadLagDirection {
-    /// Target and comparison are equal.
-    Equal,
-    /// Target transition occurs first.
-    TargetLeads,
-    /// Target transition occurs later.
-    TargetLags,
-    /// No comparison transition exists.
-    MissingComparison,
-}
-
-/// Summary for one lead/lag comparator declaration.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct LeadLagSummary {
-    /// Transition point measured.
-    #[serde(rename = "transition")]
-    pub transition: LeadLagTransition,
-    /// Axis used for measurement.
-    #[serde(rename = "axis")]
-    pub axis: TemporalAxis,
-    /// Configured tolerance.
-    #[serde(rename = "toleranceMagnitude")]
-    pub tolerance_magnitude: i64,
-    /// Number of emitted rows.
-    #[serde(rename = "rowCount")]
-    pub row_count: usize,
-    /// Count of target-lead rows.
-    #[serde(rename = "targetLeadCount")]
-    pub target_lead_count: usize,
-    /// Count of target-lag rows.
-    #[serde(rename = "targetLagCount")]
-    pub target_lag_count: usize,
-    /// Count of equal rows.
-    #[serde(rename = "equalCount")]
-    pub equal_count: usize,
-    /// Count of missing-comparison rows.
-    #[serde(rename = "missingComparisonCount")]
-    pub missing_comparison_count: usize,
-    /// Count of rows outside tolerance.
-    #[serde(rename = "outsideToleranceCount")]
-    pub outside_tolerance_count: usize,
-    /// Minimum signed delta when any paired transitions exist.
-    #[serde(rename = "minimumDeltaMagnitude")]
-    pub minimum_delta_magnitude: Option<i64>,
-    /// Maximum signed delta when any paired transitions exist.
-    #[serde(rename = "maximumDeltaMagnitude")]
-    pub maximum_delta_magnitude: Option<i64>,
-}
-
-/// Coverage summary for one comparison scope.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct CoverageSummary {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Denominator magnitude.
-    #[serde(rename = "targetMagnitude")]
-    pub target_magnitude: f64,
-    /// Exact integer denominator before presentation conversion.
-    #[serde(rename = "targetMagnitudeExact")]
-    pub target_magnitude_exact: i128,
-    /// Covered numerator magnitude.
-    #[serde(rename = "coveredMagnitude")]
-    pub covered_magnitude: f64,
-    /// Exact integer numerator before presentation conversion.
-    #[serde(rename = "coveredMagnitudeExact")]
-    pub covered_magnitude_exact: i128,
-    /// Covered ratio.
-    #[serde(rename = "coverageRatio")]
-    pub coverage_ratio: f64,
-}
-
-/// Finality state for an emitted row.
-#[non_exhaustive]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ComparisonFinality {
-    /// Row is final.
-    Final,
-    /// Row depends on clipped open windows.
-    Provisional,
-    /// Row supersedes a prior version.
-    Revised,
-    /// Row was removed in a later snapshot.
-    Retracted,
-}
-
-/// Finality metadata for a materialized row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ComparisonRowFinality {
-    /// Exported row family.
-    #[serde(rename = "rowType")]
-    pub row_type: String,
-    /// Deterministic row identifier.
-    #[serde(rename = "rowId")]
-    pub row_id: String,
-    /// Finality state.
-    pub finality: ComparisonFinality,
-    /// Human-readable reason.
-    pub reason: String,
-    /// Metadata version.
-    pub version: u32,
-    /// Superseded row identifier, when any.
-    #[serde(rename = "supersedesRowId")]
-    pub supersedes_row_id: Option<String>,
-}
-
-/// As-of lookup direction.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum AsOfDirection {
-    /// Match the latest comparison transition at or before the target point.
-    Previous,
-    /// Match the earliest comparison transition at or after the target point.
-    Next,
-    /// Match the nearest comparison transition on either side.
-    Nearest,
-}
-
-/// As-of lookup status.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum AsOfMatchStatus {
-    /// Exact point match.
-    Exact,
-    /// Matched within tolerance.
-    Matched,
-    /// No match inside tolerance.
-    NoMatch,
-    /// A future point existed but was rejected.
-    FutureRejected,
-    /// Multiple eligible matches existed; selection is deterministic.
-    Ambiguous,
-}
-
-/// Overlap row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct OverlapRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Overlap range.
-    pub range: RowRange,
-    /// Target record IDs.
-    #[serde(rename = "targetRecordIds")]
-    pub target_record_ids: Vec<String>,
-    /// Against record IDs.
-    #[serde(rename = "againstRecordIds")]
-    pub against_record_ids: Vec<String>,
-}
-
-/// Residual row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ResidualRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Target-only range.
-    pub range: RowRange,
-    /// Target record IDs.
-    #[serde(rename = "targetRecordIds")]
-    pub target_record_ids: Vec<String>,
-}
-
-/// Missing row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct MissingRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Comparison-only range.
-    pub range: RowRange,
-    /// Against record IDs.
-    #[serde(rename = "againstRecordIds")]
-    pub against_record_ids: Vec<String>,
-}
-
-/// Coverage row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct CoverageRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Target segment range.
-    pub range: RowRange,
-    /// Segment magnitude.
-    #[serde(rename = "targetMagnitude")]
-    pub target_magnitude: i64,
-    /// Covered magnitude.
-    #[serde(rename = "coveredMagnitude")]
-    pub covered_magnitude: i64,
-    /// Target record IDs.
-    #[serde(rename = "targetRecordIds")]
-    pub target_record_ids: Vec<String>,
-    /// Against record IDs.
-    #[serde(rename = "againstRecordIds")]
-    pub against_record_ids: Vec<String>,
-}
-
-/// Gap row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct GapRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Gap range.
-    pub range: RowRange,
-}
-
-/// Symmetric-difference row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct SymmetricDifferenceRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Disagreement range.
-    pub range: RowRange,
-    /// Active disagreement side.
-    pub side: ComparisonSide,
-    /// Target record IDs.
-    #[serde(rename = "targetRecordIds")]
-    pub target_record_ids: Vec<String>,
-    /// Against record IDs.
-    #[serde(rename = "againstRecordIds")]
-    pub against_record_ids: Vec<String>,
-}
-
-/// Containment row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ContainmentRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Checked range.
-    pub range: RowRange,
-    /// Containment status.
-    pub status: ContainmentStatus,
-    /// Target record IDs.
-    #[serde(rename = "targetRecordIds")]
-    pub target_record_ids: Vec<String>,
-    /// Container record IDs.
-    #[serde(rename = "containerRecordIds")]
-    pub container_record_ids: Vec<String>,
-}
-
-/// Lead/lag row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct LeadLagRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Measured transition.
-    pub transition: LeadLagTransition,
-    /// Measurement axis.
-    pub axis: TemporalAxis,
-    /// Target transition point.
-    #[serde(rename = "targetPoint")]
-    pub target_point: RowPoint,
-    /// Comparison transition point, when any.
-    #[serde(rename = "comparisonPoint")]
-    pub comparison_point: Option<RowPoint>,
-    /// Signed target-minus-comparison delta.
-    #[serde(rename = "deltaMagnitude")]
-    pub delta_magnitude: Option<i64>,
-    /// Configured tolerance.
-    #[serde(rename = "toleranceMagnitude")]
-    pub tolerance_magnitude: i64,
-    /// Whether the row is inside tolerance.
-    #[serde(rename = "isWithinTolerance")]
-    pub is_within_tolerance: bool,
-    /// Lead/lag direction.
-    pub direction: LeadLagDirection,
-    /// Target record ID.
-    #[serde(rename = "targetRecordId")]
-    pub target_record_id: String,
-    /// Comparison record ID, when any.
-    #[serde(rename = "comparisonRecordId")]
-    pub comparison_record_id: Option<String>,
-}
-
-/// As-of row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct AsOfRow {
-    /// Window family.
-    #[serde(rename = "windowName")]
-    pub window_name: String,
-    /// Logical key.
-    pub key: String,
-    /// Optional partition.
-    pub partition: Option<String>,
-    /// Lookup axis.
-    pub axis: TemporalAxis,
-    /// Lookup direction.
-    pub direction: AsOfDirection,
-    /// Target lookup point.
-    #[serde(rename = "targetPoint")]
-    pub target_point: RowPoint,
-    /// Matched comparison point, when any.
-    #[serde(rename = "matchedPoint")]
-    pub matched_point: Option<RowPoint>,
-    /// Absolute point distance, when evaluated.
-    #[serde(rename = "distanceMagnitude")]
-    pub distance_magnitude: Option<i64>,
-    /// Configured tolerance.
-    #[serde(rename = "toleranceMagnitude")]
-    pub tolerance_magnitude: i64,
-    /// Match status.
-    pub status: AsOfMatchStatus,
-    /// Target record ID.
-    #[serde(rename = "targetRecordId")]
-    pub target_record_id: String,
-    /// Matched comparison record ID, when any.
-    #[serde(rename = "matchedRecordId")]
-    pub matched_record_id: Option<String>,
-}
-
-/// Comparator row collections.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
-pub struct ComparisonRows {
-    /// Overlap rows.
-    pub overlap: Vec<OverlapRow>,
-    /// Residual rows.
-    pub residual: Vec<ResidualRow>,
-    /// Missing rows.
-    pub missing: Vec<MissingRow>,
-    /// Coverage rows.
-    pub coverage: Vec<CoverageRow>,
-    /// Gap rows.
-    pub gap: Vec<GapRow>,
-    /// Symmetric-difference rows.
-    #[serde(rename = "symmetricDifference")]
-    pub symmetric_difference: Vec<SymmetricDifferenceRow>,
-    /// Containment rows.
-    pub containment: Vec<ContainmentRow>,
-    /// Lead/lag rows.
-    #[serde(rename = "leadLag")]
-    pub lead_lag: Vec<LeadLagRow>,
-    /// As-of rows.
-    #[serde(rename = "asOf")]
-    pub as_of: Vec<AsOfRow>,
-}
-
-/// Structured comparison result.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ComparisonResult {
-    /// Result schema.
-    pub schema: String,
-    /// Schema version.
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: u32,
-    /// Artifact kind.
-    pub artifact: String,
-    /// Comparison plan.
-    #[serde(skip)]
-    pub plan: ComparisonPlan,
-    /// Comparison plan name.
-    #[serde(rename = "planName")]
-    pub plan_name: String,
-    /// Whether the result is valid.
-    #[serde(rename = "isValid")]
-    pub is_valid: bool,
-    /// Validation and execution diagnostics.
-    pub diagnostics: Vec<ComparisonDiagnostic>,
-    /// Prepared artifact, when available.
-    pub prepared: Option<Value>,
-    /// Aligned artifact, when available.
-    pub aligned: Option<Value>,
-    /// Known-at point, when available.
-    #[serde(rename = "knownAt")]
-    pub known_at: Option<RowPoint>,
-    /// Evaluation horizon, when available.
-    #[serde(rename = "evaluationHorizon")]
-    pub evaluation_horizon: Option<RowPoint>,
-    /// Comparator summaries.
-    #[serde(rename = "comparatorSummaries")]
-    pub comparator_summaries: Vec<ComparatorSummary>,
-    /// Coverage summaries.
-    #[serde(rename = "coverageSummaries")]
-    pub coverage_summaries: Vec<CoverageSummary>,
-    /// Result rows grouped by family.
-    pub rows: ComparisonRows,
-    /// Overlap rows.
-    #[serde(skip)]
-    pub overlap_rows: Vec<OverlapRow>,
-    /// Residual rows.
-    #[serde(skip)]
-    pub residual_rows: Vec<ResidualRow>,
-    /// Missing rows.
-    #[serde(skip)]
-    pub missing_rows: Vec<MissingRow>,
-    /// Coverage rows.
-    #[serde(skip)]
-    pub coverage_rows: Vec<CoverageRow>,
-    /// Gap rows.
-    #[serde(skip)]
-    pub gap_rows: Vec<GapRow>,
-    /// Symmetric-difference rows.
-    #[serde(skip)]
-    pub symmetric_difference_rows: Vec<SymmetricDifferenceRow>,
-    /// Containment rows.
-    #[serde(skip)]
-    pub containment_rows: Vec<ContainmentRow>,
-    /// Lead/lag rows.
-    #[serde(skip)]
-    pub lead_lag_rows: Vec<LeadLagRow>,
-    /// Lead/lag summaries.
-    #[serde(skip)]
-    pub lead_lag_summaries: Vec<LeadLagSummary>,
-    /// As-of rows.
-    #[serde(skip)]
-    pub as_of_rows: Vec<AsOfRow>,
-    /// Row finality metadata.
-    #[serde(rename = "rowFinalities")]
-    pub row_finalities: Vec<ComparisonRowFinality>,
-    /// Serializable extension metadata.
-    #[serde(rename = "extensionMetadata")]
-    pub extension_metadata: Vec<ComparisonExtensionMetadata>,
-}
-
-#[derive(Clone, Debug)]
 struct SegmentRef<'a> {
     start: crate::TemporalPoint,
     end: crate::TemporalPoint,
@@ -2029,7 +1548,7 @@ fn execute_compare(
 
     let aligned = align_internal(&prepared);
     let groups = group_normalized_windows(&prepared);
-    let mut rows = ComparisonRows::default();
+    let mut rows = RowAccumulator::default();
     let mut comparator_summaries = Vec::new();
     let mut lead_lag_summaries = Vec::new();
 
@@ -2115,6 +1634,9 @@ fn execute_compare(
         .filter(|window| window.is_provisional)
         .map(|window| window.record_id.clone())
         .collect::<BTreeSet<_>>();
+    let rows = rows.into_shared();
+    let coverage_summaries = build_coverage_summaries(&rows.coverage);
+    let row_finalities = build_row_finalities(&rows, &provisional_record_ids);
 
     let mut result = materialize_result(
         plan,
@@ -2125,9 +1647,9 @@ fn execute_compare(
         diagnostics,
         ResultArtifacts {
             comparator_summaries,
-            coverage_summaries: build_coverage_summaries(&rows.coverage),
+            coverage_summaries,
             lead_lag_summaries,
-            row_finalities: build_row_finalities(&rows, &provisional_record_ids),
+            row_finalities,
             extension_metadata: build_extension_metadata(&aligned, plan),
             rows,
         },
@@ -2299,16 +1821,16 @@ fn materialize_result(
         evaluation_horizon: None,
         comparator_summaries: artifacts.comparator_summaries,
         coverage_summaries: artifacts.coverage_summaries,
-        overlap_rows: artifacts.rows.overlap.clone(),
-        residual_rows: artifacts.rows.residual.clone(),
-        missing_rows: artifacts.rows.missing.clone(),
-        coverage_rows: artifacts.rows.coverage.clone(),
-        gap_rows: artifacts.rows.gap.clone(),
-        symmetric_difference_rows: artifacts.rows.symmetric_difference.clone(),
-        containment_rows: artifacts.rows.containment.clone(),
-        lead_lag_rows: artifacts.rows.lead_lag.clone(),
+        overlap_rows: Arc::clone(&artifacts.rows.overlap),
+        residual_rows: Arc::clone(&artifacts.rows.residual),
+        missing_rows: Arc::clone(&artifacts.rows.missing),
+        coverage_rows: Arc::clone(&artifacts.rows.coverage),
+        gap_rows: Arc::clone(&artifacts.rows.gap),
+        symmetric_difference_rows: Arc::clone(&artifacts.rows.symmetric_difference),
+        containment_rows: Arc::clone(&artifacts.rows.containment),
+        lead_lag_rows: Arc::clone(&artifacts.rows.lead_lag),
         lead_lag_summaries: artifacts.lead_lag_summaries,
-        as_of_rows: artifacts.rows.as_of.clone(),
+        as_of_rows: Arc::clone(&artifacts.rows.as_of),
         row_finalities: artifacts.row_finalities,
         extension_metadata: artifacts.extension_metadata,
         rows: artifacts.rows,
@@ -2391,222 +1913,6 @@ fn required_activity_count(activity: &CohortActivity, member_count: usize) -> us
         | CohortActivity::AtMost { count }
         | CohortActivity::Exactly { count } => *count,
     }
-}
-
-fn build_row_finalities(
-    rows: &ComparisonRows,
-    provisional_record_ids: &BTreeSet<String>,
-) -> Vec<ComparisonRowFinality> {
-    let mut finalities = Vec::new();
-    append_overlap_finalities(&mut finalities, &rows.overlap, provisional_record_ids);
-    append_residual_finalities(&mut finalities, &rows.residual, provisional_record_ids);
-    append_missing_finalities(&mut finalities, &rows.missing, provisional_record_ids);
-    append_coverage_finalities(&mut finalities, &rows.coverage, provisional_record_ids);
-    append_gap_finalities(&mut finalities, &rows.gap);
-    append_symmetric_difference_finalities(
-        &mut finalities,
-        &rows.symmetric_difference,
-        provisional_record_ids,
-    );
-    append_containment_finalities(&mut finalities, &rows.containment, provisional_record_ids);
-    append_lead_lag_finalities(&mut finalities, &rows.lead_lag, provisional_record_ids);
-    append_as_of_finalities(&mut finalities, &rows.as_of, provisional_record_ids);
-    finalities
-}
-
-fn stable_row_id<T: Serialize>(row_type: &str, row: &T) -> String {
-    let payload = serde_json::to_vec(row).unwrap_or_default();
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in row_type.bytes().chain(payload) {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{row_type}:{hash:016x}")
-}
-
-pub(crate) fn stable_row_id_for_export<T: Serialize>(row_type: &str, row: &T) -> String {
-    stable_row_id(row_type, row)
-}
-
-fn append_gap_finalities(finalities: &mut Vec<ComparisonRowFinality>, rows: &[GapRow]) {
-    for row in rows {
-        finalities.push(ComparisonRowFinality {
-            row_type: "gap".to_owned(),
-            row_id: stable_row_id("gap", row),
-            finality: ComparisonFinality::Final,
-            reason: "derived from closed windows".to_owned(),
-            version: 1,
-            supersedes_row_id: None,
-        });
-    }
-}
-
-fn append_overlap_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[OverlapRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "overlap",
-            stable_row_id("overlap", row),
-            row.target_record_ids
-                .iter()
-                .chain(row.against_record_ids.iter())
-                .any(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_residual_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[ResidualRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "residual",
-            stable_row_id("residual", row),
-            row.target_record_ids
-                .iter()
-                .any(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_missing_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[MissingRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "missing",
-            stable_row_id("missing", row),
-            row.against_record_ids
-                .iter()
-                .any(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_coverage_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[CoverageRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "coverage",
-            stable_row_id("coverage", row),
-            row.target_record_ids
-                .iter()
-                .chain(row.against_record_ids.iter())
-                .any(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_symmetric_difference_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[SymmetricDifferenceRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "symmetricDifference",
-            stable_row_id("symmetricDifference", row),
-            row.target_record_ids
-                .iter()
-                .chain(row.against_record_ids.iter())
-                .any(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_containment_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[ContainmentRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "containment",
-            stable_row_id("containment", row),
-            row.target_record_ids
-                .iter()
-                .chain(row.container_record_ids.iter())
-                .any(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_lead_lag_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[LeadLagRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "leadLag",
-            stable_row_id("leadLag", row),
-            provisional_record_ids.contains(&row.target_record_id)
-                || row
-                    .comparison_record_id
-                    .as_ref()
-                    .is_some_and(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn append_as_of_finalities(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    rows: &[AsOfRow],
-    provisional_record_ids: &BTreeSet<String>,
-) {
-    for row in rows {
-        push_finality(
-            finalities,
-            "asOf",
-            stable_row_id("asOf", row),
-            provisional_record_ids.contains(&row.target_record_id)
-                || row
-                    .matched_record_id
-                    .as_ref()
-                    .is_some_and(|id| provisional_record_ids.contains(id)),
-        );
-    }
-}
-
-fn push_finality(
-    finalities: &mut Vec<ComparisonRowFinality>,
-    row_type: &str,
-    row_id: String,
-    provisional: bool,
-) {
-    finalities.push(ComparisonRowFinality {
-        row_type: row_type.to_owned(),
-        row_id,
-        finality: if provisional {
-            ComparisonFinality::Provisional
-        } else {
-            ComparisonFinality::Final
-        },
-        reason: if provisional {
-            "depends on an open window clipped to the evaluation horizon".to_owned()
-        } else {
-            "derived from closed windows".to_owned()
-        },
-        version: 1,
-        supersedes_row_id: None,
-    });
 }
 
 fn prepare_internal(
@@ -3417,547 +2723,6 @@ fn aligned_segments(
     segments
 }
 
-fn build_overlap_rows(aligned: &AlignedComparison) -> Vec<OverlapRow> {
-    let mut rows = Vec::new();
-    for segment in &aligned.segments {
-        if segment.target_record_ids.is_empty() || !segment.against_is_active {
-            continue;
-        }
-
-        rows.push(OverlapRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
-            target_record_ids: segment.target_record_ids.clone(),
-            against_record_ids: segment.against_record_ids.clone(),
-        });
-    }
-    rows
-}
-
-fn build_residual_rows(aligned: &AlignedComparison) -> Vec<ResidualRow> {
-    let mut rows = Vec::new();
-    for segment in &aligned.segments {
-        if segment.target_record_ids.is_empty() || segment.against_is_active {
-            continue;
-        }
-
-        rows.push(ResidualRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
-            target_record_ids: segment.target_record_ids.clone(),
-        });
-    }
-    rows
-}
-
-fn build_missing_rows(aligned: &AlignedComparison) -> Vec<MissingRow> {
-    let mut rows = Vec::new();
-    for segment in &aligned.segments {
-        if !segment.target_record_ids.is_empty() || !segment.against_is_active {
-            continue;
-        }
-
-        rows.push(MissingRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
-            against_record_ids: segment.against_record_ids.clone(),
-        });
-    }
-    rows
-}
-
-fn build_coverage_rows(aligned: &AlignedComparison) -> Vec<CoverageRow> {
-    let mut rows = Vec::new();
-    for segment in &aligned.segments {
-        if segment.target_record_ids.is_empty() {
-            continue;
-        }
-
-        let target_magnitude = segment.range.end - segment.range.start;
-        rows.push(CoverageRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
-            target_magnitude,
-            covered_magnitude: if segment.against_is_active {
-                target_magnitude
-            } else {
-                0
-            },
-            target_record_ids: segment.target_record_ids.clone(),
-            against_record_ids: segment.against_record_ids.clone(),
-        });
-    }
-    rows
-}
-
-fn build_gap_rows(aligned: &AlignedComparison) -> Vec<GapRow> {
-    let mut rows = Vec::new();
-    for segment in &aligned.segments {
-        if !segment.target_record_ids.is_empty() || segment.against_is_active {
-            continue;
-        }
-
-        rows.push(GapRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
-        });
-    }
-    rows
-}
-
-fn build_symmetric_difference_rows(aligned: &AlignedComparison) -> Vec<SymmetricDifferenceRow> {
-    let mut rows = Vec::new();
-    for segment in &aligned.segments {
-        let has_target = !segment.target_record_ids.is_empty();
-        let has_against = segment.against_is_active;
-        if has_target == has_against {
-            continue;
-        }
-
-        rows.push(SymmetricDifferenceRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
-            side: if has_target {
-                ComparisonSide::Target
-            } else {
-                ComparisonSide::Against
-            },
-            target_record_ids: segment.target_record_ids.clone(),
-            against_record_ids: segment.against_record_ids.clone(),
-        });
-    }
-    rows
-}
-
-fn build_containment_rows(
-    aligned: &AlignedComparison,
-    prepared: &PreparedComparison,
-) -> Vec<ContainmentRow> {
-    let mut rows = Vec::new();
-    let target_ranges = target_ranges_by_record_id(prepared);
-    for segment in &aligned.segments {
-        if segment.target_record_ids.is_empty() {
-            continue;
-        }
-
-        if segment.against_is_active {
-            rows.push(ContainmentRow {
-                window_name: segment.window_name.clone(),
-                key: segment.key.clone(),
-                partition: segment.partition.clone(),
-                range: segment.range.clone(),
-                status: ContainmentStatus::Contained,
-                target_record_ids: segment.target_record_ids.clone(),
-                container_record_ids: segment.against_record_ids.clone(),
-            });
-            continue;
-        }
-
-        for target_record_id in &segment.target_record_ids {
-            rows.push(ContainmentRow {
-                window_name: segment.window_name.clone(),
-                key: segment.key.clone(),
-                partition: segment.partition.clone(),
-                range: segment.range.clone(),
-                status: classify_uncontained_segment(
-                    target_ranges.get(target_record_id.as_str()),
-                    (segment.range.start, segment.range.end),
-                ),
-                target_record_ids: vec![target_record_id.clone()],
-                container_record_ids: Vec::new(),
-            });
-        }
-    }
-    rows
-}
-
-fn target_ranges_by_record_id(prepared: &PreparedComparison) -> BTreeMap<&str, (i64, i64)> {
-    let mut ranges = BTreeMap::new();
-    for window in &prepared.normalized_windows {
-        if window.side == ComparisonSide::Target {
-            ranges.insert(
-                window.record_id.as_str(),
-                (
-                    window.range.start().magnitude(),
-                    window.range.end().magnitude(),
-                ),
-            );
-        }
-    }
-    ranges
-}
-
-fn classify_uncontained_segment(
-    target_range: Option<&(i64, i64)>,
-    segment_range: (i64, i64),
-) -> ContainmentStatus {
-    let Some(&(target_start, target_end)) = target_range else {
-        return ContainmentStatus::NotContained;
-    };
-
-    if segment_range.0 == target_start {
-        return ContainmentStatus::LeftOverhang;
-    }
-    if segment_range.1 == target_end {
-        return ContainmentStatus::RightOverhang;
-    }
-    ContainmentStatus::NotContained
-}
-
-fn build_lead_lag_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    transition: LeadLagTransition,
-    axis: TemporalAxis,
-    tolerance_magnitude: i64,
-) -> (Vec<LeadLagRow>, LeadLagSummary) {
-    let mut rows = Vec::new();
-    for ((window_name, key, partition, _group_axis, _clock), (targets, againsts)) in groups {
-        let mut comparison_points: Vec<TransitionPoint<'_>> = againsts
-            .iter()
-            .filter(|against| against.start.axis() == axis)
-            .map(|against| TransitionPoint {
-                record_id: against.record_id,
-                point: if transition == LeadLagTransition::Start {
-                    against.start.clone()
-                } else {
-                    against.end.clone()
-                },
-            })
-            .collect();
-        comparison_points.sort_by(|left, right| {
-            left.point
-                .try_cmp(&right.point)
-                .expect("lead-lag groups share a temporal domain")
-                .then_with(|| left.record_id.cmp(right.record_id))
-        });
-
-        for target in targets {
-            if target.start.axis() != axis {
-                continue;
-            }
-            let target_point = if transition == LeadLagTransition::Start {
-                target.start.clone()
-            } else {
-                target.end.clone()
-            };
-
-            if comparison_points.is_empty() {
-                rows.push(LeadLagRow {
-                    window_name: window_name.clone(),
-                    key: key.clone(),
-                    partition: partition.clone(),
-                    transition: transition.clone(),
-                    axis,
-                    target_point: row_point_from_temporal_point(&target_point),
-                    comparison_point: None,
-                    delta_magnitude: None,
-                    tolerance_magnitude,
-                    is_within_tolerance: false,
-                    direction: LeadLagDirection::MissingComparison,
-                    target_record_id: target.record_id.to_owned(),
-                    comparison_record_id: None,
-                });
-                continue;
-            }
-
-            let nearest = find_nearest_transition(&comparison_points, &target_point);
-            let delta = delta_magnitude(&target_point, &nearest.point);
-            rows.push(LeadLagRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                transition: transition.clone(),
-                axis,
-                target_point: row_point_from_temporal_point(&target_point),
-                comparison_point: Some(row_point_from_temporal_point(&nearest.point)),
-                delta_magnitude: Some(delta),
-                tolerance_magnitude,
-                is_within_tolerance: delta.abs() <= tolerance_magnitude,
-                direction: direction_for_delta(delta),
-                target_record_id: target.record_id.to_owned(),
-                comparison_record_id: Some(nearest.record_id.to_owned()),
-            });
-        }
-    }
-
-    let mut summary = LeadLagSummary {
-        transition,
-        axis,
-        tolerance_magnitude,
-        row_count: rows.len(),
-        target_lead_count: 0,
-        target_lag_count: 0,
-        equal_count: 0,
-        missing_comparison_count: 0,
-        outside_tolerance_count: 0,
-        minimum_delta_magnitude: None,
-        maximum_delta_magnitude: None,
-    };
-    for row in &rows {
-        if !row.is_within_tolerance {
-            summary.outside_tolerance_count += 1;
-        }
-        match row.direction {
-            LeadLagDirection::TargetLeads => summary.target_lead_count += 1,
-            LeadLagDirection::TargetLags => summary.target_lag_count += 1,
-            LeadLagDirection::Equal => summary.equal_count += 1,
-            LeadLagDirection::MissingComparison => summary.missing_comparison_count += 1,
-        }
-        if let Some(delta) = row.delta_magnitude {
-            summary.minimum_delta_magnitude = Some(
-                summary
-                    .minimum_delta_magnitude
-                    .map_or(delta, |current| current.min(delta)),
-            );
-            summary.maximum_delta_magnitude = Some(
-                summary
-                    .maximum_delta_magnitude
-                    .map_or(delta, |current| current.max(delta)),
-            );
-        }
-    }
-
-    (rows, summary)
-}
-
-fn find_nearest_transition<'a>(
-    candidates: &'a [TransitionPoint<'a>],
-    target_point: &crate::TemporalPoint,
-) -> TransitionPoint<'a> {
-    let insertion = candidates.partition_point(|candidate| {
-        candidate
-            .point
-            .try_cmp(target_point)
-            .is_ok_and(std::cmp::Ordering::is_lt)
-    });
-    let mut options = Vec::with_capacity(2);
-    if let Some(candidate) = candidates.get(insertion) {
-        options.push(candidate);
-    }
-    if insertion > 0 {
-        options.push(&candidates[insertion - 1]);
-    }
-    options
-        .into_iter()
-        .min_by(|left, right| {
-            delta_magnitude(target_point, &left.point)
-                .abs()
-                .cmp(&delta_magnitude(target_point, &right.point).abs())
-                .then_with(|| left.record_id.cmp(right.record_id))
-        })
-        .expect("nearest transition requires a non-empty candidate list")
-        .clone()
-}
-
-fn delta_magnitude(
-    target_point: &crate::TemporalPoint,
-    comparison_point: &crate::TemporalPoint,
-) -> i64 {
-    debug_assert!(target_point.is_compatible_with(comparison_point));
-    target_point
-        .magnitude()
-        .checked_sub(comparison_point.magnitude())
-        .expect("compatible temporal delta fits i64")
-}
-
-fn direction_for_delta(delta: i64) -> LeadLagDirection {
-    if delta < 0 {
-        LeadLagDirection::TargetLeads
-    } else if delta > 0 {
-        LeadLagDirection::TargetLags
-    } else {
-        LeadLagDirection::Equal
-    }
-}
-
-fn build_as_of_rows(
-    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
-    direction: AsOfDirection,
-    axis: TemporalAxis,
-    tolerance_magnitude: i64,
-) -> (Vec<AsOfRow>, Vec<ComparisonDiagnostic>) {
-    let mut rows = Vec::new();
-    let mut diagnostics = Vec::new();
-    for ((window_name, key, partition, _group_axis, _clock), (targets, againsts)) in groups {
-        let mut candidates: Vec<TransitionPoint<'_>> = againsts
-            .iter()
-            .filter(|against| against.start.axis() == axis)
-            .map(|against| TransitionPoint {
-                record_id: against.record_id,
-                point: against.start.clone(),
-            })
-            .collect();
-        candidates.sort_by(|left, right| {
-            left.point
-                .try_cmp(&right.point)
-                .expect("as-of groups share a temporal domain")
-                .then_with(|| left.record_id.cmp(right.record_id))
-        });
-
-        for target in targets {
-            if target.start.axis() != axis {
-                continue;
-            }
-            let target_point = target.start.clone();
-            let target_point_row = row_point_from_temporal_point(&target_point);
-
-            if candidates.is_empty() {
-                rows.push(AsOfRow {
-                    window_name: window_name.clone(),
-                    key: key.clone(),
-                    partition: partition.clone(),
-                    axis,
-                    direction: direction.clone(),
-                    target_point: target_point_row,
-                    matched_point: None,
-                    distance_magnitude: None,
-                    tolerance_magnitude,
-                    status: AsOfMatchStatus::NoMatch,
-                    target_record_id: target.record_id.to_owned(),
-                    matched_record_id: None,
-                });
-                continue;
-            }
-
-            let (best, ambiguous, future_rejected) =
-                find_as_of_candidate(&candidates, &target_point, &direction);
-            let Some(best) = best else {
-                rows.push(AsOfRow {
-                    window_name: window_name.clone(),
-                    key: key.clone(),
-                    partition: partition.clone(),
-                    axis,
-                    direction: direction.clone(),
-                    target_point: target_point_row,
-                    matched_point: None,
-                    distance_magnitude: future_rejected
-                        .as_ref()
-                        .map(|item| delta_magnitude(&target_point, &item.point).abs()),
-                    tolerance_magnitude,
-                    status: if future_rejected.is_some() {
-                        AsOfMatchStatus::FutureRejected
-                    } else {
-                        AsOfMatchStatus::NoMatch
-                    },
-                    target_record_id: target.record_id.to_owned(),
-                    matched_record_id: None,
-                });
-                continue;
-            };
-
-            let distance = delta_magnitude(&target_point, &best.point).abs();
-            if distance > tolerance_magnitude {
-                rows.push(AsOfRow {
-                    window_name: window_name.clone(),
-                    key: key.clone(),
-                    partition: partition.clone(),
-                    axis,
-                    direction: direction.clone(),
-                    target_point: target_point_row,
-                    matched_point: None,
-                    distance_magnitude: Some(distance),
-                    tolerance_magnitude,
-                    status: AsOfMatchStatus::NoMatch,
-                    target_record_id: target.record_id.to_owned(),
-                    matched_record_id: None,
-                });
-                continue;
-            }
-
-            if ambiguous {
-                diagnostics.push(ComparisonDiagnostic {
-                    code: "AmbiguousAsOfMatch".to_owned(),
-                    severity: DiagnosticSeverity::Warning,
-                });
-            }
-
-            rows.push(AsOfRow {
-                window_name: window_name.clone(),
-                key: key.clone(),
-                partition: partition.clone(),
-                axis,
-                direction: direction.clone(),
-                target_point: target_point_row,
-                matched_point: Some(row_point_from_temporal_point(&best.point)),
-                distance_magnitude: Some(distance),
-                tolerance_magnitude,
-                status: if ambiguous {
-                    AsOfMatchStatus::Ambiguous
-                } else if distance == 0 {
-                    AsOfMatchStatus::Exact
-                } else {
-                    AsOfMatchStatus::Matched
-                },
-                target_record_id: target.record_id.to_owned(),
-                matched_record_id: Some(best.record_id.to_owned()),
-            });
-        }
-    }
-
-    (rows, diagnostics)
-}
-
-fn find_as_of_candidate<'a>(
-    candidates: &'a [TransitionPoint<'a>],
-    target_point: &crate::TemporalPoint,
-    direction: &AsOfDirection,
-) -> (
-    Option<TransitionPoint<'a>>,
-    bool,
-    Option<TransitionPoint<'a>>,
-) {
-    let mut ambiguous = false;
-    let mut future_rejected = None;
-    let mut best = None;
-    let mut best_distance = None;
-
-    for candidate in candidates {
-        let comparison = candidate
-            .point
-            .try_cmp(target_point)
-            .expect("as-of groups share a temporal domain");
-        if *direction == AsOfDirection::Previous && comparison.is_gt() {
-            future_rejected.get_or_insert_with(|| candidate.clone());
-            continue;
-        }
-        if *direction == AsOfDirection::Next && comparison.is_lt() {
-            continue;
-        }
-
-        let distance = delta_magnitude(target_point, &candidate.point).abs();
-        if best_distance.is_none_or(|current| distance < current) {
-            best = Some(candidate.clone());
-            best_distance = Some(distance);
-            ambiguous = false;
-            continue;
-        }
-
-        if Some(distance) == best_distance {
-            ambiguous = true;
-            if best
-                .as_ref()
-                .is_some_and(|current| candidate.record_id < current.record_id)
-            {
-                best = Some(candidate.clone());
-            }
-        }
-    }
-
-    (best, ambiguous, future_rejected)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_must_use)]
@@ -4349,7 +3114,8 @@ mod tests {
             .record_windows()
             .with_event_time(|event| event.observed_at)
             .track_window("Quote", |event| event.selection_id, |event| event.active)
-            .build();
+            .build()
+            .expect("valid quote pipeline");
         pipeline.ingest(
             QuoteEvent {
                 selection_id: "selection-1",

@@ -28,7 +28,7 @@ let mut pipeline = for_events::<DeviceStatus>()
         |event| event.device_id.clone(),
         |event| !event.is_online,
     )
-    .build();
+    .build()?;
 
 pipeline.ingest(
     DeviceStatus { device_id: "device-17".into(), is_online: false },

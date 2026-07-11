@@ -16,9 +16,9 @@
 //! let mut pipeline = for_events::<Event>()
 //!     .record_windows()
 //!     .track_window("Active", |event| event.id, |event| event.active)
-//!     .build();
+//!     .build()?;
 //! pipeline.ingest(Event { id: "one", active: true }, Some("source-a"), None)?;
-//! # Ok::<(), spanfold::IngestionError>(())
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 mod analytics;
@@ -44,7 +44,7 @@ pub use analytics::{
     HierarchyComparisonResult, HierarchyComparisonRow, HierarchyComparisonRowKind,
     SourceMatrixCell, SourceMatrixResult, compare_hierarchy, compare_sources,
 };
-pub use builders::{ComparisonSelectorBuilder, WindowComparisonBuilder};
+pub use builders::WindowComparisonBuilder;
 pub use changelog::{
     ComparisonChangeKind, ComparisonChangelogEntry, create_changelog, replay_changelog,
 };
@@ -84,14 +84,14 @@ pub use primitive::{PrimitiveValue, PrimitiveValueError};
 pub use records::{
     ClosedWindow, OpenWindow, SummaryError, WindowAnnotation, WindowAnnotationTarget,
     WindowBoundaryChange, WindowBoundaryReason, WindowGroupKind, WindowGroupSummary, WindowHistory,
-    WindowHistoryFixture, WindowHistoryFixtureWindow, WindowHistoryQuery, WindowHistorySnapshot,
-    WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment, WindowSegment,
-    WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment, summarize_by_tag,
+    WindowHistoryFixture, WindowHistoryFixtureWindow, WindowHistoryQuery, WindowHistoryRefQuery,
+    WindowHistorySnapshot, WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment,
+    WindowSegment, WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment,
+    summarize_by_tag,
 };
 pub use temporal::{
     TemporalAxis, TemporalPoint, TemporalPointError, TemporalRange, TemporalRangeError,
 };
 pub use testing::{
     SpanfoldAssert, SpanfoldAssertionError, SpanfoldSnapshot, VirtualComparisonClock,
-    WindowHistoryFixtureBuilder, WindowHistoryFixtureWindowBuilder,
 };

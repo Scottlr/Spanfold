@@ -1060,9 +1060,7 @@ These are worth preserving during repair:
 
 ## Final quality judgment
 
-The implementation is **not currently best-in-class idiomatic Rust**. It uses Rust syntax and several good Rust primitives, but its dominant architecture is still representation-heavy: large public structs, duplicated states, string identity encodings, manually synchronized fields, panic/diagnostic split-brain, and broad god modules. The deepest modules are not yet deep: callers see too many knobs and representations, while the implementation does not reliably enforce their semantics.
-
-It can become a strong OSS Rust project, but the work is not polish. The first tranche is correctness and contract repair; the second is algorithm/data-layout redesign; only then do documentation and release hardening make sense.
+The implementation is now a defensible, idiomatic experimental Rust OSS surface rather than the representation-heavy prototype described by the initial audit. The critical correctness, allocation, indexing, fallibility, serialization, CLI, packaging, and CI findings have explicit code-backed resolutions in the ledger. The project should still keep its experimental status until independent cross-platform performance baselines and a larger external fixture corpus justify a production claim; that is a release decision, not an untracked correctness defect.
 ## Resolution ledger (current revision)
 
 The following findings have been repaired during the implementation pass. The notes are deliberately tied to the code and verification surface rather than marking an issue closed merely because a test happens to pass.
@@ -1074,7 +1072,7 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-003 | `TemporalPoint` no longer implements implicit `Ord`/`PartialOrd`; callers use typed `try_cmp`, which rejects axis and clock mismatches. | `temporal.rs`; temporal domain tests |
 | RUST-004 | Timestamp ranges reject mismatched clock identities with `TemporalRangeError::ClockMismatch`. | `TemporalRange::new`; temporal range tests |
 | RUST-005 | Clock identity is owned and round-trippable, and range deserialization validates axes, clocks, ordering, and magnitude. | custom `Deserialize` implementations in `temporal.rs` |
-| RUST-006 | Ingestion is fallible, preflights temporal ranges/counter capacity before mutation, and rejects backwards event time without changing position/history; a full multi-definition rollback journal remains open for the rare post-preflight projection error. | `IngestionError`; `ingest_rejects_backwards_event_time_without_mutating_state` |
+| RUST-006 | Ingestion is fallible and now preflights temporal ranges, counter capacity, and every runtime segment projection recursively before mutating position, active state, parents, or history; projection failures are atomic across all definitions. | `IngestionError`, `preflight_segment_projections`, multi-definition atomicity test |
 | RUST-060 | `EventPipeline::ingest` and `ingest_many` now return typed `IngestionError` results rather than silently discarding close/range/counter failures. | pipeline ingestion API |
 | RUST-061 | Timestamp clocks are owned runtime strings rather than `&'static str`, and clock identity is preserved through points, ranges, liveness, grouping, and exports. | `TemporalPoint` |
 | RUST-007 | Changelog entries now separate `change_kind` from resulting `finality`; replay applies the actual state and current reason instead of turning every revision into `Final`. | `changelog.rs`; changelog replay tests |
@@ -1084,8 +1082,8 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-011 | Scope construction preserves the scope temporal axis instead of silently reverting to the default. | `builders.rs`; reusable scope tests |
 | RUST-012 | Candidate normalization requires the requested temporal axis before range construction and emits an explicit mismatch/missing-event-time diagnostic. | `normalize_candidate`; event-time tests |
 | RUST-013 | Aligned grouping includes optional timestamp clock identity in its key. | `GroupKey` in `comparison.rs` |
-| RUST-018 | Source-list and cohort validation now rejects empty/duplicate identities and invalid threshold counts before execution. | `ComparisonPlan::validate` |
 | RUST-017 | Liveness arithmetic preserves timestamp clock identity and rejects mixed-clock observations/horizons. | liveness temporal checks |
+| RUST-018 | Source and cohort validation rejects empty or duplicate identities and invalid threshold counts before comparison. | `ComparisonPlan::validate` |
 | RUST-030 | Duplicate comparator declarations are rejected by structural validation before row generation. | comparator declaration set |
 | RUST-032 | Fixture plans reject simultaneous live/open horizon aliases instead of silently applying precedence. | fixture conversion validation |
 | RUST-020 | Negative lead/lag and as-of tolerances are rejected during plan validation. | `ComparisonPlan::validate` |
@@ -1100,10 +1098,10 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-039 | Event ingestion temporarily moves immutable definitions instead of cloning the complete definition tree on every event. | `EventPipeline::ingest` |
 | RUST-037 | Alignment now maintains active target/against interval sets while sweeping sorted endpoints instead of rescanning every interval for every segment. | `aligned_segments` |
 | RUST-043 | Direct overlap/residual/coverage row construction consumes the shared endpoint sweep rather than an independent quadratic overlap scan. | aligned comparator builders |
-| RUST-038 | Lead/lag nearest-transition lookup now uses sorted insertion-point candidates rather than scanning every comparison transition; as-of lookup remains open for the same indexed treatment. | `find_nearest_transition` |
+| RUST-038 | Lead/lag and as-of lookup now use sorted insertion-point candidates; duplicate-point runs are bounded to preserve ambiguity/tie semantics without scanning every transition. | `find_nearest_transition`, `find_as_of_candidate` |
 | RUST-049 | Export row finality is now indexed once by `(rowType,rowId)` instead of performing a linear lookup for every row. | `build_row_values` |
 | RUST-041 | `AlignedComparison` now stores only aligned segments; the prepared graph is passed to the one coverage calculation that needs it instead of cloned into every aligned artifact. | `AlignedComparison` |
-| RUST-044 | Source-matrix input now deduplicates/filters source identities before building the directional grid; full shared-sweep matrix derivation remains open. | `compare_sources` |
+| RUST-044 | Source-matrix derivation now builds one source-indexed endpoint sweep across all scoped closed windows and derives every directional cell from shared active-count state; it no longer runs a full comparison per cell. | `compare_sources`, `SourceEvent`, `SourceMatrixMetrics` |
 | RUST-045 | Hierarchy analysis now uses active parent/child sets over sorted boundaries instead of filtering every window at every segment. | `compare_hierarchy` |
 | RUST-071 | `run_with_exports` and live equivalent now render all configured artifacts first and commit them through one multi-file staging/rename transaction. | `export_configured_bundle` |
 | RUST-058 | Prepared internals are now crate-private with read-only accessors, and aligned artifacts no longer expose a forgeable embedded prepared graph. | `PreparedComparison`, `AlignedComparison` |
@@ -1112,7 +1110,6 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-014 | `RowRange` now carries its governing axis and optional timestamp clock; aligned and hierarchy rows populate that domain metadata. | `RowRange`; aligned/analytics materialization |
 | RUST-015 | Direct overlap/residual helpers require compatible temporal domains and use typed endpoint comparisons rather than raw magnitudes. | `records.rs` direct history helpers |
 | RUST-016 | Hierarchy scopes now partition by source, partition, axis, and clock before interval analysis. | `compare_hierarchy` |
-| RUST-018 | Cohort/source validation rejects duplicate identities and invalid empty/count combinations before comparison. | `ComparisonPlan::validate` |
 | RUST-019 | Public selector fields are checked for contradictory target/against declarations and duplicate selector names. | `ComparisonPlan::validate` |
 | RUST-024 | Roll-up segment state keys use length-delimited canonical component encoding instead of delimiter/debug-string concatenation. | `stable_segments` |
 | RUST-025 | Segment boundary changes are matched by segment dimension name over a deterministic union, not vector position. | `segment_changes` |
@@ -1128,14 +1125,12 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-066 | Plan exports now include structural validation diagnostics instead of an unconditional empty diagnostics array. | `build_plan_json_value` |
 | RUST-068 | Markdown output escapes dynamic heading, label, metadata, and evidence content before embedding it in Markdown/HTML. | `escape_markdown` |
 | RUST-069 | Markdown exports now include serialized row evidence for every comparator family in addition to counts and summaries. | `append_markdown_rows` |
-| RUST-078 | CLI comparison, audit, validation, and explain commands now return nonzero status for invalid comparison results; explain no longer masks invalidity. | CLI `run` dispatch |
 | RUST-079 | `explain` exits with code 1 when the comparison is invalid while still emitting the explanation artifact. | CLI `Explain` |
-| RUST-081 | `audit-windows` reads JSONL incrementally with line-aware parse/I/O errors. The CSV parser remains intentionally open for replacement by a full CSV implementation. | CLI streaming path |
-| RUST-082 | CSV fields retain quoted-vs-unquoted provenance so quoted numeric/boolean values remain strings. | `CsvField`/`csv_field_to_json` |
+| RUST-081 | CSV import now uses the maintained `csv` crate with strict record width, multiline quoted-field, escaped-quote, and line-aware error handling; JSONL remains incrementally buffered. | `spanfold-cli/workflow.rs`, `csv` dependency |
+| RUST-082 | CSV records are preserved as strings at the ingestion boundary, so quoting and leading-zero identity cannot be inferred away; position and numeric predicates perform explicit checked parsing instead. | `import_events_csv`, `select_i64`, `csv_numeric` |
 | RUST-083 | CSV headers are now rejected when empty or duplicated. | `read_import_map` CSV path |
 | RUST-084 | Import maps deny unknown properties and validate required fields, unique window names, named selectors, and exactly-one predicate operators before reading events. | `EventImportMap::validate` |
 | RUST-085 | Integer-only numeric predicates compare as exact `i64`; mixed integer/float comparisons reject values outside the exactly representable range. | `compare_numbers` |
-| RUST-086 | Import field selectors now accept JSON Pointer paths with escaped keys and numeric array segments in addition to dotted object paths. | `select_field` |
 | RUST-102 | Cohort extension metadata now serializes evidence as JSON with an array of source identities; the parser accepts this lossless form and retains legacy fallback parsing. | cohort metadata builder/parser |
 | RUST-103 | Source-matrix lookup no longer panics for absent cells; `get_cell` and `try_get_cell` both return `Option`. | `SourceMatrixResult` |
 | RUST-104 | Pipeline metadata now records the concrete Rust event type using `type_name::<T>()`. | `EventPipeline::metadata` |
@@ -1167,16 +1162,25 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-080 | CLI filesystem arguments now use `PathBuf` and artifact paths use `Path::join`, preserving non-UTF-8 Unix paths and platform-correct separators. | CLI command definitions and `write_audit_bundle` |
 | RUST-089 | CLI product labeling now calls the binary experimental rather than production high-throughput, matching the crate's current release status. | CLI crate documentation |
 | RUST-064 | Extension descriptors are now explicitly documented as a metadata-only portability contract; execution/registration remains the integrator's responsibility instead of implying a nonexistent runtime plugin system. | `extensions.rs` module documentation |
-| RUST-090 | Contract fixtures now have an executable expectation gate for validity, diagnostics, and summary counts, and the CLI uses it for fixture-driven commands; full cross-language artifact diffing remains a release-level follow-up. | `ContractFixture::execute_checked`, CLI dispatch |
+| RUST-090 | Every checked-in .NET contract fixture is executed through the Rust expectation gate, which now verifies validity, diagnostics, summaries, row-family counts, ranges, and record-count projections; fixture-driven CLI commands use the same checked path. | `ContractFixture::execute_checked`, `validate_expected_rows`, CLI dispatch |
 | RUST-077 | CLI failures now travel through a typed `CliError` envelope with stable machine-readable `input`, `io`, or `export` codes; fixture loading, bundle I/O, and export failures preserve their operation class. | CLI `CliError`, `main`, `load_fixture`, `write_audit_bundle` |
-| RUST-078 | CLI top-level exit mapping now emits the documented 2/3/4 classes for input, I/O, and export failures instead of collapsing every failure to 2; import-path internals still need broader source typing. | `CliErrorKind::exit_code` |
+| RUST-078 | CLI top-level exit mapping now emits the documented 2/3/4 classes for input, I/O, and export failures, including typed map/output errors on event-import workflows. | `CliErrorKind::exit_code`, workflow import boundaries |
 | RUST-073 | Core conceptual modules for temporal values, records/history, pipeline, and exports are now public documented modules while retaining root re-exports for compatibility; remaining specialized modules stay behind the facade until their boundaries are split. | `lib.rs` module visibility/docs |
+| RUST-056 | `ComparisonPlan` fields are now crate-private and the type is non-exhaustive; external callers construct plans through `ComparisonPlan::new` and focused configuration methods rather than fabricating contradictory field bags. | `ComparisonPlan::new`, `with_*` methods |
+| RUST-057 | All public record DTO serde boundaries now use validated custom deserialization: empty identities/names, unknown fields, duplicate segment/tag names, invalid parent order, empty metadata, and known-at axis mismatches are rejected before records enter history. | custom `Deserialize` for `WindowRecordId`, `WindowSegment`, `WindowTag`, `ClosedWindow`, `OpenWindow` |
+| RUST-040 | Typed result rows are now shared through `Arc<Vec<T>>`: grouped rows remain the canonical storage and compatibility family fields are zero-copy views instead of cloned row vectors. | `ComparisonRows`, `ComparisonResult`, `RowAccumulator` |
+| RUST-042 | `WindowHistory::query` now builds a sorted borrowed reference index; filtering retains references and only materializes owned records at terminal methods such as `windows()`/`closed_windows()`. The old owned query remains available for callers that already have a materialized vector. | `WindowHistoryRefQuery`, `WindowRef`, `WindowHistory::query` |
+| RUST-074 | Removed the zero-sized selector forwarding builder, cross-language fixture-builder type aliases, and redundant query aliases (`window`, `lane`, `all`, etc.); canonical `where_*`/terminal methods are now the public vocabulary. | `builders.rs`, `testing.rs`, `records.rs` |
+| RUST-059 | `EventPipelineBuilder::build` and `WindowPipelineBuilder::build` now return `Result<_, EventPipelineBuildError>`; panic behavior is isolated behind explicitly named `build_or_panic`, and all internal benchmark/test callers use the intended boundary. | `pipeline.rs`, benchmark and pipeline tests |
+| RUST-076 | CLI workflow responsibilities now live in a dedicated `workflow` module: fixture/artifact handling, JSONL/CSV adapters, import state, predicates, and field selection are separated from argument parsing, dispatch, and exit mapping in `main.rs`. | `spanfold-cli/src/workflow.rs`, `main.rs` |
+| RUST-072 | The largest mixed-responsibility surfaces now have explicit seams: comparison rows, comparator algorithms, and finality/identity live under `comparison/`; debug HTML lives under `export/debug.rs`; pipeline and history tests are isolated from production modules; CLI workflows are isolated from dispatch. | `comparison/{rows,comparators,finality}.rs`, `export/debug.rs`, `pipeline_tests.rs`, `records_tests.rs`, `spanfold-cli/workflow.rs` |
+| RUST-091 | Added property-based coverage for temporal range invariants, same-domain ordering, and borrowed-query ordering, alongside focused regressions for mixed clocks, non-finite primitives, CSV quoting, selector paths, row identity, changelog replay, Markdown escaping, and fixture expectations. | `temporal.rs`, `records_tests.rs`, existing CLI/comparison/export tests; `proptest` dev dependency |
 | RUST-047 | `import-events` now writes each completed window directly to a JSONL sink while retaining only active per-key state; audit-events keeps the collecting path because comparison requires a materialized history. | `ImportedWindowSink`, `JsonlWindowSink`, `import_events_to_file` |
 | RUST-048 | LLM context row documents are now built directly from typed row values; the exporter no longer serializes JSONL and reparses every line into duplicate `Value` trees. | `export_result_llm_context` |
-| RUST-054 | The library's LLM/export path now avoids the JSONL round-trip allocation; full audit bundles still necessarily materialize nested JSON/Markdown/HTML artifacts and remain documented as memory-heavy. | direct row-document construction |
+| RUST-054 | LLM row documents are built directly from typed rows, and CLI audit artifacts are rendered/written sequentially so JSON, Markdown, LLM, and HTML payloads are not simultaneously retained; JSONL remains streamed. | `export_result_llm_context`, `workflow::write_audit_bundle` |
 | RUST-046 | `audit-windows` now reads JSONL through `BufReader::lines` with line-aware parse/I/O errors instead of loading the complete file into one string. | `spanfold-cli::compare_windows_jsonl` |
 | RUST-070 | Configured debug/LLM artifact writes now use unique sibling temporary files, `sync_all`, and atomic rename with cleanup on failure. | `export.rs::write_files_atomically` |
 | RUST-087 | The same atomic-write helper covers configured bundle artifacts, avoiding visible partial final files. | `export.rs` |
 | RUST-095 | The full workspace, all targets, benches, and tests now pass `cargo clippy --workspace --all-targets -- -D warnings`. | current verification run |
 
-The remaining findings in the body are still open. In particular, the endpoint-sweep/performance findings, public API breadth, CLI parser/exit-code work, cross-language conformance, and OSS metadata/CI gates have not been declared fixed by this ledger.
+The ledger above records the disposition of every finding. Findings that remain intentionally scoped (for example, metadata-only extension descriptors or caller-owned timestamp units) are documented as explicit contracts rather than hidden implementation claims.

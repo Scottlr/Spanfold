@@ -2,10 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
-use crate::{
-    AgainstSelection, Comparator, ComparisonDiagnostic, ComparisonDuplicateWindowPolicy,
-    ComparisonPlan, RowRange, WindowHistory, compare,
-};
+use crate::{ComparisonDiagnostic, RowRange, TemporalAxis, WindowHistory};
 
 /// One directional source-matrix cell.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -138,85 +135,104 @@ pub fn compare_sources(
             unique_sources.push(source.clone());
         }
     }
-    let mut cells = Vec::with_capacity(unique_sources.len() * unique_sources.len());
-    for target_source in &unique_sources {
-        for against_source in &unique_sources {
-            let target_has_windows = has_window_for_source(history, window_name, target_source);
-            let against_has_windows = has_window_for_source(history, window_name, against_source);
-            if target_source == against_source {
-                cells.push(SourceMatrixCell {
-                    target_source: target_source.clone(),
-                    against_source: against_source.clone(),
-                    is_diagonal: true,
-                    target_has_windows,
-                    against_has_windows,
-                    overlap_row_count: 0,
-                    residual_row_count: 0,
-                    missing_row_count: 0,
-                    coverage_row_count: 0,
-                    coverage_ratio: target_has_windows.then_some(1.0),
-                });
+    let mut metrics =
+        vec![SourceMatrixMetrics::default(); unique_sources.len() * unique_sources.len()];
+    let source_index = unique_sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| (source.as_str(), index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut groups =
+        std::collections::BTreeMap::<(String, Option<String>), Vec<SourceEvent>>::new();
+    for window in history.closed_windows() {
+        if window.window_name != window_name
+            || window.range.start().axis() != TemporalAxis::ProcessingPosition
+        {
+            continue;
+        }
+        let Some(source) = window
+            .source
+            .as_deref()
+            .and_then(|value| source_index.get(value))
+        else {
+            continue;
+        };
+        let key = (window.key.clone(), window.partition.clone());
+        let events = groups.entry(key).or_default();
+        events.push(SourceEvent {
+            position: window.range.start().magnitude(),
+            source: *source,
+            active: true,
+        });
+        events.push(SourceEvent {
+            position: window.range.end().magnitude(),
+            source: *source,
+            active: false,
+        });
+    }
+
+    for events in groups.values_mut() {
+        events.sort_by_key(|event| event.position);
+        let mut active = vec![0_usize; unique_sources.len()];
+        let mut index = 0;
+        while index < events.len() {
+            let position = events[index].position;
+            while index < events.len() && events[index].position == position {
+                let event = events[index];
+                if event.active {
+                    active[event.source] += 1;
+                } else {
+                    active[event.source] = active[event.source].saturating_sub(1);
+                }
+                index += 1;
+            }
+            let next_position = events.get(index).map_or(position, |event| event.position);
+            let length = next_position.saturating_sub(position);
+            if length <= 0 {
                 continue;
             }
+            for target in 0..unique_sources.len() {
+                for against in 0..unique_sources.len() {
+                    let target_active = active[target] > 0;
+                    let against_active = active[against] > 0;
+                    let metric = &mut metrics[target * unique_sources.len() + against];
+                    metric.target_has_windows |= target_active;
+                    metric.against_has_windows |= against_active;
+                    if target_active {
+                        metric.coverage_row_count += 1;
+                        metric.target_magnitude += i128::from(length);
+                        if against_active {
+                            metric.covered_magnitude += i128::from(length);
+                        }
+                    }
+                    if target_active && against_active {
+                        metric.overlap_row_count += 1;
+                    } else if target_active {
+                        metric.residual_row_count += 1;
+                    } else if against_active {
+                        metric.missing_row_count += 1;
+                    }
+                }
+            }
+        }
+    }
 
-            let result = compare(
-                history,
-                &ComparisonPlan {
-                    name: format!("{name} {target_source} vs {against_source}"),
-                    target_source: target_source.clone(),
-                    against: AgainstSelection::Sources(vec![against_source.clone()]),
-                    target_selector: None,
-                    against_selectors: Vec::new(),
-                    scope_window: Some(window_name.to_owned()),
-                    scope_key: None,
-                    scope_partition: None,
-                    scope_segments: Vec::new(),
-                    scope_tags: Vec::new(),
-                    comparators: vec![
-                        Comparator::Overlap,
-                        Comparator::Residual,
-                        Comparator::Missing,
-                        Comparator::Coverage,
-                    ],
-                    require_closed_windows: true,
-                    use_half_open_ranges: true,
-                    time_axis: crate::TemporalAxis::ProcessingPosition,
-                    null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
-                    known_at: None,
-                    open_window_policy: crate::OpenWindowPolicy::RequireClosed,
-                    open_window_horizon: None,
-                    coalesce_adjacent_windows: false,
-                    duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
-                    output: crate::ComparisonOutputOptions::default_options(),
-                    strict: false,
-                },
-            );
-            let coverage_ratio = if result.coverage_summaries.is_empty() {
-                None
-            } else {
-                let target: f64 = result
-                    .coverage_summaries
-                    .iter()
-                    .map(|summary| summary.target_magnitude)
-                    .sum();
-                let covered: f64 = result
-                    .coverage_summaries
-                    .iter()
-                    .map(|summary| summary.covered_magnitude)
-                    .sum();
-                (target > 0.0).then_some(covered / target)
-            };
+    let mut cells = Vec::with_capacity(unique_sources.len() * unique_sources.len());
+    for target in 0..unique_sources.len() {
+        for against in 0..unique_sources.len() {
+            let metric = &metrics[target * unique_sources.len() + against];
             cells.push(SourceMatrixCell {
-                target_source: target_source.clone(),
-                against_source: against_source.clone(),
-                is_diagonal: false,
-                target_has_windows,
-                against_has_windows,
-                overlap_row_count: result.overlap_rows.len(),
-                residual_row_count: result.residual_rows.len(),
-                missing_row_count: result.missing_rows.len(),
-                coverage_row_count: result.coverage_rows.len(),
-                coverage_ratio,
+                target_source: unique_sources[target].clone(),
+                against_source: unique_sources[against].clone(),
+                is_diagonal: target == against,
+                target_has_windows: metric.target_has_windows,
+                against_has_windows: metric.against_has_windows,
+                overlap_row_count: metric.overlap_row_count,
+                residual_row_count: metric.residual_row_count,
+                missing_row_count: metric.missing_row_count,
+                coverage_row_count: metric.coverage_row_count,
+                coverage_ratio: (metric.target_magnitude > 0)
+                    .then_some(metric.covered_magnitude as f64 / metric.target_magnitude as f64),
             });
         }
     }
@@ -227,6 +243,25 @@ pub fn compare_sources(
         sources: unique_sources,
         cells,
     }
+}
+
+#[derive(Clone, Copy)]
+struct SourceEvent {
+    position: i64,
+    source: usize,
+    active: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SourceMatrixMetrics {
+    target_has_windows: bool,
+    against_has_windows: bool,
+    overlap_row_count: usize,
+    residual_row_count: usize,
+    missing_row_count: usize,
+    coverage_row_count: usize,
+    target_magnitude: i128,
+    covered_magnitude: i128,
 }
 
 /// Builds a hierarchy explanation across parent and child windows.
@@ -403,16 +438,6 @@ pub fn compare_hierarchy(
         rows,
         diagnostics,
     }
-}
-
-fn has_window_for_source(history: &WindowHistory, window_name: &str, source: &str) -> bool {
-    history
-        .closed_windows()
-        .iter()
-        .any(|window| window.window_name == window_name && window.source.as_deref() == Some(source))
-        || history.open_windows().iter().any(|window| {
-            window.window_name == window_name && window.source.as_deref() == Some(source)
-        })
 }
 
 #[cfg(test)]

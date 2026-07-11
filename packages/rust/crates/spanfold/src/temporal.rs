@@ -174,10 +174,18 @@ impl TemporalRange {
         self.start.clone()
     }
 
+    pub(crate) fn start_ref(&self) -> &TemporalPoint {
+        &self.start
+    }
+
     /// Returns the exclusive end point.
     #[must_use]
     pub fn end(&self) -> TemporalPoint {
         self.end.clone()
+    }
+
+    pub(crate) fn end_ref(&self) -> &TemporalPoint {
+        &self.end
     }
 
     /// Returns the non-negative range magnitude.
@@ -248,6 +256,7 @@ pub enum TemporalRangeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn position_ranges_are_half_open_and_have_magnitude() {
@@ -309,5 +318,25 @@ mod tests {
                 .try_cmp(&TemporalPoint::timestamp_ticks_with_clock(1, "b")),
             Err(TemporalPointError::ClockMismatch { .. })
         ));
+    }
+
+    proptest! {
+        #[test]
+        fn range_constructor_never_accepts_backwards_positions(start in any::<i64>(), end in any::<i64>()) {
+            let result = TemporalRange::new(TemporalPoint::position(start), TemporalPoint::position(end));
+            if start > end {
+                prop_assert!(matches!(result, Err(TemporalRangeError::EndBeforeStart { .. })), "backwards range accepted");
+            } else if end.checked_sub(start).is_none() {
+                prop_assert!(matches!(result, Err(TemporalRangeError::MagnitudeOverflow { .. })), "overflowing range accepted");
+            } else {
+                prop_assert!(result.is_ok());
+            }
+        }
+
+        #[test]
+        fn compatible_points_compare_by_magnitude(left in any::<i64>(), right in any::<i64>()) {
+            let ordering = TemporalPoint::position(left).try_cmp(&TemporalPoint::position(right)).expect("same domain");
+            prop_assert_eq!(ordering, left.cmp(&right));
+        }
     }
 }

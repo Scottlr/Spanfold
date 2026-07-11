@@ -2,16 +2,7 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::{
-    ComparisonDiagnostic, ComparisonResult, TemporalPoint, WindowHistoryFixture,
-    WindowHistoryFixtureWindow,
-};
-
-/// Alias matching the cross-language fixture-builder naming.
-pub type WindowHistoryFixtureBuilder = WindowHistoryFixture;
-
-/// Alias matching the cross-language fixture-window-builder naming.
-pub type WindowHistoryFixtureWindowBuilder = WindowHistoryFixtureWindow;
+use crate::{ComparisonDiagnostic, ComparisonResult, TemporalPoint};
 
 /// Assertion failure returned by Spanfold testing helpers.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -314,7 +305,7 @@ mod tests {
 
     #[test]
     fn fixture_aliases_can_create_comparison_history() {
-        let history = WindowHistoryFixtureBuilder::new()
+        let history = crate::WindowHistoryFixture::new()
             .closed_window("DeviceOffline", "device-1", 1, 5, |window| {
                 window.source("provider-a")
             })

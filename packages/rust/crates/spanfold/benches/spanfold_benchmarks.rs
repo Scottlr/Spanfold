@@ -35,7 +35,8 @@ fn create_comparison_data(
             |signal| signal.device_id.clone(),
             |signal| !signal.is_online,
         )
-        .build();
+        .build()
+        .expect("valid benchmark pipeline");
     let mut occurrences = vec![0_usize; device_count * source_count];
     for event_index in 0..event_count {
         let device_index = event_index % device_count;
@@ -81,7 +82,8 @@ fn create_segment_cohort_data() -> WindowHistory {
             |signal| signal.market_id.clone(),
             |children| children.any_active(),
         )
-        .build();
+        .build()
+        .expect("valid benchmark pipeline");
 
     for event_index in 0..event_count {
         let selection_index = event_index % selection_count;

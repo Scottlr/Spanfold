@@ -15,9 +15,11 @@ authors.workspace = true
 [[bin]]
 name = "spanfold"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 clap.workspace = true
+csv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 spanfold = { version = "0.1.0", path = "../spanfold" }

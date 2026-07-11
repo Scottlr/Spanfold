@@ -406,6 +406,86 @@ fn validate_expectation(
             ));
         }
     }
+    if let Some(expected_rows) = object.get("rows") {
+        validate_expected_rows(expected_rows, result)?;
+    }
+    Ok(())
+}
+
+fn validate_expected_rows(
+    expected: &serde_json::Value,
+    result: &crate::ComparisonResult,
+) -> Result<(), FixtureError> {
+    let Some(expected_families) = expected.as_object() else {
+        return Err(FixtureError::Validation(
+            "fixture expectation rows must be an object".to_owned(),
+        ));
+    };
+    let actual = serde_json::to_value(&result.rows)?;
+    let Some(actual_families) = actual.as_object() else {
+        return Err(FixtureError::Validation(
+            "comparison rows must serialize as an object".to_owned(),
+        ));
+    };
+    for (family, expected_rows) in expected_families {
+        let Some(expected_rows) = expected_rows.as_array() else {
+            return Err(FixtureError::Validation(format!(
+                "fixture expectation rows.{family} must be an array"
+            )));
+        };
+        let actual_rows = actual_families
+            .get(family)
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                FixtureError::Validation(format!(
+                    "comparison result does not contain row family {family}"
+                ))
+            })?;
+        if expected_rows.len() != actual_rows.len() {
+            return Err(FixtureError::Validation(format!(
+                "fixture expectation mismatch at rows.{family}: expected {} rows, actual {}",
+                expected_rows.len(),
+                actual_rows.len()
+            )));
+        }
+        for (index, (expected_row, actual_row)) in expected_rows.iter().zip(actual_rows).enumerate()
+        {
+            let Some(expected_row) = expected_row.as_object() else {
+                return Err(FixtureError::Validation(format!(
+                    "fixture expectation rows.{family}[{index}] must be an object"
+                )));
+            };
+            let Some(actual_row) = actual_row.as_object() else {
+                return Err(FixtureError::Validation(format!(
+                    "comparison result rows.{family}[{index}] must be an object"
+                )));
+            };
+            for (field, expected_value) in expected_row {
+                let actual_value = match field.as_str() {
+                    "start" | "end" => actual_row
+                        .get("range")
+                        .and_then(serde_json::Value::as_object)
+                        .and_then(|range| range.get(field))
+                        .cloned(),
+                    "targetRecordCount" => actual_row
+                        .get("targetRecordIds")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|ids| serde_json::Value::from(ids.len())),
+                    "againstRecordCount" => actual_row
+                        .get("againstRecordIds")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|ids| serde_json::Value::from(ids.len())),
+                    _ => actual_row.get(field).cloned(),
+                };
+                if actual_value.as_ref() != Some(expected_value) {
+                    return Err(FixtureError::Validation(format!(
+                        "fixture expectation mismatch at rows.{family}[{index}].{field}: expected {expected_value}, actual {}",
+                        actual_value.unwrap_or(serde_json::Value::Null)
+                    )));
+                }
+            }
+        }
+    }
     Ok(())
 }
 

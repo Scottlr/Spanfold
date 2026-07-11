@@ -1,78 +1,10 @@
 use crate::{
     AgainstSelection, CohortActivity, Comparator, ComparisonDiagnostic,
     ComparisonDuplicateWindowPolicy, ComparisonNormalizationPolicy, ComparisonOutputOptions,
-    ComparisonPlan, ComparisonScope, ComparisonSelector, ComparisonSelectorError, OpenWindowPolicy,
-    PreparedComparison, PrimitiveValue, TemporalPoint, WindowFilter, WindowHistory, align, compare,
-    compare_live, prepare, prepare_live,
+    ComparisonPlan, ComparisonScope, ComparisonSelector, OpenWindowPolicy, PreparedComparison,
+    PrimitiveValue, TemporalPoint, WindowFilter, WindowHistory, align, compare, compare_live,
+    prepare, prepare_live,
 };
-
-/// Builds selectors for comparison plans and local selector predicates.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ComparisonSelectorBuilder;
-
-impl ComparisonSelectorBuilder {
-    /// Returns a selector for a configured window name.
-    #[must_use]
-    pub fn window_name(self, window_name: impl Into<String>) -> ComparisonSelector {
-        ComparisonSelector::for_window_name(window_name)
-    }
-
-    /// Returns a selector for a recorded window key.
-    #[must_use]
-    pub fn key(self, key: impl Into<String>) -> ComparisonSelector {
-        ComparisonSelector::for_key(key)
-    }
-
-    /// Returns a selector for a source identity.
-    #[must_use]
-    pub fn source(self, source: impl Into<String>) -> ComparisonSelector {
-        ComparisonSelector::for_source(source)
-    }
-
-    /// Returns a selector for any of several source identities.
-    #[must_use]
-    pub fn sources(
-        self,
-        sources: impl IntoIterator<Item = impl Into<String>>,
-    ) -> ComparisonSelector {
-        ComparisonSelector::for_sources(sources)
-    }
-
-    /// Returns a selector for a partition identity.
-    #[must_use]
-    pub fn partition(self, partition: impl Into<String>) -> ComparisonSelector {
-        ComparisonSelector::for_partition(partition)
-    }
-
-    /// Returns a selector for a half-open processing-position range.
-    pub fn position_range(
-        self,
-        start_inclusive: i64,
-        end_exclusive: Option<i64>,
-    ) -> Result<ComparisonSelector, ComparisonSelectorError> {
-        ComparisonSelector::for_position_range(start_inclusive, end_exclusive)
-    }
-
-    /// Returns a selector for a half-open timestamp range.
-    pub fn time_range(
-        self,
-        start_inclusive: i64,
-        end_exclusive: Option<i64>,
-    ) -> Result<ComparisonSelector, ComparisonSelectorError> {
-        ComparisonSelector::for_time_range(start_inclusive, end_exclusive)
-    }
-
-    /// Returns a runtime-only selector backed by a predicate.
-    #[must_use]
-    pub fn runtime(
-        self,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        predicate: impl Fn(&crate::WindowRecord) -> bool + Send + Sync + 'static,
-    ) -> ComparisonSelector {
-        ComparisonSelector::runtime_only(name, description, predicate)
-    }
-}
 
 /// Fluent comparison builder over an existing recorded history.
 #[derive(Clone, Debug)]
@@ -452,8 +384,8 @@ mod tests {
 
     use crate::{
         ComparisonDebugHtmlOptions, ComparisonLlmContextOptions, ComparisonNormalizationPolicy,
-        ComparisonNullTimestampPolicy, ComparisonScope, TemporalAxis, TemporalPoint,
-        WindowHistoryFixture,
+        ComparisonNullTimestampPolicy, ComparisonScope, ComparisonSelector, TemporalAxis,
+        TemporalPoint, WindowHistoryFixture,
     };
 
     #[test]
@@ -561,9 +493,8 @@ mod tests {
 
     #[test]
     fn selector_builder_creates_composable_selectors() {
-        let selector = crate::ComparisonSelectorBuilder
-            .window_name("DeviceOffline")
-            .and(crate::ComparisonSelectorBuilder.source("provider-a"));
+        let selector = ComparisonSelector::for_window_name("DeviceOffline")
+            .and(ComparisonSelector::for_source("provider-a"));
         let window = crate::WindowRecord::Closed(crate::ClosedWindow {
             id: crate::WindowRecordId::new("record-1"),
             window_name: "DeviceOffline".to_owned(),
@@ -579,11 +510,7 @@ mod tests {
         });
 
         assert!(selector.matches(&window));
-        assert!(
-            crate::ComparisonSelectorBuilder
-                .position_range(5, Some(1))
-                .is_err()
-        );
+        assert!(ComparisonSelector::for_position_range(5, Some(1)).is_err());
     }
 
     #[test]

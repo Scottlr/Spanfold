@@ -145,7 +145,6 @@ impl ComparisonExtensionBuilder {
     }
 
     /// Builds the immutable descriptor.
-    #[must_use]
     pub fn build(self) -> Result<ComparisonExtensionDescriptor, ComparisonExtensionBuildError> {
         if self.id.trim().is_empty() || self.display_name.trim().is_empty() {
             return Err(ComparisonExtensionBuildError::MissingIdentity);

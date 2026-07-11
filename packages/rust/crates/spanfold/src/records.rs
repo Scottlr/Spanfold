@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::{
     ComparisonFinality, PrimitiveValue, TemporalAxis, TemporalPoint, TemporalRange,
@@ -8,7 +11,7 @@ use crate::{
 };
 
 /// Deterministic window record identifier.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize)]
 pub struct WindowRecordId(String);
 
 impl WindowRecordId {
@@ -25,8 +28,22 @@ impl WindowRecordId {
     }
 }
 
+impl<'de> Deserialize<'de> for WindowRecordId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        if value.trim().is_empty() {
+            return Err(serde::de::Error::custom("window record id cannot be empty"));
+        }
+        Ok(Self(value))
+    }
+}
+
 /// Analytical segment captured with a window.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WindowSegment {
     /// Segment name.
     pub name: String,
@@ -55,8 +72,38 @@ impl WindowSegment {
     }
 }
 
+impl<'de> Deserialize<'de> for WindowSegment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawSegment {
+            name: String,
+            value: PrimitiveValue,
+            parent_name: Option<String>,
+        }
+        let raw = RawSegment::deserialize(deserializer)?;
+        if raw.name.trim().is_empty()
+            || raw
+                .parent_name
+                .as_deref()
+                .is_some_and(|parent| parent.trim().is_empty())
+        {
+            return Err(serde::de::Error::custom("segment names cannot be empty"));
+        }
+        Ok(Self {
+            name: raw.name,
+            value: raw.value,
+            parent_name: raw.parent_name,
+        })
+    }
+}
+
 /// Descriptive tag captured with a window.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WindowTag {
     /// Tag name.
     pub name: String,
@@ -75,6 +122,28 @@ impl WindowTag {
     }
 }
 
+impl<'de> Deserialize<'de> for WindowTag {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawTag {
+            name: String,
+            value: PrimitiveValue,
+        }
+        let raw = RawTag::deserialize(deserializer)?;
+        if raw.name.trim().is_empty() {
+            return Err(serde::de::Error::custom("tag names cannot be empty"));
+        }
+        Ok(Self {
+            name: raw.name,
+            value: raw.value,
+        })
+    }
+}
+
 /// Describes why a recorded window boundary was emitted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum WindowBoundaryReason {
@@ -85,7 +154,8 @@ pub enum WindowBoundaryReason {
 }
 
 /// Describes one segment value change that caused a window boundary.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WindowBoundaryChange {
     /// Segment dimension name.
     pub segment_name: String,
@@ -95,8 +165,35 @@ pub struct WindowBoundaryChange {
     pub current_value: Option<PrimitiveValue>,
 }
 
+impl<'de> Deserialize<'de> for WindowBoundaryChange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawBoundaryChange {
+            segment_name: String,
+            previous_value: Option<PrimitiveValue>,
+            current_value: Option<PrimitiveValue>,
+        }
+        let raw = RawBoundaryChange::deserialize(deserializer)?;
+        if raw.segment_name.trim().is_empty() {
+            return Err(serde::de::Error::custom(
+                "boundary segment names cannot be empty",
+            ));
+        }
+        Ok(Self {
+            segment_name: raw.segment_name,
+            previous_value: raw.previous_value,
+            current_value: raw.current_value,
+        })
+    }
+}
+
 /// Closed state window.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ClosedWindow {
     /// Window record ID.
     pub id: WindowRecordId,
@@ -123,7 +220,8 @@ pub struct ClosedWindow {
 }
 
 /// Open state window.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct OpenWindow {
     /// Window record ID.
     pub id: WindowRecordId,
@@ -143,6 +241,161 @@ pub struct OpenWindow {
     pub segments: Vec<WindowSegment>,
     /// Captured tags.
     pub tags: Vec<WindowTag>,
+}
+
+struct WindowPayload<'a> {
+    window_name: &'a str,
+    key: &'a str,
+    source: Option<&'a str>,
+    partition: Option<&'a str>,
+    start: &'a TemporalPoint,
+    known_at: Option<&'a TemporalPoint>,
+    segments: &'a [WindowSegment],
+    tags: &'a [WindowTag],
+    boundary_changes: &'a [WindowBoundaryChange],
+}
+
+fn validate_window_payload(payload: WindowPayload<'_>) -> Result<(), &'static str> {
+    if payload.window_name.trim().is_empty() {
+        return Err("window name cannot be empty");
+    }
+    if payload.key.trim().is_empty() {
+        return Err("window key cannot be empty");
+    }
+    if payload.source.is_some_and(|value| value.trim().is_empty()) {
+        return Err("source cannot be empty");
+    }
+    if payload
+        .partition
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err("partition cannot be empty");
+    }
+    if let Some(known_at) = payload.known_at
+        && !payload.start.is_compatible_with(known_at)
+    {
+        return Err("known-at point must share the window temporal domain");
+    }
+    let mut segment_names = BTreeSet::new();
+    for segment in payload.segments {
+        if !segment_names.insert(segment.name.as_str()) {
+            return Err("segment names must be unique within a window");
+        }
+        if let Some(parent) = segment.parent_name.as_deref()
+            && !segment_names.contains(parent)
+        {
+            return Err("segment parent must precede and reference a captured segment");
+        }
+    }
+    let mut tag_names = BTreeSet::new();
+    for tag in payload.tags {
+        if !tag_names.insert(tag.name.as_str()) {
+            return Err("tag names must be unique within a window");
+        }
+    }
+    if payload
+        .boundary_changes
+        .iter()
+        .any(|change| change.segment_name.trim().is_empty())
+    {
+        return Err("boundary segment names cannot be empty");
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for ClosedWindow {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawClosedWindow {
+            id: WindowRecordId,
+            window_name: String,
+            key: String,
+            range: TemporalRange,
+            known_at: Option<TemporalPoint>,
+            source: Option<String>,
+            partition: Option<String>,
+            segments: Vec<WindowSegment>,
+            tags: Vec<WindowTag>,
+            boundary_reason: Option<WindowBoundaryReason>,
+            boundary_changes: Vec<WindowBoundaryChange>,
+        }
+        let raw = RawClosedWindow::deserialize(deserializer)?;
+        let start = raw.range.start_ref();
+        validate_window_payload(WindowPayload {
+            window_name: &raw.window_name,
+            key: &raw.key,
+            source: raw.source.as_deref(),
+            partition: raw.partition.as_deref(),
+            start,
+            known_at: raw.known_at.as_ref(),
+            segments: &raw.segments,
+            tags: &raw.tags,
+            boundary_changes: &raw.boundary_changes,
+        })
+        .map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            id: raw.id,
+            window_name: raw.window_name,
+            key: raw.key,
+            range: raw.range,
+            known_at: raw.known_at,
+            source: raw.source,
+            partition: raw.partition,
+            segments: raw.segments,
+            tags: raw.tags,
+            boundary_reason: raw.boundary_reason,
+            boundary_changes: raw.boundary_changes,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for OpenWindow {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawOpenWindow {
+            id: WindowRecordId,
+            window_name: String,
+            key: String,
+            start: TemporalPoint,
+            known_at: Option<TemporalPoint>,
+            source: Option<String>,
+            partition: Option<String>,
+            segments: Vec<WindowSegment>,
+            tags: Vec<WindowTag>,
+        }
+        let raw = RawOpenWindow::deserialize(deserializer)?;
+        validate_window_payload(WindowPayload {
+            window_name: &raw.window_name,
+            key: &raw.key,
+            source: raw.source.as_deref(),
+            partition: raw.partition.as_deref(),
+            start: &raw.start,
+            known_at: raw.known_at.as_ref(),
+            segments: &raw.segments,
+            tags: &raw.tags,
+            boundary_changes: &[],
+        })
+        .map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            id: raw.id,
+            window_name: raw.window_name,
+            key: raw.key,
+            start: raw.start,
+            known_at: raw.known_at,
+            source: raw.source,
+            partition: raw.partition,
+            segments: raw.segments,
+            tags: raw.tags,
+        })
+    }
 }
 
 /// A recorded open or closed window.
@@ -471,28 +724,28 @@ impl WindowHistory {
         windows
     }
 
-    /// Starts a direct read-only query over recorded windows.
+    /// Starts a direct read-only query borrowing this history.
     #[must_use]
-    pub fn query(&self) -> WindowHistoryQuery {
-        WindowHistoryQuery::new(self.windows())
+    pub fn query(&self) -> WindowHistoryRefQuery<'_> {
+        WindowHistoryRefQuery::new(self)
     }
 
     /// Returns recorded windows for a configured window name.
     #[must_use]
     pub fn for_window(&self, window_name: &str) -> Vec<WindowRecord> {
-        self.query().where_window(window_name).all()
+        self.query().where_window(window_name).windows()
     }
 
     /// Returns windows containing a required segment value.
     #[must_use]
     pub fn with_segment(&self, name: &str, value: impl Into<PrimitiveValue>) -> Vec<WindowRecord> {
-        self.query().where_segment(name, value).all()
+        self.query().where_segment(name, value).windows()
     }
 
     /// Returns windows containing a required tag value.
     #[must_use]
     pub fn with_tag(&self, name: &str, value: impl Into<PrimitiveValue>) -> Vec<WindowRecord> {
-        self.query().where_tag(name, value).all()
+        self.query().where_tag(name, value).windows()
     }
 
     /// Evaluates recorded windows at an explicit horizon.
@@ -501,6 +754,7 @@ impl WindowHistory {
         horizon: TemporalPoint,
     ) -> Result<WindowHistorySnapshot, TemporalRangeError> {
         let mut records = self
+            .query()
             .windows()
             .into_iter()
             .map(|window| snapshot_record(window, horizon.clone()))
@@ -676,7 +930,243 @@ impl WindowHistory {
     }
 }
 
-/// Fluent direct query API for recorded windows.
+#[derive(Clone, Copy, Debug)]
+enum WindowRef<'a> {
+    Closed(&'a ClosedWindow),
+    Open(&'a OpenWindow),
+}
+
+impl<'a> WindowRef<'a> {
+    fn owned(self) -> WindowRecord {
+        match self {
+            Self::Closed(window) => WindowRecord::Closed(window.clone()),
+            Self::Open(window) => WindowRecord::Open(window.clone()),
+        }
+    }
+
+    fn window_name(self) -> &'a str {
+        match self {
+            Self::Closed(window) => &window.window_name,
+            Self::Open(window) => &window.window_name,
+        }
+    }
+
+    fn key(self) -> &'a str {
+        match self {
+            Self::Closed(window) => &window.key,
+            Self::Open(window) => &window.key,
+        }
+    }
+
+    fn source(self) -> Option<&'a str> {
+        match self {
+            Self::Closed(window) => window.source.as_deref(),
+            Self::Open(window) => window.source.as_deref(),
+        }
+    }
+
+    fn partition(self) -> Option<&'a str> {
+        match self {
+            Self::Closed(window) => window.partition.as_deref(),
+            Self::Open(window) => window.partition.as_deref(),
+        }
+    }
+
+    fn segments(self) -> &'a [WindowSegment] {
+        match self {
+            Self::Closed(window) => &window.segments,
+            Self::Open(window) => &window.segments,
+        }
+    }
+
+    fn tags(self) -> &'a [WindowTag] {
+        match self {
+            Self::Closed(window) => &window.tags,
+            Self::Open(window) => &window.tags,
+        }
+    }
+
+    fn is_closed(self) -> bool {
+        matches!(self, Self::Closed(_))
+    }
+
+    fn start(self) -> &'a TemporalPoint {
+        match self {
+            Self::Closed(window) => window.range.start_ref(),
+            Self::Open(window) => &window.start,
+        }
+    }
+
+    fn end(self) -> Option<&'a TemporalPoint> {
+        match self {
+            Self::Closed(window) => Some(window.range.end_ref()),
+            Self::Open(_) => None,
+        }
+    }
+
+    fn id(self) -> &'a WindowRecordId {
+        match self {
+            Self::Closed(window) => &window.id,
+            Self::Open(window) => &window.id,
+        }
+    }
+}
+
+fn compare_window_refs(left: WindowRef<'_>, right: WindowRef<'_>) -> Ordering {
+    left.window_name()
+        .cmp(right.window_name())
+        .then_with(|| left.key().cmp(right.key()))
+        .then_with(|| left.source().cmp(&right.source()))
+        .then_with(|| left.partition().cmp(&right.partition()))
+        .then_with(|| left.start().magnitude().cmp(&right.start().magnitude()))
+        .then_with(|| {
+            left.end()
+                .map_or(i64::MAX, |point| point.magnitude())
+                .cmp(&right.end().map_or(i64::MAX, |point| point.magnitude()))
+        })
+        .then_with(|| left.id().cmp(right.id()))
+}
+
+/// Fluent direct query API borrowing recorded windows.
+#[derive(Clone, Debug)]
+pub struct WindowHistoryRefQuery<'a> {
+    windows: Vec<WindowRef<'a>>,
+}
+
+impl<'a> WindowHistoryRefQuery<'a> {
+    fn new(history: &'a WindowHistory) -> Self {
+        let mut windows = history
+            .closed
+            .iter()
+            .map(WindowRef::Closed)
+            .chain(history.open.iter().map(WindowRef::Open))
+            .collect::<Vec<_>>();
+        windows.sort_by(|left, right| compare_window_refs(*left, *right));
+        Self { windows }
+    }
+
+    /// Filters by configured window name.
+    #[must_use]
+    pub fn where_window(mut self, window_name: &str) -> Self {
+        self.windows
+            .retain(|window| window.window_name() == window_name);
+        self
+    }
+
+    /// Filters by logical key.
+    #[must_use]
+    pub fn where_key(mut self, key: &str) -> Self {
+        self.windows.retain(|window| window.key() == key);
+        self
+    }
+
+    /// Filters by source/lane.
+    #[must_use]
+    pub fn where_source(mut self, source: &str) -> Self {
+        self.windows
+            .retain(|window| window.source() == Some(source));
+        self
+    }
+
+    /// Filters by partition.
+    #[must_use]
+    pub fn where_partition(mut self, partition: &str) -> Self {
+        self.windows
+            .retain(|window| window.partition() == Some(partition));
+        self
+    }
+
+    /// Filters by segment value.
+    #[must_use]
+    pub fn where_segment(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
+        let value = value.into();
+        self.windows.retain(|window| {
+            window
+                .segments()
+                .iter()
+                .any(|segment| segment.name == name && segment.value == value)
+        });
+        self
+    }
+
+    /// Filters by tag value.
+    #[must_use]
+    pub fn where_tag(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
+        let value = value.into();
+        self.windows.retain(|window| {
+            window
+                .tags()
+                .iter()
+                .any(|tag| tag.name == name && tag.value == value)
+        });
+        self
+    }
+
+    /// Filters to closed windows.
+    #[must_use]
+    pub fn closed(mut self) -> Self {
+        self.windows.retain(|window| window.is_closed());
+        self
+    }
+
+    /// Filters to open windows.
+    #[must_use]
+    pub fn open(mut self) -> Self {
+        self.windows.retain(|window| !window.is_closed());
+        self
+    }
+
+    /// Materializes matching windows only at the result boundary.
+    #[must_use]
+    pub fn windows(&self) -> Vec<WindowRecord> {
+        self.windows.iter().copied().map(WindowRef::owned).collect()
+    }
+
+    /// Materializes matching closed windows.
+    #[must_use]
+    pub fn closed_windows(&self) -> Vec<ClosedWindow> {
+        self.windows
+            .iter()
+            .filter_map(|window| match window {
+                WindowRef::Closed(window) => Some((*window).clone()),
+                WindowRef::Open(_) => None,
+            })
+            .collect()
+    }
+
+    /// Materializes matching open windows.
+    #[must_use]
+    pub fn open_windows(&self) -> Vec<OpenWindow> {
+        self.windows
+            .iter()
+            .filter_map(|window| match window {
+                WindowRef::Closed(_) => None,
+                WindowRef::Open(window) => Some((*window).clone()),
+            })
+            .collect()
+    }
+
+    /// Returns the latest matching window.
+    #[must_use]
+    pub fn latest(&self) -> Option<WindowRecord> {
+        self.windows.last().copied().map(WindowRef::owned)
+    }
+
+    /// Summarizes matching windows by segment.
+    pub fn summarize_by_segment(
+        &self,
+        name: &str,
+    ) -> Result<Vec<WindowGroupSummary>, SummaryError> {
+        summarize_by_segment(self.windows(), name)
+    }
+
+    /// Summarizes matching windows by tag.
+    pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, SummaryError> {
+        summarize_by_tag(self.windows(), name)
+    }
+}
+
+/// Fluent direct query API for owned window records.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowHistoryQuery {
     windows: Vec<WindowRecord>,
@@ -698,23 +1188,11 @@ impl WindowHistoryQuery {
         self
     }
 
-    /// Alias for [`where_window`](Self::where_window).
-    #[must_use]
-    pub fn window(self, window_name: &str) -> Self {
-        self.where_window(window_name)
-    }
-
     /// Filters by logical key.
     #[must_use]
     pub fn where_key(mut self, key: &str) -> Self {
         self.windows.retain(|window| window.key() == key);
         self
-    }
-
-    /// Alias for [`where_key`](Self::where_key).
-    #[must_use]
-    pub fn key(self, key: &str) -> Self {
-        self.where_key(key)
     }
 
     /// Filters by source/lane.
@@ -725,36 +1203,12 @@ impl WindowHistoryQuery {
         self
     }
 
-    /// Alias for [`where_source`](Self::where_source).
-    #[must_use]
-    pub fn source(self, source: &str) -> Self {
-        self.where_source(source)
-    }
-
-    /// Alias for filtering by source/lane.
-    #[must_use]
-    pub fn where_lane(self, lane: &str) -> Self {
-        self.where_source(lane)
-    }
-
-    /// Alias for [`where_lane`](Self::where_lane).
-    #[must_use]
-    pub fn lane(self, lane: &str) -> Self {
-        self.where_lane(lane)
-    }
-
     /// Filters by partition.
     #[must_use]
     pub fn where_partition(mut self, partition: &str) -> Self {
         self.windows
             .retain(|window| window.partition() == Some(partition));
         self
-    }
-
-    /// Alias for [`where_partition`](Self::where_partition).
-    #[must_use]
-    pub fn partition(self, partition: &str) -> Self {
-        self.where_partition(partition)
     }
 
     /// Filters by segment value.
@@ -770,12 +1224,6 @@ impl WindowHistoryQuery {
         self
     }
 
-    /// Alias for [`where_segment`](Self::where_segment).
-    #[must_use]
-    pub fn segment(self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        self.where_segment(name, value)
-    }
-
     /// Filters by tag value.
     #[must_use]
     pub fn where_tag(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
@@ -787,12 +1235,6 @@ impl WindowHistoryQuery {
                 .any(|tag| tag.name == name && tag.value == value)
         });
         self
-    }
-
-    /// Alias for [`where_tag`](Self::where_tag).
-    #[must_use]
-    pub fn tag(self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        self.where_tag(name, value)
     }
 
     /// Filters to closed windows.
@@ -813,12 +1255,6 @@ impl WindowHistoryQuery {
     #[must_use]
     pub fn windows(&self) -> Vec<WindowRecord> {
         self.windows.clone()
-    }
-
-    /// Alias for [`windows`](Self::windows).
-    #[must_use]
-    pub fn all(&self) -> Vec<WindowRecord> {
-        self.windows()
     }
 
     /// Materializes matching closed windows.
@@ -849,12 +1285,6 @@ impl WindowHistoryQuery {
     #[must_use]
     pub fn latest(&self) -> Option<WindowRecord> {
         self.windows.last().cloned()
-    }
-
-    /// Alias for [`latest`](Self::latest).
-    #[must_use]
-    pub fn latest_window(&self) -> Option<WindowRecord> {
-        self.latest()
     }
 
     /// Materializes matching snapshot records at a horizon.
@@ -951,23 +1381,11 @@ impl WindowSnapshotQuery {
         self
     }
 
-    /// Alias for [`where_window`](Self::where_window).
-    #[must_use]
-    pub fn window(self, window_name: &str) -> Self {
-        self.where_window(window_name)
-    }
-
     /// Filters by logical key.
     #[must_use]
     pub fn where_key(mut self, key: &str) -> Self {
         self.records.retain(|record| record.window.key() == key);
         self
-    }
-
-    /// Alias for [`where_key`](Self::where_key).
-    #[must_use]
-    pub fn key(self, key: &str) -> Self {
-        self.where_key(key)
     }
 
     /// Filters by source/lane.
@@ -978,36 +1396,12 @@ impl WindowSnapshotQuery {
         self
     }
 
-    /// Alias for [`where_source`](Self::where_source).
-    #[must_use]
-    pub fn source(self, source: &str) -> Self {
-        self.where_source(source)
-    }
-
-    /// Alias for filtering by source/lane.
-    #[must_use]
-    pub fn where_lane(self, lane: &str) -> Self {
-        self.where_source(lane)
-    }
-
-    /// Alias for [`where_lane`](Self::where_lane).
-    #[must_use]
-    pub fn lane(self, lane: &str) -> Self {
-        self.where_lane(lane)
-    }
-
     /// Filters by partition.
     #[must_use]
     pub fn where_partition(mut self, partition: &str) -> Self {
         self.records
             .retain(|record| record.window.partition() == Some(partition));
         self
-    }
-
-    /// Alias for [`where_partition`](Self::where_partition).
-    #[must_use]
-    pub fn partition(self, partition: &str) -> Self {
-        self.where_partition(partition)
     }
 
     /// Filters by segment value.
@@ -1024,12 +1418,6 @@ impl WindowSnapshotQuery {
         self
     }
 
-    /// Alias for [`where_segment`](Self::where_segment).
-    #[must_use]
-    pub fn segment(self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        self.where_segment(name, value)
-    }
-
     /// Filters by tag value.
     #[must_use]
     pub fn where_tag(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
@@ -1044,22 +1432,10 @@ impl WindowSnapshotQuery {
         self
     }
 
-    /// Alias for [`where_tag`](Self::where_tag).
-    #[must_use]
-    pub fn tag(self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        self.where_tag(name, value)
-    }
-
     /// Materializes all matching snapshot records.
     #[must_use]
     pub fn windows(&self) -> Vec<WindowSnapshotRecord> {
         self.records.clone()
-    }
-
-    /// Alias for [`windows`](Self::windows).
-    #[must_use]
-    pub fn all(&self) -> Vec<WindowSnapshotRecord> {
-        self.windows()
     }
 
     /// Materializes final snapshot records.
@@ -1086,12 +1462,6 @@ impl WindowSnapshotQuery {
     #[must_use]
     pub fn latest_window(&self) -> Option<WindowSnapshotRecord> {
         self.records.last().cloned()
-    }
-
-    /// Alias for [`latest_window`](Self::latest_window).
-    #[must_use]
-    pub fn latest(&self) -> Option<WindowSnapshotRecord> {
-        self.latest_window()
     }
 
     /// Summarizes matching snapshot records by segment.
@@ -1528,209 +1898,6 @@ impl WindowHistoryFixtureWindow {
         self
     }
 }
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fixture_builder_creates_closed_windows_with_metadata() {
-        let history = WindowHistoryFixture::new()
-            .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
-                w.source("provider-a")
-                    .partition("fleet-a")
-                    .segment("lifecycle", "Incident")
-                    .child_segment("stage", "Escalated", "lifecycle")
-                    .tag("fleet", "critical")
-            })
-            .expect("valid fixture window")
-            .build();
-
-        let window = &history.closed_windows()[0];
-        assert_eq!(window.id.as_str(), "window-0000");
-        assert_eq!(window.source.as_deref(), Some("provider-a"));
-        assert_eq!(window.partition.as_deref(), Some("fleet-a"));
-        assert_eq!(window.segments.len(), 2);
-        assert_eq!(window.tags.len(), 1);
-        assert_eq!(window.range.magnitude(), 4);
-    }
-
-    #[test]
-    fn fixture_builder_creates_open_windows() {
-        let history = WindowHistoryFixture::new()
-            .open_window("DeviceOffline", "device-1", 10, |w| w.source("provider-a"))
-            .build();
-
-        assert_eq!(history.open_windows().len(), 1);
-        assert_eq!(history.open_windows()[0].start, TemporalPoint::position(10));
-    }
-
-    #[test]
-    fn direct_history_query_filters_and_aliases() {
-        let history = segmented_history();
-
-        let rows = history
-            .query()
-            .where_window("DeviceOffline")
-            .where_key("device-1")
-            .where_lane("provider-a")
-            .where_partition("p1")
-            .where_segment("lifecycle", "Incident")
-            .where_tag("fleet", "warehouse")
-            .closed()
-            .all();
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].source(), Some("provider-a"));
-        assert_eq!(
-            rows[0].segments()[0].value,
-            PrimitiveValue::from("Incident")
-        );
-
-        let latest = history
-            .query()
-            .window("DeviceOffline")
-            .lane("provider-a")
-            .latest()
-            .expect("latest window");
-        assert_eq!(latest.key(), "device-2");
-    }
-
-    #[test]
-    fn snapshot_records_include_final_and_provisional_ranges() {
-        let history = segmented_history();
-        let snapshot = history
-            .snapshot_at(TemporalPoint::position(6))
-            .expect("snapshot");
-        let rows = snapshot
-            .query()
-            .where_window("DeviceOffline")
-            .where_lane("provider-a")
-            .all();
-
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].finality, ComparisonFinality::Final);
-        assert_eq!(rows[1].finality, ComparisonFinality::Provisional);
-        assert_eq!(rows[1].range.magnitude(), 3);
-    }
-
-    #[test]
-    fn summaries_group_recorded_and_snapshot_windows() {
-        let history = segmented_history();
-
-        let summaries = history
-            .query()
-            .where_window("DeviceOffline")
-            .summarize_by_segment("lifecycle")
-            .expect("segment summaries");
-        let incident = summaries
-            .iter()
-            .find(|summary| summary.value == PrimitiveValue::from("Incident"))
-            .expect("incident summary");
-        assert_eq!(incident.group_kind, WindowGroupKind::Segment);
-        assert_eq!(incident.record_count, 2);
-        assert_eq!(incident.final_count, 1);
-        assert_eq!(incident.provisional_count, 1);
-        assert_eq!(incident.measured_position_count, 1);
-        assert_eq!(incident.total_position_length, 1);
-
-        let snapshot_summaries = history
-            .snapshot_at(TemporalPoint::position(6))
-            .expect("snapshot")
-            .query()
-            .where_window("DeviceOffline")
-            .summarize_by_segment("lifecycle")
-            .expect("snapshot summaries");
-        let snapshot_incident = snapshot_summaries
-            .iter()
-            .find(|summary| summary.value == PrimitiveValue::from("Incident"))
-            .expect("snapshot incident summary");
-        assert_eq!(snapshot_incident.measured_position_count, 2);
-        assert_eq!(snapshot_incident.total_position_length, 4);
-
-        assert!(history.query().summarize_by_segment("").is_err());
-    }
-
-    #[test]
-    fn direct_overlap_and_residual_helpers_match_query_surface() {
-        let history = WindowHistoryFixture::new()
-            .closed_window("SelectionSuspension", "selection-1", 1, 5, |w| {
-                w.source("provider-a")
-            })
-            .expect("target")
-            .closed_window("SelectionSuspension", "selection-1", 3, 6, |w| {
-                w.source("provider-b")
-            })
-            .expect("against")
-            .build();
-
-        let overlap = history.find_overlaps().remove(0);
-        assert_eq!(overlap.first.source.as_deref(), Some("provider-a"));
-        assert_eq!(overlap.second.source.as_deref(), Some("provider-b"));
-
-        let residual = history.find_residuals("provider-a").remove(0);
-        assert_eq!(residual.start_position, 1);
-        assert_eq!(residual.end_position, 3);
-    }
-
-    #[test]
-    fn annotations_append_revisions_and_filter_by_known_at() {
-        let mut history = WindowHistoryFixture::new()
-            .open_window("DeviceOffline", "device-1", 1, |w| w.source("lane-a"))
-            .build();
-        let open = history.query().open_windows()[0].clone();
-        let target = WindowAnnotationTarget::from_open(&open);
-
-        let first = history.annotate(target.clone(), "classification", "initial", None);
-        let second = history.annotate(
-            target.clone(),
-            "classification",
-            "revised",
-            Some(TemporalPoint::position(5)),
-        );
-        history.annotate(
-            target.clone(),
-            "classification",
-            "future",
-            Some(TemporalPoint::position(8)),
-        );
-        history.annotate(
-            target.clone(),
-            "timestamp-note",
-            "different-axis",
-            Some(TemporalPoint::timestamp_ticks(10)),
-        );
-
-        assert_eq!(first.revision, 1);
-        assert_eq!(second.revision, 2);
-        assert_eq!(history.annotations_for(&target).len(), 4);
-
-        let known = history.annotations_known_at(&target, TemporalPoint::position(6));
-        assert_eq!(known, vec![second]);
-    }
-
-    fn segmented_history() -> WindowHistory {
-        WindowHistoryFixture::new()
-            .closed_window("DeviceOffline", "device-1", 1, 2, |w| {
-                w.source("provider-a")
-                    .partition("p1")
-                    .segment("lifecycle", "Incident")
-                    .tag("fleet", "warehouse")
-            })
-            .expect("closed provider-a")
-            .open_window("DeviceOffline", "device-2", 3, |w| {
-                w.source("provider-a")
-                    .partition("p1")
-                    .segment("lifecycle", "Incident")
-                    .tag("fleet", "warehouse")
-            })
-            .closed_window("DeviceOffline", "device-3", 4, 5, |w| {
-                w.source("provider-b")
-                    .partition("p1")
-                    .segment("lifecycle", "Normal")
-                    .tag("fleet", "warehouse")
-            })
-            .expect("closed provider-b")
-            .build()
-    }
-}
+#[path = "records_tests.rs"]
+mod tests;
