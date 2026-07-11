@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spanfold API reference for C#, Python, and Rust with comparison builders, selectors, exports, temporal types, and testing helpers.">
+  <meta name="description" content="Spanfold API reference for C# and Rust with comparison builders, selectors, exports, temporal types, and testing helpers.">
   <title>Spanfold API reference</title>
   <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -62,7 +62,6 @@
         <span>Code</span>
         <div class="language-switcher" aria-label="Code language">
           <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-          <button type="button" data-language-toggle="python" aria-pressed="false">Python</button>
           <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
         </div>
       </div>
@@ -71,19 +70,13 @@
       <p class="eyebrow">API reference</p>
       <h1>Spanfold API reference.</h1>
       <p>
-        Static reference for the public package surface across C#, Python, and
-        Rust. Python keeps the same core capabilities with snake-case names and
-        dataclass result models; Rust exposes idiomatic builders, selector-backed
+        Static reference for the public package surface across C# and Rust.
+        Rust exposes idiomatic builders, selector-backed
         comparison plans, deterministic exports, audit bundles, and CLI workflows.
       </p>
       <div class="language-panel" data-language="csharp">
         <pre><code>dotnet add package Spanfold
 dotnet add package Spanfold.Testing</code></pre>
-      </div>
-      <div class="language-panel" data-language="python">
-        <pre><code>cd packages/python
-python -m pip install -e ".[dev]"</code></pre>
-        <p class="language-note">The Python package includes the core runtime, comparison, export, testing, and fixture CLI surfaces.</p>
       </div>
       <div class="language-panel" data-language="rust">
         <pre><code>cd packages/rust
@@ -155,7 +148,6 @@ cargo run -p spanfold-cli -- --help</code></pre>
         </details>
         <details open>
           <summary>Spanfold.Comparison</summary>
-          <a class="type-link" href="#PythonParity">Python parity surface</a>
           <a class="type-link" href="#RustApi">Rust API surface</a>
           <a class="type-link" href="#WindowComparisonBuilder">WindowComparisonBuilder</a>
           <a class="member-link" href="#WindowComparisonBuilder">Target(...)</a>
@@ -218,45 +210,6 @@ cargo run -p spanfold-cli -- --help</code></pre>
       </aside>
 
       <div class="api-reference-content">
-        <section class="api-member" id="PythonParity">
-          <p class="member-kind">python package</p>
-          <h2>Python parity surface</h2>
-          <p>
-            The Python package mirrors the C# core library with idiomatic naming:
-            builders expose <code>build()</code>, <code>validate()</code>,
-            <code>prepare()</code>, <code>run()</code>, and <code>run_live()</code>;
-            prepared comparisons expose <code>align()</code>; results expose
-            deterministic JSON, JSON Lines, Markdown, debug HTML, and LLM context
-            exports.
-          </p>
-          <table class="member-table">
-            <tr><th>Python member</th><th>C# equivalent</th></tr>
-            <tr><td><code>Spanfold.for_events()</code></td><td><code>Spanfold.For&lt;TEvent&gt;()</code></td></tr>
-            <tr><td><code>WindowComparisonBuilder.prepare()</code></td><td><code>WindowComparisonBuilder.Prepare()</code></td></tr>
-            <tr><td><code>PreparedComparison.align()</code></td><td><code>PreparedComparison.Align()</code></td></tr>
-            <tr><td><code>ComparisonComparatorCatalog.is_known_declaration(...)</code></td><td><code>ComparisonComparatorCatalog.IsKnownDeclaration(...)</code></td></tr>
-            <tr><td><code>ComparisonResult.export_llm_context(...)</code></td><td><code>ComparisonResult.ExportLlmContext(...)</code></td></tr>
-            <tr><td><code>ComparisonDebugHtmlOptions.to_file(...)</code></td><td><code>ComparisonDebugHtmlOptions.ToFile(...)</code></td></tr>
-            <tr><td><code>ComparisonLlmContextOptions.to_file(...)</code></td><td><code>ComparisonLlmContextOptions.ToFile(...)</code></td></tr>
-            <tr><td><code>python -m spanfold.cli compare fixture.json</code></td><td><code>spanfold compare fixture.json</code></td></tr>
-          </table>
-          <div class="language-panel" data-language="python">
-            <pre><code>from spanfold import ComparisonLlmContextOptions
-
-result = (
-    history.compare("Provider QA")
-    .target("provider-a")
-    .against("provider-b")
-    .within(window_name="DeviceOffline")
-    .using("overlap", "residual", "coverage")
-    .run(ComparisonLlmContextOptions.to_file("artifacts/provider-qa.llm.json"))
-)
-
-prepared = result.prepared
-aligned = prepared.align() if prepared is not None else None</code></pre>
-          </div>
-        </section>
-
         <section class="api-member" id="RustApi">
           <p class="member-kind">rust package</p>
           <h2>Rust API surface</h2>
@@ -473,17 +426,6 @@ let rows = export_result_json_lines(&result)?;</code></pre>
     .Within(scope =&gt; scope.Window("DeviceOffline"))
     .Using(c =&gt; c.Overlap().Residual().Missing())
     .Run();</code></pre>
-          </div>
-          <div class="language-panel" data-language="python">
-            <pre><code>result = (
-    pipeline.history.compare("Provider QA")
-    .target("provider-a")
-    .against("provider-b")
-    .within(window_name="DeviceOffline")
-    .using("overlap", "residual", "missing")
-    .run()
-)</code></pre>
-            <p class="language-note">Python exposes the same comparison stages with snake-case method names.</p>
           </div>
           <div class="language-panel" data-language="rust">
             <pre><code>let result = history

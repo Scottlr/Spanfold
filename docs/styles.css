@@ -217,7 +217,6 @@ main,
 }
 
 body[data-language="csharp"] .language-panel[data-language="csharp"],
-body[data-language="python"] .language-panel[data-language="python"],
 body[data-language="rust"] .language-panel[data-language="rust"] {
   display: block;
 }

@@ -1,7 +1,7 @@
 (function () {
   const measurementId = "G-RDNDN2RW33";
   const storageKey = "spanfold-language";
-  const supported = new Set(["csharp", "python", "rust"]);
+  const supported = new Set(["csharp", "rust"]);
 
   function installGoogleAnalytics() {
     if (window.gtag) {

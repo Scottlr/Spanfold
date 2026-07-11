@@ -4,9 +4,6 @@
       case "csharp":
       case "cs":
         return "csharp";
-      case "python":
-      case "py":
-        return "python";
       case "powershell":
       case "ps":
       case "ps1":
@@ -49,7 +46,7 @@
       return "powershell";
     }
 
-    if (/^(cd|dotnet|python\s+-m)\b/im.test(text) || /^-e\s+/m.test(text)) {
+    if (/^(cd|dotnet|cargo)\b/im.test(text)) {
       return "bash";
     }
 
@@ -64,10 +61,6 @@
 
     if (/\b(using|public|sealed|record|foreach|var)\b|=>/.test(text)) {
       return "csharp";
-    }
-
-    if (/\b(from|import|class|def)\b|print\(|result\s*=/.test(text)) {
-      return "python";
     }
 
     return "plaintext";

@@ -1,7 +1,7 @@
 [package]
 name = "spanfold-cli"
-version = "0.0.0"
-description = "Production high-throughput CLI for Spanfold temporal evidence workflows."
+version = "0.1.0"
+description = "Preview CLI for Spanfold temporal evidence workflows."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

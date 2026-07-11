@@ -35,15 +35,6 @@ Run the .NET suite with:
 dotnet run -c Release --project benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj # Run the full benchmark suite.
 ```
 
-Run the Python suite with:
-
-```bash
-cd packages/python
-python benchmarks/spanfold_benchmarks.py --smoke # Quick check.
-python benchmarks/spanfold_benchmarks.py --scenario medium # Focused scenario.
-python benchmarks/spanfold_benchmarks.py # Full Python harness.
-```
-
 For focused work, filter by class or method:
 
 ```bash

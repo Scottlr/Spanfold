@@ -62,7 +62,6 @@
         <span>Code</span>
         <div class="language-switcher" aria-label="Code language">
           <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-          <button type="button" data-language-toggle="python" aria-pressed="false">Python</button>
         </div>
       </div>
     </div>
@@ -97,18 +96,6 @@
 
 result.ExportDebugHtml("artifacts/provider-qa.html");
 result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
-      </div>
-      <div class="language-panel" data-language="python">
-        <pre><code>result = (
-    pipeline.history.compare("Provider QA")
-    .target("provider-a")
-    .against("provider-b")
-    .within(window_name="DeviceOffline")
-    .using("overlap", "residual", "coverage")
-    .run()
-)
-
-result.export_llm_context("artifacts/provider-qa.llm.json")</code></pre>
       </div>
     </section>
 

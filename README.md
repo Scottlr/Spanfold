@@ -200,14 +200,6 @@ dotnet add package Spanfold.Testing # optional: fixtures, snapshots, assertions
 
 → [.NET package README](packages/dotnet/README.md)
 
-## Python Package
-
-A typed Python package that tracks the core C# API surface with idiomatic
-snake-case names, dataclass models, deterministic exports, testing helpers, and
-fixture CLI commands.
-
-→ [Python package README](packages/python/README.md)
-
 ## Rust Package
 
 A Rust 2024 package and CLI that support the core comparison contract with
@@ -230,12 +222,6 @@ packages/
     benchmarks/
     docs/
     Spanfold.slnx
-  python/
-    src/
-    tests/
-    samples/
-    docs/
-    pyproject.toml
   rust/
     crates/
     tests/
@@ -251,14 +237,6 @@ Run the .NET reference tests:
 
 ```bash
 dotnet test packages/dotnet/Spanfold.slnx
-```
-
-Run the Python port tests:
-
-```bash
-cd packages/python
-python -m pip install -e ".[dev]"
-pytest
 ```
 
 Run the Rust port tests and lints:

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spanfold records temporal state windows and compares them across sources, providers, or pipeline stages in C#, Python, and Rust.">
+  <meta name="description" content="Spanfold records temporal state windows and compares them across sources, providers, or pipeline stages in C# and Rust.">
   <title>Spanfold - temporal state-window comparison</title>
   <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -78,7 +78,6 @@
             <span>Code</span>
             <div class="language-switcher" aria-label="Code language">
               <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-              <button type="button" data-language-toggle="python" aria-pressed="false">Python</button>
               <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
             </div>
           </div>
@@ -101,24 +100,6 @@ Install-Package Spanfold.Testing</code></pre>
 &lt;PackageReference Include="Spanfold.Testing" Version="0.1.0" /&gt;</code></pre>
             </article>
           </div>
-        </div>
-        <div class="language-panel" data-language="python">
-          <div class="install-methods">
-            <article>
-              <h3>Editable port</h3>
-              <pre><code>cd packages/python
-python -m pip install -e ".[dev]"</code></pre>
-            </article>
-            <article>
-              <h3>Local path</h3>
-              <pre><code>python -m pip install -e ./packages/python</code></pre>
-            </article>
-            <article>
-              <h3>requirements.txt</h3>
-              <pre><code>-e ./packages/python</code></pre>
-            </article>
-          </div>
-          <p class="language-note">Python tracks the core API surface with idiomatic snake-case names.</p>
         </div>
         <div class="language-panel" data-language="rust">
           <div class="install-methods">
@@ -310,11 +291,6 @@ cargo test --workspace</code></pre>
 dotnet add package Spanfold.Testing</code></pre>
             <p>`Spanfold.Testing` is optional. It provides fixtures, snapshots, and assertions for consumer tests.</p>
           </div>
-          <div class="language-panel" data-language="python">
-            <pre><code>cd packages/python
-python -m pip install -e ".[dev]"</code></pre>
-            <p class="language-note">The Python package now tracks the C# core API surface with idiomatic snake-case names.</p>
-          </div>
           <div class="language-panel" data-language="rust">
             <pre><code>cd packages/rust
 cargo test --workspace</code></pre>
@@ -338,31 +314,6 @@ pipeline.Ingest(new DeviceSignal("device-17", false), source: "provider-a");
 pipeline.Ingest(new DeviceSignal("device-17", true), source: "provider-a");
 
 public sealed record DeviceSignal(string DeviceId, bool IsOnline);</code></pre>
-          </div>
-          <div class="language-panel" data-language="python">
-            <pre><code>from dataclasses import dataclass
-
-from spanfold import Spanfold
-
-
-@dataclass(frozen=True)
-class DeviceSignal:
-    device_id: str
-    is_online: bool
-
-
-pipeline = (
-    Spanfold.for_events()
-    .record_windows()
-    .track_window(
-        "DeviceOffline",
-        key=lambda signal: signal.device_id,
-        is_active=lambda signal: not signal.is_online,
-    )
-)
-
-pipeline.ingest(DeviceSignal("device-17", False), source="provider-a")
-pipeline.ingest(DeviceSignal("device-17", True), source="provider-a")</code></pre>
           </div>
           <div class="language-panel" data-language="rust">
             <pre><code>use spanfold::for_events;
@@ -413,19 +364,6 @@ pipeline.ingest(
 
 result.ExportDebugHtml("artifacts/provider-qa.html");
 result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
-        </div>
-        <div class="language-panel" data-language="python">
-          <pre><code>result = (
-    pipeline.history.compare("Provider QA")
-    .target("provider-a")
-    .against("provider-b")
-    .within(window_name="DeviceOffline")
-    .using("overlap", "residual", "missing", "coverage")
-    .run()
-)
-
-result.export_debug_html("artifacts/provider-qa.html")
-result.export_llm_context("artifacts/provider-qa.llm.json")</code></pre>
         </div>
         <div class="language-panel" data-language="rust">
           <pre><code>use spanfold::{export_result_llm_context, ComparisonDebugHtmlOptions, ComparisonLlmContextOptions};

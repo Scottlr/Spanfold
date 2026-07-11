@@ -5,7 +5,7 @@
 //! This crate is the start of Spanfold's Rust 1.95.0 / Rust 2024
 //! implementation. It intentionally begins with strongly typed data structures
 //! and builders that future comparison, export, and CLI work can use without a
-//! mechanical translation from the .NET or Python codebases.
+//! mechanical translation from the .NET implementation.
 
 mod analytics;
 mod builders;

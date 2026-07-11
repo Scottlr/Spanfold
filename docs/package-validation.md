@@ -17,8 +17,6 @@ unzip -l artifacts/package/Spanfold.0.1.0.snupkg # Inspect symbol package conten
 
 Expected package contents include:
 
-- `lib/net8.0/Spanfold.dll`
-- `lib/net8.0/Spanfold.xml`
 - `lib/net10.0/Spanfold.dll`
 - `lib/net10.0/Spanfold.xml`
 - `README.md`
@@ -26,7 +24,7 @@ Expected package contents include:
 Run a consumer smoke test from a temporary directory:
 
 ```bash
-dotnet new console --framework net8.0 # Create a temporary consumer app.
+dotnet new console --framework net10.0 # Create a temporary consumer app.
 dotnet add package Spanfold --version 0.1.0 --source /absolute/path/to/spanfold/artifacts/package # Reference the local package.
 dotnet build # Verify the consumer can restore and compile.
 ```

@@ -1,6 +1,6 @@
 [package]
 name = "spanfold"
-version = "0.0.0"
+version = "0.1.0"
 description = "High-throughput temporal state-window recording and comparison for Rust."
 edition.workspace = true
 rust-version.workspace = true
