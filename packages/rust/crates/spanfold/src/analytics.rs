@@ -69,11 +69,10 @@ impl SourceMatrixResult {
         })
     }
 
-    /// Returns one directional matrix cell or panics when absent.
+    /// Returns one directional matrix cell, or `None` when absent.
     #[must_use]
-    pub fn get_cell(&self, target_source: &str, against_source: &str) -> &SourceMatrixCell {
+    pub fn get_cell(&self, target_source: &str, against_source: &str) -> Option<&SourceMatrixCell> {
         self.try_get_cell(target_source, against_source)
-            .expect("source matrix cell was not found")
     }
 }
 
@@ -132,9 +131,16 @@ pub fn compare_sources(
     window_name: &str,
     sources: &[String],
 ) -> SourceMatrixResult {
-    let mut cells = Vec::with_capacity(sources.len() * sources.len());
-    for target_source in sources {
-        for against_source in sources {
+    let mut unique_sources = Vec::with_capacity(sources.len());
+    let mut seen_sources = BTreeSet::new();
+    for source in sources {
+        if !source.trim().is_empty() && seen_sources.insert(source.as_str()) {
+            unique_sources.push(source.clone());
+        }
+    }
+    let mut cells = Vec::with_capacity(unique_sources.len() * unique_sources.len());
+    for target_source in &unique_sources {
+        for against_source in &unique_sources {
             let target_has_windows = has_window_for_source(history, window_name, target_source);
             let against_has_windows = has_window_for_source(history, window_name, against_source);
             if target_source == against_source {
@@ -218,7 +224,7 @@ pub fn compare_sources(
     SourceMatrixResult {
         name: name.to_owned(),
         window_name: window_name.to_owned(),
-        sources: sources.to_vec(),
+        sources: unique_sources,
         cells,
     }
 }
@@ -258,21 +264,41 @@ pub fn compare_hierarchy(
 
     let mut scopes = BTreeSet::new();
     for window in &parents {
-        scopes.insert((window.source.clone(), window.partition.clone()));
+        scopes.insert((
+            window.source.clone(),
+            window.partition.clone(),
+            window.range.start().axis(),
+            window.range.start().clock().map(str::to_owned),
+        ));
     }
     for window in &children {
-        scopes.insert((window.source.clone(), window.partition.clone()));
+        scopes.insert((
+            window.source.clone(),
+            window.partition.clone(),
+            window.range.start().axis(),
+            window.range.start().clock().map(str::to_owned),
+        ));
     }
 
     let mut rows = Vec::new();
-    for (source, partition) in scopes {
+    for (source, partition, axis, clock) in scopes {
         let scoped_parents = parents
             .iter()
-            .filter(|window| window.source == source && window.partition == partition)
+            .filter(|window| {
+                window.source == source
+                    && window.partition == partition
+                    && window.range.start().axis() == axis
+                    && window.range.start().clock() == clock.as_deref()
+            })
             .collect::<Vec<_>>();
         let scoped_children = children
             .iter()
-            .filter(|window| window.source == source && window.partition == partition)
+            .filter(|window| {
+                window.source == source
+                    && window.partition == partition
+                    && window.range.start().axis() == axis
+                    && window.range.start().clock() == clock.as_deref()
+            })
             .collect::<Vec<_>>();
 
         let mut boundaries = BTreeSet::new();
@@ -281,27 +307,69 @@ pub fn compare_hierarchy(
             boundaries.insert(window.range.end().magnitude());
         }
         let boundaries = boundaries.into_iter().collect::<Vec<_>>();
+        let mut parent_starts = scoped_parents
+            .iter()
+            .enumerate()
+            .map(|(index, window)| (window.range.start().magnitude(), index))
+            .collect::<Vec<_>>();
+        let mut parent_ends = scoped_parents
+            .iter()
+            .enumerate()
+            .map(|(index, window)| (window.range.end().magnitude(), index))
+            .collect::<Vec<_>>();
+        let mut child_starts = scoped_children
+            .iter()
+            .enumerate()
+            .map(|(index, window)| (window.range.start().magnitude(), index))
+            .collect::<Vec<_>>();
+        let mut child_ends = scoped_children
+            .iter()
+            .enumerate()
+            .map(|(index, window)| (window.range.end().magnitude(), index))
+            .collect::<Vec<_>>();
+        parent_starts.sort_unstable();
+        parent_ends.sort_unstable();
+        child_starts.sort_unstable();
+        child_ends.sort_unstable();
+        let mut active_parents = BTreeSet::new();
+        let mut active_children = BTreeSet::new();
+        let mut parent_start_index = 0;
+        let mut parent_end_index = 0;
+        let mut child_start_index = 0;
+        let mut child_end_index = 0;
         for pair in boundaries.windows(2) {
             let start = pair[0];
             let end = pair[1];
             if start >= end {
                 continue;
             }
-            let parent_record_ids = scoped_parents
+            while parent_end_index < parent_ends.len() && parent_ends[parent_end_index].0 <= start {
+                active_parents.remove(&parent_ends[parent_end_index].1);
+                parent_end_index += 1;
+            }
+            while child_end_index < child_ends.len() && child_ends[child_end_index].0 <= start {
+                active_children.remove(&child_ends[child_end_index].1);
+                child_end_index += 1;
+            }
+            while parent_start_index < parent_starts.len()
+                && parent_starts[parent_start_index].0 <= start
+            {
+                active_parents.insert(parent_starts[parent_start_index].1);
+                parent_start_index += 1;
+            }
+            while child_start_index < child_starts.len()
+                && child_starts[child_start_index].0 <= start
+            {
+                active_children.insert(child_starts[child_start_index].1);
+                child_start_index += 1;
+            }
+            let parent_record_ids = active_parents
                 .iter()
-                .filter(|window| {
-                    window.range.start().magnitude() <= start
-                        && end <= window.range.end().magnitude()
-                })
-                .map(|window| window.id.as_str().to_owned())
+                .map(|index| scoped_parents[*index].id.as_str().to_owned())
                 .collect::<Vec<_>>();
-            let child_record_ids = scoped_children
+            let child_record_ids = active_children
                 .iter()
-                .filter(|window| {
-                    window.range.start().magnitude() <= start
-                        && end <= window.range.end().magnitude()
-                })
-                .map(|window| window.id.as_str().to_owned())
+                .map(|index| scoped_children[*index].id.as_str().to_owned())
                 .collect::<Vec<_>>();
             if parent_record_ids.is_empty() && child_record_ids.is_empty() {
                 continue;
@@ -316,7 +384,12 @@ pub fn compare_hierarchy(
                 },
                 source: source.clone(),
                 partition: partition.clone(),
-                range: RowRange { start, end },
+                range: RowRange {
+                    start,
+                    end,
+                    axis,
+                    clock: clock.clone(),
+                },
                 parent_record_ids,
                 child_record_ids,
             });
@@ -366,7 +439,7 @@ mod tests {
             &["provider-a".to_owned(), "provider-b".to_owned()],
         );
 
-        let forward = matrix.get_cell("provider-a", "provider-b");
+        let forward = matrix.get_cell("provider-a", "provider-b").expect("cell");
         assert!(!forward.is_diagonal);
         assert_eq!(forward.overlap_row_count, 1);
         assert!(matrix.try_get_cell("provider-b", "provider-a").is_some());

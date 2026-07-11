@@ -27,6 +27,7 @@ pub enum FixtureError {
 pub struct ContractFixture {
     history: WindowHistory,
     plan: ComparisonPlan,
+    expected: Option<serde_json::Value>,
 }
 
 impl ContractFixture {
@@ -55,9 +56,11 @@ impl ContractFixture {
             }
         }
 
+        let expected = parsed.expected.or(parsed.expect);
         Ok(Self {
             history: builder.build(),
             plan: parsed.plan.try_into()?,
+            expected,
         })
     }
 
@@ -78,6 +81,15 @@ impl ContractFixture {
     pub fn execute(&self) -> crate::ComparisonResult {
         compare(&self.history, &self.plan)
     }
+
+    /// Executes the fixture and enforces its optional expectation contract.
+    pub fn execute_checked(&self) -> Result<crate::ComparisonResult, FixtureError> {
+        let result = self.execute();
+        if let Some(expected) = &self.expected {
+            validate_expectation(expected, &result)?;
+        }
+        Ok(result)
+    }
 }
 
 impl FromStr for ContractFixture {
@@ -89,12 +101,19 @@ impl FromStr for ContractFixture {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawFixture {
     schema: String,
     #[serde(rename = "schemaVersion")]
     schema_version: u32,
+    #[serde(rename = "name", default)]
+    _name: Option<String>,
     windows: Vec<RawWindow>,
     plan: RawPlan,
+    #[serde(rename = "expected", default)]
+    expected: Option<serde_json::Value>,
+    #[serde(rename = "expect", default)]
+    expect: Option<serde_json::Value>,
 }
 
 impl RawFixture {
@@ -114,6 +133,7 @@ impl RawFixture {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawWindow {
     #[serde(rename = "windowName")]
     window_name: String,
@@ -133,6 +153,7 @@ struct RawWindow {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawNamedValue {
     name: String,
     value: PrimitiveValue,
@@ -141,6 +162,7 @@ struct RawNamedValue {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawPlan {
     name: String,
     #[serde(rename = "targetSource")]
@@ -174,6 +196,7 @@ struct RawPlan {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawAgainstCohort {
     name: String,
     sources: Vec<String>,
@@ -185,6 +208,12 @@ impl TryFrom<RawPlan> for ComparisonPlan {
     type Error = FixtureError;
 
     fn try_from(value: RawPlan) -> Result<Self, Self::Error> {
+        if value.live_horizon_position.is_some() && value.open_window_horizon_position.is_some() {
+            return Err(FixtureError::Validation(
+                "liveHorizonPosition and openWindowHorizonPosition are mutually exclusive."
+                    .to_owned(),
+            ));
+        }
         let against = if let Some(cohort) = value.against_cohort {
             if cohort.sources.is_empty() {
                 return Err(FixtureError::Validation(
@@ -338,6 +367,68 @@ fn apply_window_metadata(
     builder
 }
 
+fn validate_expectation(
+    expected: &serde_json::Value,
+    result: &crate::ComparisonResult,
+) -> Result<(), FixtureError> {
+    let Some(object) = expected.as_object() else {
+        return Err(FixtureError::Validation(
+            "fixture expectation must be an object".to_owned(),
+        ));
+    };
+    if let Some(expected_valid) = object.get("isValid") {
+        let actual_valid = serde_json::Value::Bool(result.is_valid);
+        if expected_valid != &actual_valid {
+            return Err(FixtureError::Validation(format!(
+                "fixture expectation mismatch at isValid: expected {expected_valid}, actual {actual_valid}"
+            )));
+        }
+    }
+    if let Some(expected_diagnostics) = object.get("diagnostics") {
+        let actual_diagnostics = serde_json::Value::Array(
+            result
+                .diagnostics
+                .iter()
+                .map(|diagnostic| serde_json::Value::String(diagnostic.code.clone()))
+                .collect(),
+        );
+        if expected_diagnostics != &actual_diagnostics {
+            return Err(FixtureError::Validation(format!(
+                "fixture expectation mismatch at diagnostics: expected {expected_diagnostics}, actual {actual_diagnostics}"
+            )));
+        }
+    }
+    if let Some(expected_summaries) = object.get("summaries") {
+        let actual_summaries = serde_json::to_value(&result.comparator_summaries)?;
+        if !json_subset(expected_summaries, &actual_summaries) {
+            return Err(FixtureError::Validation(
+                "fixture expectation mismatch at summaries".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn json_subset(expected: &serde_json::Value, actual: &serde_json::Value) -> bool {
+    match (expected, actual) {
+        (serde_json::Value::Object(expected), serde_json::Value::Object(actual)) => {
+            expected.iter().all(|(key, value)| {
+                actual
+                    .get(key)
+                    .is_some_and(|candidate| json_subset(value, candidate))
+            })
+        }
+        (serde_json::Value::Array(expected), serde_json::Value::Array(actual)) => {
+            expected.len() == actual.len()
+                && expected
+                    .iter()
+                    .zip(actual)
+                    .all(|(expected, actual)| json_subset(expected, actual))
+        }
+        _ => expected == actual,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,5 +537,28 @@ mod tests {
 
         assert!(result.is_valid);
         assert!(result.residual_rows.is_empty());
+    }
+
+    #[test]
+    fn bundled_contract_fixtures_enforce_expectations() {
+        for json in [
+            include_str!(
+                "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/basic-overlap.json"
+            ),
+            include_str!(
+                "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/cohort-any-residual.json"
+            ),
+            include_str!(
+                "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/segmented-residual.json"
+            ),
+            include_str!(
+                "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/strict-broad-scope.json"
+            ),
+        ] {
+            ContractFixture::parse_json(json)
+                .expect("fixture should parse")
+                .execute_checked()
+                .expect("fixture expectation should match");
+        }
     }
 }

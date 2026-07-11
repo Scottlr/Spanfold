@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use std::collections::BTreeMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::{
     ComparisonFinality, PrimitiveValue, TemporalAxis, TemporalPoint, TemporalRange,
@@ -229,7 +229,7 @@ impl WindowRecord {
     pub fn start(&self) -> TemporalPoint {
         match self {
             Self::Closed(window) => window.range.start(),
-            Self::Open(window) => window.start,
+            Self::Open(window) => window.start.clone(),
         }
     }
 
@@ -317,6 +317,10 @@ pub struct WindowResidualSegment {
     pub end_position: i64,
     /// Optional partition.
     pub partition: Option<String>,
+    /// Temporal axis governing the positions.
+    pub axis: TemporalAxis,
+    /// Timestamp clock identity, when applicable.
+    pub clock: Option<String>,
 }
 
 /// Stable target identity for window annotations.
@@ -328,6 +332,10 @@ pub struct WindowAnnotationTarget {
     pub key: String,
     /// Window start position.
     pub start_position: i64,
+    /// Temporal axis governing `start_position`.
+    pub axis: TemporalAxis,
+    /// Timestamp clock identity, when applicable.
+    pub clock: Option<String>,
     /// Optional source/lane.
     pub source: Option<String>,
     /// Optional partition.
@@ -342,6 +350,8 @@ impl WindowAnnotationTarget {
             window_name: window.window_name().to_owned(),
             key: window.key().to_owned(),
             start_position: window.start().magnitude(),
+            axis: window.start().axis(),
+            clock: window.start().clock().map(str::to_owned),
             source: window.source().map(str::to_owned),
             partition: window.partition().map(str::to_owned),
         }
@@ -376,13 +386,45 @@ pub struct WindowAnnotation {
 }
 
 /// In-memory history of open and closed windows.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct WindowHistory {
     closed: Vec<ClosedWindow>,
     open: Vec<OpenWindow>,
     #[serde(skip)]
     open_indexes: BTreeMap<WindowRecordId, usize>,
     annotations: Vec<WindowAnnotation>,
+}
+
+impl<'de> Deserialize<'de> for WindowHistory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawHistory {
+            #[serde(default)]
+            closed: Vec<ClosedWindow>,
+            #[serde(default)]
+            open: Vec<OpenWindow>,
+            #[serde(default)]
+            annotations: Vec<WindowAnnotation>,
+        }
+
+        let raw = RawHistory::deserialize(deserializer)?;
+        let mut open_indexes = BTreeMap::new();
+        for (index, window) in raw.open.iter().enumerate() {
+            if open_indexes.insert(window.id.clone(), index).is_some() {
+                return Err(serde::de::Error::custom("duplicate open window record id"));
+            }
+        }
+        Ok(Self {
+            closed: raw.closed,
+            open: raw.open,
+            open_indexes,
+            annotations: raw.annotations,
+        })
+    }
 }
 
 impl WindowHistory {
@@ -461,12 +503,12 @@ impl WindowHistory {
         let mut records = self
             .windows()
             .into_iter()
-            .map(|window| snapshot_record(window, horizon))
+            .map(|window| snapshot_record(window, horizon.clone()))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-        records.sort_by_key(|record| window_sort_key(&record.window));
+        records.sort_by(|left, right| compare_window_records(&left.window, &right.window));
         Ok(WindowHistorySnapshot { horizon, records })
     }
 
@@ -517,6 +559,8 @@ impl WindowHistory {
                     start_position,
                     end_position,
                     partition: target.partition.clone(),
+                    axis: target.range.start().axis(),
+                    clock: target.range.start().clock().map(str::to_owned),
                 },
             ));
         }
@@ -569,8 +613,11 @@ impl WindowHistory {
             .iter()
             .filter(|annotation| {
                 &annotation.target == target
-                    && annotation.known_at.is_some_and(|known_at| {
-                        known_at.axis() == horizon.axis() && known_at <= horizon
+                    && annotation.known_at.as_ref().is_some_and(|known_at| {
+                        known_at.axis() == horizon.axis()
+                            && known_at
+                                .try_cmp(&horizon)
+                                .is_ok_and(std::cmp::Ordering::is_le)
                     })
             })
             .cloned()
@@ -615,6 +662,17 @@ impl WindowHistory {
             self.open_indexes.insert(self.open[index].id.clone(), index);
         }
         Some(removed)
+    }
+
+    pub(crate) fn update_open_tags(&mut self, id: &WindowRecordId, tags: Vec<WindowTag>) -> bool {
+        let Some(index) = self.open_indexes.get(id).copied() else {
+            return false;
+        };
+        let Some(window) = self.open.get_mut(index) else {
+            return false;
+        };
+        window.tags = tags;
+        true
     }
 }
 
@@ -832,12 +890,15 @@ impl WindowHistoryQuery {
     }
 
     /// Summarizes matching windows by segment.
-    pub fn summarize_by_segment(&self, name: &str) -> Result<Vec<WindowGroupSummary>, String> {
+    pub fn summarize_by_segment(
+        &self,
+        name: &str,
+    ) -> Result<Vec<WindowGroupSummary>, SummaryError> {
         summarize_by_segment(self.windows.clone(), name)
     }
 
     /// Summarizes matching windows by tag.
-    pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, String> {
+    pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, SummaryError> {
         summarize_by_tag(self.windows.clone(), name)
     }
 
@@ -849,12 +910,12 @@ impl WindowHistoryQuery {
             .windows
             .iter()
             .cloned()
-            .map(|window| snapshot_record(window, horizon))
+            .map(|window| snapshot_record(window, horizon.clone()))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-        records.sort_by_key(|record| window_sort_key(&record.window));
+        records.sort_by(|left, right| compare_window_records(&left.window, &right.window));
         Ok(WindowHistorySnapshot { horizon, records })
     }
 }
@@ -863,7 +924,7 @@ impl WindowHistorySnapshot {
     /// Starts a query over snapshot records.
     #[must_use]
     pub fn query(&self) -> WindowSnapshotQuery {
-        WindowSnapshotQuery::new(self.horizon, self.records.clone())
+        WindowSnapshotQuery::new(self.horizon.clone(), self.records.clone())
     }
 }
 
@@ -878,7 +939,7 @@ impl WindowSnapshotQuery {
     /// Creates a snapshot query.
     #[must_use]
     pub fn new(horizon: TemporalPoint, mut records: Vec<WindowSnapshotRecord>) -> Self {
-        records.sort_by_key(|record| window_sort_key(&record.window));
+        records.sort_by(|left, right| compare_window_records(&left.window, &right.window));
         Self { horizon, records }
     }
 
@@ -1034,12 +1095,15 @@ impl WindowSnapshotQuery {
     }
 
     /// Summarizes matching snapshot records by segment.
-    pub fn summarize_by_segment(&self, name: &str) -> Result<Vec<WindowGroupSummary>, String> {
+    pub fn summarize_by_segment(
+        &self,
+        name: &str,
+    ) -> Result<Vec<WindowGroupSummary>, SummaryError> {
         summarize_snapshot_records(&self.records, WindowGroupKind::Segment, name)
     }
 
     /// Summarizes matching snapshot records by tag.
-    pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, String> {
+    pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, SummaryError> {
         summarize_snapshot_records(&self.records, WindowGroupKind::Tag, name)
     }
 }
@@ -1048,7 +1112,7 @@ impl WindowSnapshotQuery {
 pub fn summarize_by_segment(
     windows: impl IntoIterator<Item = WindowRecord>,
     name: &str,
-) -> Result<Vec<WindowGroupSummary>, String> {
+) -> Result<Vec<WindowGroupSummary>, SummaryError> {
     summarize_windows(windows, WindowGroupKind::Segment, name)
 }
 
@@ -1056,7 +1120,7 @@ pub fn summarize_by_segment(
 pub fn summarize_by_tag(
     windows: impl IntoIterator<Item = WindowRecord>,
     name: &str,
-) -> Result<Vec<WindowGroupSummary>, String> {
+) -> Result<Vec<WindowGroupSummary>, SummaryError> {
     summarize_windows(windows, WindowGroupKind::Tag, name)
 }
 
@@ -1134,7 +1198,7 @@ fn summarize_windows(
     windows: impl IntoIterator<Item = WindowRecord>,
     group_kind: WindowGroupKind,
     name: &str,
-) -> Result<Vec<WindowGroupSummary>, String> {
+) -> Result<Vec<WindowGroupSummary>, SummaryError> {
     validate_summary_name(name)?;
     let mut groups = BTreeMap::<String, SummaryAccumulator>::new();
     for window in windows {
@@ -1155,7 +1219,7 @@ fn summarize_snapshot_records(
     records: &[WindowSnapshotRecord],
     group_kind: WindowGroupKind,
     name: &str,
-) -> Result<Vec<WindowGroupSummary>, String> {
+) -> Result<Vec<WindowGroupSummary>, SummaryError> {
     validate_summary_name(name)?;
     let mut groups = BTreeMap::<String, SummaryAccumulator>::new();
     for record in records {
@@ -1172,9 +1236,17 @@ fn summarize_snapshot_records(
         .collect())
 }
 
-fn validate_summary_name(name: &str) -> Result<(), String> {
+/// Error returned when a summary dimension is invalid.
+#[derive(Clone, Copy, Debug, Eq, thiserror::Error, PartialEq)]
+pub enum SummaryError {
+    /// A segment or tag name must contain non-whitespace text.
+    #[error("summary dimension name cannot be empty")]
+    EmptyName,
+}
+
+fn validate_summary_name(name: &str) -> Result<(), SummaryError> {
     if name.trim().is_empty() {
-        return Err("Summary dimension name cannot be empty.".to_owned());
+        return Err(SummaryError::EmptyName);
     }
     Ok(())
 }
@@ -1184,39 +1256,45 @@ fn metadata_values(
     group_kind: WindowGroupKind,
     name: &str,
 ) -> Vec<PrimitiveValue> {
-    let mut values = Vec::new();
+    let mut values = BTreeMap::<String, PrimitiveValue>::new();
     match group_kind {
         WindowGroupKind::Segment => {
             for segment in window.segments() {
-                if segment.name == name && !values.contains(&segment.value) {
-                    values.push(segment.value.clone());
+                if segment.name == name {
+                    let value = segment.value.clone();
+                    values.entry(primitive_sort_key(&value)).or_insert(value);
                 }
             }
         }
         WindowGroupKind::Tag => {
             for tag in window.tags() {
-                if tag.name == name && !values.contains(&tag.value) {
-                    values.push(tag.value.clone());
+                if tag.name == name {
+                    let value = tag.value.clone();
+                    values.entry(primitive_sort_key(&value)).or_insert(value);
                 }
             }
         }
     }
-    values
+    values.into_values().collect()
 }
 
 fn snapshot_record(
     window: WindowRecord,
     horizon: TemporalPoint,
 ) -> Result<Option<WindowSnapshotRecord>, TemporalRangeError> {
-    if window.start().axis() != horizon.axis() || window.start() > horizon {
+    let start = window.start();
+    if start.axis() != horizon.axis() || matches!(start.try_cmp(&horizon), Ok(Ordering::Greater)) {
         return Ok(None);
     }
 
     match window {
         WindowRecord::Closed(closed) => {
-            if closed.range.end() <= horizon {
+            if matches!(
+                closed.range.end().try_cmp(&horizon),
+                Ok(Ordering::Less | Ordering::Equal)
+            ) {
                 Ok(Some(WindowSnapshotRecord {
-                    range: closed.range,
+                    range: closed.range.clone(),
                     window: WindowRecord::Closed(closed),
                     finality: ComparisonFinality::Final,
                 }))
@@ -1230,7 +1308,7 @@ fn snapshot_record(
             }
         }
         WindowRecord::Open(open) => {
-            let range = TemporalRange::new(open.start, horizon)?;
+            let range = TemporalRange::new(open.start.clone(), horizon.clone())?;
             Ok(Some(WindowSnapshotRecord {
                 window: WindowRecord::Open(open),
                 range,
@@ -1241,19 +1319,22 @@ fn snapshot_record(
 }
 
 fn sort_window_records(windows: &mut [WindowRecord]) {
-    windows.sort_by_key(window_sort_key);
+    windows.sort_by(compare_window_records);
 }
 
-fn window_sort_key(window: &WindowRecord) -> (String, String, String, String, i64, i64, String) {
-    (
-        window.window_name().to_owned(),
-        window.key().to_owned(),
-        window.source().unwrap_or("<null>").to_owned(),
-        window.partition().unwrap_or("<null>").to_owned(),
-        window.start().magnitude(),
-        window.end().map_or(i64::MAX, |point| point.magnitude()),
-        window.id().as_str().to_owned(),
-    )
+fn compare_window_records(left: &WindowRecord, right: &WindowRecord) -> Ordering {
+    left.window_name()
+        .cmp(right.window_name())
+        .then_with(|| left.key().cmp(right.key()))
+        .then_with(|| left.source().cmp(&right.source()))
+        .then_with(|| left.partition().cmp(&right.partition()))
+        .then_with(|| left.start().magnitude().cmp(&right.start().magnitude()))
+        .then_with(|| {
+            left.end()
+                .map_or(i64::MAX, |point| point.magnitude())
+                .cmp(&right.end().map_or(i64::MAX, |point| point.magnitude()))
+        })
+        .then_with(|| left.id().cmp(right.id()))
 }
 
 fn primitive_sort_key(value: &PrimitiveValue) -> String {
@@ -1270,11 +1351,20 @@ fn same_closed_scope(first: &ClosedWindow, second: &ClosedWindow) -> bool {
     first.window_name == second.window_name
         && first.key == second.key
         && first.partition == second.partition
+        && first
+            .range
+            .start()
+            .is_compatible_with(&second.range.start())
 }
 
 fn closed_windows_overlap(first: &ClosedWindow, second: &ClosedWindow) -> bool {
-    first.range.start().magnitude() < second.range.end().magnitude()
-        && second.range.start().magnitude() < first.range.end().magnitude()
+    matches!(
+        first.range.start().try_cmp(&second.range.end()),
+        Ok(Ordering::Less)
+    ) && matches!(
+        second.range.start().try_cmp(&first.range.end()),
+        Ok(Ordering::Less)
+    )
 }
 
 fn subtract_position_window(segments: &[(i64, i64)], window: &ClosedWindow) -> Vec<(i64, i64)> {

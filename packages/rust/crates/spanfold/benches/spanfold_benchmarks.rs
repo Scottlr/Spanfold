@@ -44,7 +44,7 @@ fn create_comparison_data(
         let occurrence = occurrences[occurrence_index];
         occurrences[occurrence_index] += 1;
         let source = format!("provider-{source_index}");
-        pipeline.ingest(
+        let _ = pipeline.ingest(
             DeviceSignal {
                 device_id: format!("device-{device_index}"),
                 is_online: occurrence.is_multiple_of(2),
@@ -88,7 +88,7 @@ fn create_segment_cohort_data() -> WindowHistory {
         let source_index = (event_index / selection_count) % source_count;
         let occurrence = event_index / (selection_count * source_count);
         let source = format!("provider-{source_index}");
-        pipeline.ingest(
+        let _ = pipeline.ingest(
             SegmentSignal {
                 selection_id: format!("selection-{selection_index}"),
                 market_id: format!("market-{}", selection_index % 16),
@@ -136,7 +136,7 @@ fn segment_builder(history: &WindowHistory) -> spanfold::WindowComparisonBuilder
 
 fn ingestion_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("ingestion");
-    for event_count in [128, 1_024, 8_192] {
+    for event_count in [128, 1_024, 8_192, 100_000, 1_000_000] {
         group.bench_function(format!("ingest_{event_count}"), |b| {
             b.iter(|| create_comparison_data(black_box(event_count), 128, 2));
         });
@@ -157,7 +157,7 @@ fn comparison_benchmarks(c: &mut Criterion) {
     let live_horizon = TemporalPoint::position(1_025);
     let live_result_for_export = comparison_builder(&history)
         .residual()
-        .run_live(live_horizon);
+        .run_live(live_horizon.clone());
 
     let mut group = c.benchmark_group("comparison");
     group.bench_function("prepare", |b| {
@@ -191,7 +191,7 @@ fn comparison_benchmarks(c: &mut Criterion) {
         b.iter(|| {
             comparison_builder(black_box(&history))
                 .residual()
-                .run_live(live_horizon)
+                .run_live(live_horizon.clone())
         });
     });
     group.bench_function("export_json", |b| {

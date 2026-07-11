@@ -76,7 +76,7 @@ fn compare_outputs_llm_context_with_row_documents() {
             "\"schema\": \"spanfold.comparison.llm-context\"",
         ))
         .stdout(predicate::str::contains("\"artifact\": \"result-summary\""))
-        .stdout(predicate::str::contains("\"rowId\": \"overlap[0]\""));
+        .stdout(predicate::str::contains("\"rowId\": \"overlap:"));
 }
 
 #[test]

@@ -143,7 +143,25 @@ impl SpanfoldSnapshot {
         if normalized_expected == normalized_actual {
             return Ok(());
         }
-        Err(SpanfoldAssertionError::new("Spanfold snapshot mismatch."))
+        let expected_lines = normalized_expected.lines().collect::<Vec<_>>();
+        let actual_lines = normalized_actual.lines().collect::<Vec<_>>();
+        let first_difference = expected_lines
+            .iter()
+            .zip(&actual_lines)
+            .position(|(expected, actual)| expected != actual)
+            .unwrap_or(expected_lines.len().min(actual_lines.len()));
+        Err(SpanfoldAssertionError::new(format!(
+            "Spanfold snapshot mismatch at line {}.\n- {}\n+ {}",
+            first_difference + 1,
+            expected_lines
+                .get(first_difference)
+                .copied()
+                .unwrap_or("<missing>"),
+            actual_lines
+                .get(first_difference)
+                .copied()
+                .unwrap_or("<missing>")
+        )))
     }
 }
 
@@ -180,7 +198,7 @@ impl VirtualComparisonClock {
 
     /// Returns the current processing-position horizon.
     #[must_use]
-    pub const fn horizon(self) -> TemporalPoint {
+    pub fn horizon(self) -> TemporalPoint {
         TemporalPoint::position(self.position)
     }
 
@@ -230,16 +248,26 @@ fn normalize_hex_record_ids(value: &str) -> String {
     let mut next_id = 1;
     let mut output = String::with_capacity(value.len());
     let mut token = String::new();
+    let mut normalize_token = false;
 
     for character in value.chars() {
-        if character.is_ascii_hexdigit() {
+        if normalize_token && character.is_ascii_hexdigit() {
             token.push(character);
             continue;
         }
-        flush_token(&mut output, &mut token, &mut ids, &mut next_id);
+        if normalize_token {
+            flush_token(&mut output, &mut token, &mut ids, &mut next_id, true);
+        }
         output.push(character);
+        normalize_token = id_value_context(&output);
     }
-    flush_token(&mut output, &mut token, &mut ids, &mut next_id);
+    flush_token(
+        &mut output,
+        &mut token,
+        &mut ids,
+        &mut next_id,
+        normalize_token,
+    );
     output
 }
 
@@ -248,8 +276,9 @@ fn flush_token(
     token: &mut String,
     ids: &mut BTreeMap<String, String>,
     next_id: &mut usize,
+    normalize: bool,
 ) {
-    if token.len() >= 16 && token.len() <= 64 {
+    if normalize && token.len() >= 16 && token.len() <= 64 {
         let replacement = ids.entry(token.clone()).or_insert_with(|| {
             let replacement = format!("<record-id:{next_id}>");
             *next_id += 1;
@@ -260,6 +289,19 @@ fn flush_token(
         output.push_str(token);
     }
     token.clear();
+}
+
+fn id_value_context(output: &str) -> bool {
+    let suffix = output
+        .rsplit_once('\n')
+        .map_or(output, |(_, line)| line)
+        .trim_end();
+    suffix.ends_with("id=")
+        || suffix.ends_with("recordId=")
+        || suffix.ends_with("\"id\":\"")
+        || suffix.ends_with("\"recordId\":\"")
+        || suffix.ends_with("\"windowId\":\"")
+        || suffix.ends_with("\"recordIds\":[\"")
 }
 
 #[cfg(test)]
@@ -316,8 +358,8 @@ mod tests {
 
     #[test]
     fn snapshot_helper_normalizes_record_ids_and_line_endings() {
-        let expected = "id=0123456789abcdef\r\nsame=0123456789abcdef  \n";
-        let actual = "id=fedcba9876543210\nsame=fedcba9876543210\n";
+        let expected = "recordId=0123456789abcdef\r\nrecordId=0123456789abcdef  \n";
+        let actual = "recordId=fedcba9876543210\nrecordId=fedcba9876543210\n";
 
         SpanfoldSnapshot::assert_equal(expected, actual).expect("normalized snapshots");
     }

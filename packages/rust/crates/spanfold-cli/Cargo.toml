@@ -2,6 +2,10 @@
 name = "spanfold-cli"
 version = "0.1.0"
 description = "Preview CLI for Spanfold temporal evidence workflows."
+readme = "../../README.md"
+documentation = "https://docs.rs/spanfold-cli"
+keywords = ["temporal", "interval", "comparison", "cli"]
+categories = ["command-line-utilities", "data-structures"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,7 +20,7 @@ path = "src/main.rs"
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-spanfold = { path = "../spanfold" }
+spanfold = { version = "0.1.0", path = "../spanfold" }
 
 [dev-dependencies]
 assert_cmd = "2.1.1"

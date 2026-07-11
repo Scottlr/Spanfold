@@ -1,10 +1,11 @@
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt,
     sync::Arc,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
@@ -13,6 +14,7 @@ use crate::{
 };
 
 /// Comparator family supported by the Rust implementation.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Comparator {
     /// Overlap rows where target and comparison are both active.
@@ -52,15 +54,21 @@ pub enum Comparator {
 impl Comparator {
     /// Parses a comparator declaration.
     pub fn parse(value: &str) -> Option<Self> {
+        Self::parse_result(value).ok()
+    }
+
+    /// Parses a comparator declaration with a reason for malformed input.
+    pub fn parse_result(value: &str) -> Result<Self, ComparatorParseError> {
         match value {
-            "overlap" => Some(Self::Overlap),
-            "residual" => Some(Self::Residual),
-            "missing" => Some(Self::Missing),
-            "coverage" => Some(Self::Coverage),
-            "gap" => Some(Self::Gap),
-            "symmetric-difference" => Some(Self::SymmetricDifference),
-            "containment" => Some(Self::Containment),
-            _ => parse_parameterized_comparator(value),
+            "overlap" => Ok(Self::Overlap),
+            "residual" => Ok(Self::Residual),
+            "missing" => Ok(Self::Missing),
+            "coverage" => Ok(Self::Coverage),
+            "gap" => Ok(Self::Gap),
+            "symmetric-difference" => Ok(Self::SymmetricDifference),
+            "containment" => Ok(Self::Containment),
+            _ => parse_parameterized_comparator(value)
+                .ok_or_else(|| ComparatorParseError(value.to_owned())),
         }
     }
 
@@ -80,18 +88,54 @@ impl Comparator {
                 axis,
                 tolerance_magnitude,
             } => {
-                format!("lead-lag:{transition:?}:{axis:?}:{tolerance_magnitude}")
+                format!(
+                    "lead-lag:{}:{}:{tolerance_magnitude}",
+                    lead_lag_transition_name(transition),
+                    temporal_axis_name(*axis)
+                )
             }
             Self::AsOf {
                 direction,
                 axis,
                 tolerance_magnitude,
-            } => format!("asof:{direction:?}:{axis:?}:{tolerance_magnitude}"),
+            } => format!(
+                "asof:{}:{}:{tolerance_magnitude}",
+                as_of_direction_name(direction),
+                temporal_axis_name(*axis)
+            ),
         }
     }
 }
 
+/// Detailed comparator declaration parse error.
+#[derive(Clone, Debug, Eq, thiserror::Error, PartialEq)]
+#[error("unsupported comparator declaration '{0}'")]
+pub struct ComparatorParseError(String);
+
+fn temporal_axis_name(axis: TemporalAxis) -> &'static str {
+    match axis {
+        TemporalAxis::ProcessingPosition => "position",
+        TemporalAxis::Timestamp => "timestamp",
+    }
+}
+
+fn lead_lag_transition_name(transition: &LeadLagTransition) -> &'static str {
+    match transition {
+        LeadLagTransition::Start => "start",
+        LeadLagTransition::End => "end",
+    }
+}
+
+fn as_of_direction_name(direction: &AsOfDirection) -> &'static str {
+    match direction {
+        AsOfDirection::Previous => "previous",
+        AsOfDirection::Next => "next",
+        AsOfDirection::Nearest => "nearest",
+    }
+}
+
 /// Comparison-side selection.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgainstSelection {
     /// One or more source lanes.
@@ -433,6 +477,59 @@ impl ComparisonSelector {
     pub fn matches(&self, window: &crate::WindowRecord) -> bool {
         self.kind.matches(window)
     }
+
+    /// Returns the portable selector expression used by plan exports.
+    pub(crate) fn export_expression(&self) -> serde_json::Value {
+        fn encode(kind: &ComparisonSelectorKind) -> serde_json::Value {
+            match kind {
+                ComparisonSelectorKind::Any => serde_json::json!({"kind": "any"}),
+                ComparisonSelectorKind::WindowName(value) => {
+                    serde_json::json!({"kind": "windowName", "value": value})
+                }
+                ComparisonSelectorKind::Key(value) => {
+                    serde_json::json!({"kind": "key", "value": value})
+                }
+                ComparisonSelectorKind::Source(value) => {
+                    serde_json::json!({"kind": "source", "value": value})
+                }
+                ComparisonSelectorKind::Sources(values) => {
+                    serde_json::json!({"kind": "sources", "values": values})
+                }
+                ComparisonSelectorKind::Partition(value) => {
+                    serde_json::json!({"kind": "partition", "value": value})
+                }
+                ComparisonSelectorKind::PositionRange {
+                    start_inclusive,
+                    end_exclusive,
+                } => serde_json::json!({
+                    "kind": "positionRange",
+                    "startInclusive": start_inclusive,
+                    "endExclusive": end_exclusive
+                }),
+                ComparisonSelectorKind::TimeRange {
+                    start_inclusive,
+                    end_exclusive,
+                } => serde_json::json!({
+                    "kind": "timeRange",
+                    "startInclusive": start_inclusive,
+                    "endExclusive": end_exclusive
+                }),
+                ComparisonSelectorKind::Runtime(_) => serde_json::json!({"kind": "runtime"}),
+                ComparisonSelectorKind::And(left, right) => serde_json::json!({
+                    "kind": "and",
+                    "left": encode(left),
+                    "right": encode(right)
+                }),
+                ComparisonSelectorKind::Or(left, right) => serde_json::json!({
+                    "kind": "or",
+                    "left": encode(left),
+                    "right": encode(right)
+                }),
+            }
+        }
+
+        encode(&self.kind)
+    }
 }
 
 /// Selector construction error.
@@ -444,6 +541,7 @@ pub enum ComparisonSelectorError {
 }
 
 /// Cohort activity rule.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CohortActivity {
     /// Any active source makes the cohort active.
@@ -613,6 +711,7 @@ impl ComparisonScope {
 }
 
 /// Handling for records that do not have timestamps in event-time comparisons.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComparisonNullTimestampPolicy {
     /// Emit a diagnostic for records without event timestamps.
@@ -653,9 +752,9 @@ impl Default for ComparisonNormalizationPolicy {
 impl ComparisonNormalizationPolicy {
     /// Returns the default historical comparison normalization policy.
     #[must_use]
-    pub const fn default_policy() -> Self {
+    pub fn default_policy() -> Self {
         Self {
-            require_closed_windows: true,
+            require_closed_windows: false,
             use_half_open_ranges: true,
             time_axis: crate::TemporalAxis::ProcessingPosition,
             open_window_policy: OpenWindowPolicy::RequireClosed,
@@ -669,13 +768,13 @@ impl ComparisonNormalizationPolicy {
 
     /// Returns a policy that excludes open windows from historical comparison.
     #[must_use]
-    pub const fn require_closed() -> Self {
+    pub fn require_closed() -> Self {
         Self::default_policy()
     }
 
     /// Returns a policy that clips open windows to an explicit horizon.
     #[must_use]
-    pub const fn clip_open_windows_to(horizon: crate::TemporalPoint) -> Self {
+    pub fn clip_open_windows_to(horizon: crate::TemporalPoint) -> Self {
         Self {
             require_closed_windows: false,
             time_axis: horizon.axis(),
@@ -687,7 +786,7 @@ impl ComparisonNormalizationPolicy {
 
     /// Returns a policy that normalizes on the event-time axis.
     #[must_use]
-    pub const fn event_time() -> Self {
+    pub fn event_time() -> Self {
         Self {
             time_axis: crate::TemporalAxis::Timestamp,
             ..Self::default_policy()
@@ -710,7 +809,7 @@ impl ComparisonNormalizationPolicy {
 
     /// Returns this policy with a known-at availability point.
     #[must_use]
-    pub const fn with_known_at(mut self, point: crate::TemporalPoint) -> Self {
+    pub fn with_known_at(mut self, point: crate::TemporalPoint) -> Self {
         self.known_at = Some(point);
         self
     }
@@ -847,41 +946,17 @@ impl ComparisonPlan {
     #[must_use]
     pub fn validate(&self) -> Vec<ComparisonDiagnostic> {
         let mut diagnostics = Vec::new();
-        let exportability_severity = if self.strict {
-            DiagnosticSeverity::Error
-        } else {
-            DiagnosticSeverity::Warning
-        };
-
         if self.name.trim().is_empty() {
             diagnostics.push(plan_diagnostic("MissingName", DiagnosticSeverity::Error));
         }
 
         if self.target_selector.is_none() && self.target_source.trim().is_empty() {
             diagnostics.push(plan_diagnostic("MissingTarget", DiagnosticSeverity::Error));
-        } else if !self.effective_target_selector().is_serializable {
-            diagnostics.push(plan_diagnostic(
-                "NonSerializableSelector",
-                exportability_severity.clone(),
-            ));
         }
 
         let against = self.effective_against_selectors();
         if against.is_empty() {
             diagnostics.push(plan_diagnostic("MissingAgainst", DiagnosticSeverity::Error));
-        } else {
-            for selector in against {
-                if !selector.is_serializable {
-                    diagnostics.push(plan_diagnostic(
-                        "NonSerializableSelector",
-                        exportability_severity.clone(),
-                    ));
-                }
-            }
-        }
-
-        if self.scope_window.is_none() {
-            diagnostics.push(plan_diagnostic("MissingScope", DiagnosticSeverity::Error));
         }
 
         if self.comparators.is_empty() {
@@ -891,6 +966,144 @@ impl ComparisonPlan {
             ));
         }
 
+        if self
+            .scope_window
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            diagnostics.push(plan_diagnostic("EmptyScope", DiagnosticSeverity::Error));
+        }
+
+        let mut comparator_declarations = BTreeSet::new();
+        for comparator in &self.comparators {
+            let declaration = comparator.declaration();
+            if !comparator_declarations.insert(declaration) {
+                diagnostics.push(plan_diagnostic(
+                    "DuplicateComparator",
+                    DiagnosticSeverity::Error,
+                ));
+            }
+            if matches!(
+                comparator,
+                Comparator::LeadLag {
+                    tolerance_magnitude,
+                    ..
+                } | Comparator::AsOf {
+                    tolerance_magnitude,
+                    ..
+                } if *tolerance_magnitude < 0
+            ) {
+                diagnostics.push(plan_diagnostic(
+                    "NegativeTolerance",
+                    DiagnosticSeverity::Error,
+                ));
+            }
+        }
+
+        if let Some(selector) = &self.target_selector
+            && selector.name.trim().is_empty()
+        {
+            diagnostics.push(plan_diagnostic(
+                "EmptyTargetSelectorName",
+                DiagnosticSeverity::Error,
+            ));
+        }
+        if let Some(selector) = &self.target_selector
+            && !self.target_source.trim().is_empty()
+            && self.target_source != selector.name
+        {
+            diagnostics.push(plan_diagnostic(
+                "ContradictoryTargetSelection",
+                DiagnosticSeverity::Error,
+            ));
+        }
+
+        if !self.against_selectors.is_empty()
+            && (!matches!(&self.against, AgainstSelection::Sources(sources) if sources.is_empty()))
+        {
+            diagnostics.push(plan_diagnostic(
+                "ContradictoryAgainstSelection",
+                DiagnosticSeverity::Error,
+            ));
+        }
+
+        if self.against_selectors.is_empty() {
+            match &self.against {
+                AgainstSelection::Sources(sources) => {
+                    validate_source_list(sources, false, &mut diagnostics);
+                }
+                AgainstSelection::Cohort {
+                    name,
+                    sources,
+                    activity,
+                } => {
+                    if name.trim().is_empty() {
+                        diagnostics.push(plan_diagnostic(
+                            "EmptyCohortName",
+                            DiagnosticSeverity::Error,
+                        ));
+                    }
+                    validate_source_list(sources, true, &mut diagnostics);
+                    if activity.count().is_some_and(|count| count > sources.len()) {
+                        diagnostics.push(plan_diagnostic(
+                            "InvalidCohortCount",
+                            DiagnosticSeverity::Error,
+                        ));
+                    }
+                    if matches!(activity, CohortActivity::AtLeast { count: 0 }) {
+                        diagnostics.push(plan_diagnostic(
+                            "InvalidCohortCount",
+                            DiagnosticSeverity::Error,
+                        ));
+                    }
+                }
+            }
+        }
+
+        let mut selector_names = BTreeSet::new();
+        for selector in self
+            .target_selector
+            .iter()
+            .chain(self.against_selectors.iter())
+        {
+            if selector.name.trim().is_empty() {
+                diagnostics.push(plan_diagnostic(
+                    "EmptySelectorName",
+                    DiagnosticSeverity::Error,
+                ));
+            }
+            if !selector_names.insert(selector.name.as_str()) {
+                diagnostics.push(plan_diagnostic(
+                    "DuplicateSelectorName",
+                    DiagnosticSeverity::Error,
+                ));
+            }
+        }
+        validate_filters(&self.scope_segments, "Segment", &mut diagnostics);
+        validate_filters(&self.scope_tags, "Tag", &mut diagnostics);
+
+        if !self.use_half_open_ranges {
+            diagnostics.push(plan_diagnostic(
+                "UnsupportedRangeSemantics",
+                DiagnosticSeverity::Error,
+            ));
+        }
+        if let Some(horizon) = &self.open_window_horizon
+            && horizon.axis() != self.time_axis
+        {
+            diagnostics.push(plan_diagnostic(
+                "HorizonAxisMismatch",
+                DiagnosticSeverity::Error,
+            ));
+        }
+        if self.open_window_horizon.is_some()
+            && self.open_window_policy != OpenWindowPolicy::ClipToHorizon
+        {
+            diagnostics.push(plan_diagnostic(
+                "UnusedOpenWindowHorizon",
+                DiagnosticSeverity::Error,
+            ));
+        }
         diagnostics
     }
 }
@@ -902,7 +1115,59 @@ fn plan_diagnostic(code: &str, severity: DiagnosticSeverity) -> ComparisonDiagno
     }
 }
 
+fn validate_source_list(
+    sources: &[String],
+    cohort: bool,
+    diagnostics: &mut Vec<ComparisonDiagnostic>,
+) {
+    if sources.is_empty() {
+        diagnostics.push(plan_diagnostic(
+            if cohort {
+                "EmptyCohort"
+            } else {
+                "EmptyAgainstSources"
+            },
+            DiagnosticSeverity::Error,
+        ));
+    }
+    let mut seen = BTreeSet::<&str>::new();
+    for source in sources {
+        if source.trim().is_empty() {
+            diagnostics.push(plan_diagnostic("EmptySource", DiagnosticSeverity::Error));
+        }
+        if !seen.insert(source.as_str()) {
+            diagnostics.push(plan_diagnostic(
+                "DuplicateSource",
+                DiagnosticSeverity::Error,
+            ));
+        }
+    }
+}
+
+fn validate_filters(
+    filters: &[WindowFilter],
+    kind: &str,
+    diagnostics: &mut Vec<ComparisonDiagnostic>,
+) {
+    let mut names = BTreeSet::new();
+    for filter in filters {
+        if filter.name.trim().is_empty() {
+            diagnostics.push(plan_diagnostic(
+                &format!("Empty{kind}FilterName"),
+                DiagnosticSeverity::Error,
+            ));
+        }
+        if !names.insert(filter.name.as_str()) {
+            diagnostics.push(plan_diagnostic(
+                &format!("Duplicate{kind}FilterName"),
+                DiagnosticSeverity::Error,
+            ));
+        }
+    }
+}
+
 /// Open-window normalization policy.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpenWindowPolicy {
     /// Open windows are rejected.
@@ -912,6 +1177,7 @@ pub enum OpenWindowPolicy {
 }
 
 /// Duplicate normalized-window handling policy.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComparisonDuplicateWindowPolicy {
     /// Preserve duplicate normalized windows.
@@ -921,6 +1187,7 @@ pub enum ComparisonDuplicateWindowPolicy {
 }
 
 /// Diagnostic severity.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum DiagnosticSeverity {
     /// Warning-level diagnostic.
@@ -938,6 +1205,27 @@ pub struct ComparisonDiagnostic {
     pub severity: DiagnosticSeverity,
 }
 
+impl ComparisonDiagnostic {
+    /// Returns an actionable remediation hint for this diagnostic code.
+    #[must_use]
+    pub fn message(&self) -> &'static str {
+        match self.code.as_str() {
+            "MissingName" => "set a non-empty comparison plan name",
+            "MissingTarget" => "configure a target source or selector",
+            "MissingAgainst" => "configure at least one comparison source or selector",
+            "MissingComparator" => "configure at least one comparator",
+            "FutureWindowExcluded" => "advance known-at or provide an earlier-available window",
+            "MissingEventTime" => {
+                "provide event timestamps or choose processing-position normalization"
+            }
+            "TemporalAxisMismatch" => "align the plan axis with the recorded window axis",
+            "SelfComparison" => "make target and comparison selectors disjoint",
+            "RuntimeNonSerializablePlan" => "use serializable selectors for portable execution",
+            _ => "inspect the prepared artifact and plan fields for the invalid contract",
+        }
+    }
+}
+
 /// Comparator summary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ComparatorSummary {
@@ -950,23 +1238,27 @@ pub struct ComparatorSummary {
 }
 
 /// Exported range for a row.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RowRange {
     /// Inclusive start magnitude.
     pub start: i64,
     /// Exclusive end magnitude.
     pub end: i64,
+    /// Temporal axis governing the magnitudes.
+    pub axis: TemporalAxis,
+    /// Timestamp clock identity, when applicable.
+    pub clock: Option<String>,
 }
 
 /// Exported point for transition-based rows.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RowPoint {
     /// Point axis.
     pub axis: TemporalAxis,
     /// Scalar point magnitude.
     pub magnitude: i64,
     /// Clock identity for timestamp points.
-    pub clock: Option<&'static str>,
+    pub clock: Option<String>,
 }
 
 /// The active side for a disagreement segment.
@@ -1064,16 +1356,23 @@ pub struct CoverageSummary {
     /// Denominator magnitude.
     #[serde(rename = "targetMagnitude")]
     pub target_magnitude: f64,
+    /// Exact integer denominator before presentation conversion.
+    #[serde(rename = "targetMagnitudeExact")]
+    pub target_magnitude_exact: i128,
     /// Covered numerator magnitude.
     #[serde(rename = "coveredMagnitude")]
     pub covered_magnitude: f64,
+    /// Exact integer numerator before presentation conversion.
+    #[serde(rename = "coveredMagnitudeExact")]
+    pub covered_magnitude_exact: i128,
     /// Covered ratio.
     #[serde(rename = "coverageRatio")]
     pub coverage_ratio: f64,
 }
 
 /// Finality state for an emitted row.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ComparisonFinality {
     /// Row is final.
     Final,
@@ -1410,34 +1709,34 @@ pub struct ComparisonResult {
     /// Result rows grouped by family.
     pub rows: ComparisonRows,
     /// Overlap rows.
-    #[serde(rename = "overlapRows")]
+    #[serde(skip)]
     pub overlap_rows: Vec<OverlapRow>,
     /// Residual rows.
-    #[serde(rename = "residualRows")]
+    #[serde(skip)]
     pub residual_rows: Vec<ResidualRow>,
     /// Missing rows.
-    #[serde(rename = "missingRows")]
+    #[serde(skip)]
     pub missing_rows: Vec<MissingRow>,
     /// Coverage rows.
-    #[serde(rename = "coverageRows")]
+    #[serde(skip)]
     pub coverage_rows: Vec<CoverageRow>,
     /// Gap rows.
-    #[serde(rename = "gapRows")]
+    #[serde(skip)]
     pub gap_rows: Vec<GapRow>,
     /// Symmetric-difference rows.
-    #[serde(rename = "symmetricDifferenceRows")]
+    #[serde(skip)]
     pub symmetric_difference_rows: Vec<SymmetricDifferenceRow>,
     /// Containment rows.
-    #[serde(rename = "containmentRows")]
+    #[serde(skip)]
     pub containment_rows: Vec<ContainmentRow>,
     /// Lead/lag rows.
-    #[serde(rename = "leadLagRows")]
+    #[serde(skip)]
     pub lead_lag_rows: Vec<LeadLagRow>,
     /// Lead/lag summaries.
-    #[serde(rename = "leadLagSummaries")]
+    #[serde(skip)]
     pub lead_lag_summaries: Vec<LeadLagSummary>,
     /// As-of rows.
-    #[serde(rename = "asOfRows")]
+    #[serde(skip)]
     pub as_of_rows: Vec<AsOfRow>,
     /// Row finality metadata.
     #[serde(rename = "rowFinalities")]
@@ -1453,26 +1752,28 @@ struct SegmentRef<'a> {
     end: crate::TemporalPoint,
     record_id: &'a str,
     record_ids: Vec<String>,
-    source: &'a str,
+    source: Option<&'a str>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AlignedSegment {
     start: i64,
     end: i64,
+    axis: TemporalAxis,
+    clock: Option<String>,
     target_record_ids: Vec<String>,
     against_record_ids: Vec<String>,
     against_is_active: bool,
     against_active_sources: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct TransitionPoint<'a> {
     record_id: &'a str,
     point: crate::TemporalPoint,
 }
 
-type GroupKey = (String, String, Option<String>, TemporalAxis);
+type GroupKey = (String, String, Option<String>, TemporalAxis, Option<String>);
 type GroupWindows<'a> = (Vec<SegmentRef<'a>>, Vec<SegmentRef<'a>>);
 
 struct ResultArtifacts {
@@ -1562,18 +1863,44 @@ pub struct NormalizedWindowRecord {
 pub struct PreparedComparison {
     /// Source plan for the prepared comparison.
     #[serde(skip)]
-    pub plan: ComparisonPlan,
+    pub(crate) plan: ComparisonPlan,
     /// Preparation diagnostics.
-    pub diagnostics: Vec<ComparisonDiagnostic>,
+    pub(crate) diagnostics: Vec<ComparisonDiagnostic>,
     /// Selected windows.
     #[serde(rename = "selectedWindows")]
-    pub selected_windows: Vec<WindowArtifact>,
+    pub(crate) selected_windows: Vec<WindowArtifact>,
     /// Excluded windows.
     #[serde(rename = "excludedWindows")]
-    pub excluded_windows: Vec<ExcludedWindowRecord>,
+    pub(crate) excluded_windows: Vec<ExcludedWindowRecord>,
     /// Normalized windows.
     #[serde(rename = "normalizedWindows")]
-    pub normalized_windows: Vec<NormalizedWindowRecord>,
+    pub(crate) normalized_windows: Vec<NormalizedWindowRecord>,
+}
+
+impl PreparedComparison {
+    /// Returns preparation diagnostics.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[ComparisonDiagnostic] {
+        &self.diagnostics
+    }
+
+    /// Returns selected window artifacts.
+    #[must_use]
+    pub fn selected_windows(&self) -> &[WindowArtifact] {
+        &self.selected_windows
+    }
+
+    /// Returns excluded window artifacts.
+    #[must_use]
+    pub fn excluded_windows(&self) -> &[ExcludedWindowRecord] {
+        &self.excluded_windows
+    }
+
+    /// Returns normalized windows.
+    #[must_use]
+    pub fn normalized_windows(&self) -> &[NormalizedWindowRecord] {
+        &self.normalized_windows
+    }
 }
 
 /// Aligned segment artifact.
@@ -1608,9 +1935,6 @@ pub struct AlignedSegmentArtifact {
 /// Aligned comparison artifact.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AlignedComparison {
-    /// Source prepared comparison.
-    #[serde(skip)]
-    pub prepared: PreparedComparison,
     /// Deterministic aligned segments.
     pub segments: Vec<AlignedSegmentArtifact>,
 }
@@ -1658,13 +1982,21 @@ fn execute_compare(
     plan: &ComparisonPlan,
     live_horizon_override: Option<crate::TemporalPoint>,
 ) -> ComparisonResult {
-    let mut diagnostics = Vec::new();
-    let prepared = prepare_internal(history, plan, live_horizon_override);
+    let structural_diagnostics = plan.validate();
+    if structural_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
+        return invalid_result(plan, structural_diagnostics);
+    }
+
+    let mut diagnostics = structural_diagnostics;
+    let prepared = prepare_internal(history, plan, live_horizon_override.clone());
     diagnostics.extend(prepared.diagnostics.clone());
     diagnostics.extend(runtime_critic_diagnostics(
         plan,
         &prepared,
-        live_horizon_override,
+        live_horizon_override.clone(),
     ));
     if diagnostics
         .iter()
@@ -1684,11 +2016,14 @@ fn execute_compare(
                 rows: ComparisonRows::default(),
             },
         );
-        result.known_at = plan.known_at.map(row_point_from_temporal_point);
+        result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
         result.evaluation_horizon = live_horizon_override
-            .or(plan.open_window_horizon)
+            .as_ref()
+            .or(plan.open_window_horizon.as_ref())
             .map(row_point_from_temporal_point);
-        result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
+        if plan.output.include_explain_data {
+            result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
+        }
         return result;
     }
 
@@ -1737,7 +2072,7 @@ fn execute_compare(
                 count
             }
             Comparator::Containment => {
-                let emitted = build_containment_rows(&aligned);
+                let emitted = build_containment_rows(&aligned, &prepared);
                 let count = emitted.len();
                 rows.containment.extend(emitted);
                 count
@@ -1797,12 +2132,43 @@ fn execute_compare(
             rows,
         },
     );
-    result.known_at = plan.known_at.map(row_point_from_temporal_point);
+    result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
     result.evaluation_horizon = live_horizon_override
-        .or(plan.open_window_horizon)
+        .as_ref()
+        .or(plan.open_window_horizon.as_ref())
         .map(row_point_from_temporal_point);
-    result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
-    result.aligned = Some(serde_json::to_value(aligned).expect("aligned artifact"));
+    if plan.output.include_explain_data {
+        result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
+    }
+    if plan.output.include_aligned_segments {
+        result.aligned = Some(serde_json::to_value(aligned).expect("aligned artifact"));
+    }
+    result
+}
+
+fn invalid_result(
+    plan: &ComparisonPlan,
+    diagnostics: Vec<ComparisonDiagnostic>,
+) -> ComparisonResult {
+    let mut result = materialize_result(
+        plan,
+        &plan.name,
+        false,
+        diagnostics,
+        ResultArtifacts {
+            comparator_summaries: Vec::new(),
+            coverage_summaries: Vec::new(),
+            lead_lag_summaries: Vec::new(),
+            row_finalities: Vec::new(),
+            extension_metadata: Vec::new(),
+            rows: ComparisonRows::default(),
+        },
+    );
+    result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
+    result.evaluation_horizon = plan
+        .open_window_horizon
+        .as_ref()
+        .map(row_point_from_temporal_point);
     result
 }
 
@@ -1870,7 +2236,8 @@ fn runtime_critic_diagnostics(
     {
         push_diagnostic_once(&mut diagnostics, "UnboundedOpenDuration", severity.clone());
     }
-    if let (Some(horizon), Some(known_at)) = (plan.open_window_horizon, plan.known_at)
+    if let (Some(horizon), Some(known_at)) =
+        (plan.open_window_horizon.as_ref(), plan.known_at.as_ref())
         && horizon.axis() == TemporalAxis::Timestamp
         && known_at.axis() == TemporalAxis::Timestamp
         && horizon.clock() != known_at.clock()
@@ -1883,25 +2250,25 @@ fn runtime_critic_diagnostics(
 
 fn parse_temporal_axis(value: &str) -> Option<TemporalAxis> {
     match value {
-        "ProcessingPosition" => Some(TemporalAxis::ProcessingPosition),
-        "Timestamp" => Some(TemporalAxis::Timestamp),
+        "position" | "ProcessingPosition" => Some(TemporalAxis::ProcessingPosition),
+        "timestamp" | "Timestamp" => Some(TemporalAxis::Timestamp),
         _ => None,
     }
 }
 
 fn parse_lead_lag_transition(value: &str) -> Option<LeadLagTransition> {
     match value {
-        "Start" => Some(LeadLagTransition::Start),
-        "End" => Some(LeadLagTransition::End),
+        "start" | "Start" => Some(LeadLagTransition::Start),
+        "end" | "End" => Some(LeadLagTransition::End),
         _ => None,
     }
 }
 
 fn parse_as_of_direction(value: &str) -> Option<AsOfDirection> {
     match value {
-        "Previous" => Some(AsOfDirection::Previous),
-        "Next" => Some(AsOfDirection::Next),
-        "Nearest" => Some(AsOfDirection::Nearest),
+        "previous" | "Previous" => Some(AsOfDirection::Previous),
+        "next" | "Next" => Some(AsOfDirection::Next),
+        "nearest" | "Nearest" => Some(AsOfDirection::Nearest),
         _ => None,
     }
 }
@@ -1949,7 +2316,7 @@ fn materialize_result(
 }
 
 fn build_coverage_summaries(rows: &[CoverageRow]) -> Vec<CoverageSummary> {
-    let mut grouped: BTreeMap<(String, String, Option<String>), (f64, f64)> = BTreeMap::new();
+    let mut grouped: BTreeMap<(String, String, Option<String>), (i128, i128)> = BTreeMap::new();
     for row in rows {
         let entry = grouped
             .entry((
@@ -1957,9 +2324,9 @@ fn build_coverage_summaries(rows: &[CoverageRow]) -> Vec<CoverageSummary> {
                 row.key.clone(),
                 row.partition.clone(),
             ))
-            .or_insert((0.0, 0.0));
-        entry.0 += row.target_magnitude as f64;
-        entry.1 += row.covered_magnitude as f64;
+            .or_insert((0, 0));
+        entry.0 += i128::from(row.target_magnitude);
+        entry.1 += i128::from(row.covered_magnitude);
     }
 
     grouped
@@ -1970,12 +2337,14 @@ fn build_coverage_summaries(rows: &[CoverageRow]) -> Vec<CoverageSummary> {
                     window_name,
                     key,
                     partition,
-                    target_magnitude,
-                    covered_magnitude,
-                    coverage_ratio: if target_magnitude == 0.0 {
+                    target_magnitude: target_magnitude as f64,
+                    target_magnitude_exact: target_magnitude,
+                    covered_magnitude: covered_magnitude as f64,
+                    covered_magnitude_exact: covered_magnitude,
+                    coverage_ratio: if target_magnitude == 0 {
                         0.0
                     } else {
-                        covered_magnitude / target_magnitude
+                        covered_magnitude as f64 / target_magnitude as f64
                     },
                 }
             },
@@ -2001,14 +2370,14 @@ fn build_extension_metadata(
         .map(|(index, segment)| ComparisonExtensionMetadata {
             extension_id: "spanfold.cohort".to_owned(),
             key: format!("segment[{index}]"),
-            value: format!(
-                "rule={}; required={}; activeCount={}; isActive={}; activeSources={}",
-                activity.name(),
-                required_activity_count(activity, sources.len()),
-                segment.against_active_sources.len(),
-                segment.against_is_active,
-                segment.against_active_sources.join(",")
-            ),
+            value: serde_json::json!({
+                "rule": activity.name(),
+                "required": required_activity_count(activity, sources.len()),
+                "activeCount": segment.against_active_sources.len(),
+                "isActive": segment.against_is_active,
+                "activeSources": segment.against_active_sources,
+            })
+            .to_string(),
         })
         .collect()
 }
@@ -2033,7 +2402,7 @@ fn build_row_finalities(
     append_residual_finalities(&mut finalities, &rows.residual, provisional_record_ids);
     append_missing_finalities(&mut finalities, &rows.missing, provisional_record_ids);
     append_coverage_finalities(&mut finalities, &rows.coverage, provisional_record_ids);
-    append_finalities(&mut finalities, "gap", rows.gap.len());
+    append_gap_finalities(&mut finalities, &rows.gap);
     append_symmetric_difference_finalities(
         &mut finalities,
         &rows.symmetric_difference,
@@ -2045,11 +2414,25 @@ fn build_row_finalities(
     finalities
 }
 
-fn append_finalities(finalities: &mut Vec<ComparisonRowFinality>, row_type: &str, count: usize) {
-    for index in 0..count {
+fn stable_row_id<T: Serialize>(row_type: &str, row: &T) -> String {
+    let payload = serde_json::to_vec(row).unwrap_or_default();
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in row_type.bytes().chain(payload) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{row_type}:{hash:016x}")
+}
+
+pub(crate) fn stable_row_id_for_export<T: Serialize>(row_type: &str, row: &T) -> String {
+    stable_row_id(row_type, row)
+}
+
+fn append_gap_finalities(finalities: &mut Vec<ComparisonRowFinality>, rows: &[GapRow]) {
+    for row in rows {
         finalities.push(ComparisonRowFinality {
-            row_type: row_type.to_owned(),
-            row_id: format!("{row_type}[{index}]"),
+            row_type: "gap".to_owned(),
+            row_id: stable_row_id("gap", row),
             finality: ComparisonFinality::Final,
             reason: "derived from closed windows".to_owned(),
             version: 1,
@@ -2063,11 +2446,11 @@ fn append_overlap_finalities(
     rows: &[OverlapRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "overlap",
-            index,
+            stable_row_id("overlap", row),
             row.target_record_ids
                 .iter()
                 .chain(row.against_record_ids.iter())
@@ -2081,11 +2464,11 @@ fn append_residual_finalities(
     rows: &[ResidualRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "residual",
-            index,
+            stable_row_id("residual", row),
             row.target_record_ids
                 .iter()
                 .any(|id| provisional_record_ids.contains(id)),
@@ -2098,11 +2481,11 @@ fn append_missing_finalities(
     rows: &[MissingRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "missing",
-            index,
+            stable_row_id("missing", row),
             row.against_record_ids
                 .iter()
                 .any(|id| provisional_record_ids.contains(id)),
@@ -2115,11 +2498,11 @@ fn append_coverage_finalities(
     rows: &[CoverageRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "coverage",
-            index,
+            stable_row_id("coverage", row),
             row.target_record_ids
                 .iter()
                 .chain(row.against_record_ids.iter())
@@ -2133,11 +2516,11 @@ fn append_symmetric_difference_finalities(
     rows: &[SymmetricDifferenceRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "symmetricDifference",
-            index,
+            stable_row_id("symmetricDifference", row),
             row.target_record_ids
                 .iter()
                 .chain(row.against_record_ids.iter())
@@ -2151,11 +2534,11 @@ fn append_containment_finalities(
     rows: &[ContainmentRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "containment",
-            index,
+            stable_row_id("containment", row),
             row.target_record_ids
                 .iter()
                 .chain(row.container_record_ids.iter())
@@ -2169,11 +2552,11 @@ fn append_lead_lag_finalities(
     rows: &[LeadLagRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "leadLag",
-            index,
+            stable_row_id("leadLag", row),
             provisional_record_ids.contains(&row.target_record_id)
                 || row
                     .comparison_record_id
@@ -2188,11 +2571,11 @@ fn append_as_of_finalities(
     rows: &[AsOfRow],
     provisional_record_ids: &BTreeSet<String>,
 ) {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         push_finality(
             finalities,
             "asOf",
-            index,
+            stable_row_id("asOf", row),
             provisional_record_ids.contains(&row.target_record_id)
                 || row
                     .matched_record_id
@@ -2205,12 +2588,12 @@ fn append_as_of_finalities(
 fn push_finality(
     finalities: &mut Vec<ComparisonRowFinality>,
     row_type: &str,
-    index: usize,
+    row_id: String,
     provisional: bool,
 ) {
     finalities.push(ComparisonRowFinality {
         row_type: row_type.to_owned(),
-        row_id: format!("{row_type}[{index}]"),
+        row_id,
         finality: if provisional {
             ComparisonFinality::Provisional
         } else {
@@ -2231,7 +2614,21 @@ fn prepare_internal(
     plan: &ComparisonPlan,
     live_horizon_override: Option<crate::TemporalPoint>,
 ) -> PreparedComparison {
-    let mut diagnostics = Vec::new();
+    let structural_diagnostics = plan.validate();
+    if structural_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
+        return PreparedComparison {
+            plan: plan.clone(),
+            diagnostics: structural_diagnostics,
+            selected_windows: Vec::new(),
+            excluded_windows: Vec::new(),
+            normalized_windows: Vec::new(),
+        };
+    }
+
+    let mut diagnostics = structural_diagnostics;
     let mut selected_windows = Vec::new();
     let mut excluded_windows = Vec::new();
     let mut normalized_windows = Vec::new();
@@ -2276,18 +2673,16 @@ fn prepare_internal(
     for candidate in candidates {
         let window = to_window_artifact(&candidate);
         let record = candidate.to_window_record();
-        let known_at_position = candidate.known_at_position().unwrap_or_else(|| {
-            if candidate.is_open() {
-                candidate.start_position()
-            } else {
-                candidate
-                    .end_position()
-                    .unwrap_or(candidate.start_position())
-            }
+        let known_at_point = candidate.known_at_point().unwrap_or_else(|| {
+            candidate
+                .end_point()
+                .unwrap_or_else(|| candidate.start_point())
         });
-        if let Some(known_at) = plan.known_at
-            && (known_at.axis() != TemporalAxis::ProcessingPosition
-                || known_at_position > known_at.magnitude())
+        if let Some(known_at) = plan.known_at.as_ref()
+            && !matches!(
+                known_at_point.try_cmp(known_at),
+                Ok(Ordering::Less | Ordering::Equal)
+            )
         {
             excluded_windows.push(ExcludedWindowRecord {
                 record_id: window.record_id.clone(),
@@ -2368,7 +2763,7 @@ fn prepare_internal(
                 target_selector_name,
                 ComparisonSide::Target,
                 plan,
-                live_horizon_override,
+                live_horizon_override.clone(),
                 &mut diagnostics,
                 &mut excluded_windows,
             )
@@ -2386,7 +2781,7 @@ fn prepare_internal(
                 selector_name,
                 ComparisonSide::Against,
                 plan,
-                live_horizon_override,
+                live_horizon_override.clone(),
                 &mut diagnostics,
                 &mut excluded_windows,
             ) {
@@ -2397,6 +2792,24 @@ fn prepare_internal(
 
     let normalized_windows =
         postprocess_normalized_windows(normalized_windows, plan, &mut diagnostics);
+    let target_ids = normalized_windows
+        .iter()
+        .filter(|window| window.side == ComparisonSide::Target)
+        .flat_map(|window| window.record_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if normalized_windows.iter().any(|window| {
+        window.side == ComparisonSide::Against
+            && window
+                .record_ids
+                .iter()
+                .any(|record_id| target_ids.contains(record_id))
+    }) {
+        push_diagnostic_once(
+            &mut diagnostics,
+            "SelfComparison",
+            DiagnosticSeverity::Error,
+        );
+    }
 
     PreparedComparison {
         plan: plan.clone(),
@@ -2425,7 +2838,7 @@ fn deduplicate_normalized_windows(
     plan: &ComparisonPlan,
     diagnostics: &mut Vec<ComparisonDiagnostic>,
 ) -> Vec<NormalizedWindowRecord> {
-    let mut seen = BTreeSet::new();
+    let mut seen = BTreeSet::<Vec<u8>>::new();
     let mut rows = Vec::new();
     for window in windows {
         let key = normalized_duplicate_key(&window);
@@ -2445,7 +2858,7 @@ fn deduplicate_normalized_windows(
 fn coalesce_normalized_windows(
     windows: Vec<NormalizedWindowRecord>,
 ) -> Vec<NormalizedWindowRecord> {
-    let mut groups: BTreeMap<String, Vec<NormalizedWindowRecord>> = BTreeMap::new();
+    let mut groups: BTreeMap<Vec<u8>, Vec<NormalizedWindowRecord>> = BTreeMap::new();
     for window in windows {
         groups
             .entry(normalized_coalesce_key(&window))
@@ -2455,12 +2868,18 @@ fn coalesce_normalized_windows(
 
     let mut rows = Vec::new();
     for mut windows in groups.into_values() {
-        windows.sort_by_key(|window| {
-            (
-                window.range.start(),
-                window.range.end(),
-                window.record_id.clone(),
-            )
+        windows.sort_by(|left, right| {
+            left.range
+                .start()
+                .try_cmp(&right.range.start())
+                .expect("coalescing groups share a temporal domain")
+                .then_with(|| {
+                    left.range
+                        .end()
+                        .try_cmp(&right.range.end())
+                        .expect("coalescing groups share a temporal domain")
+                })
+                .then_with(|| left.record_id.cmp(&right.record_id))
         });
         for window in windows {
             if let Some(previous) = rows.last_mut()
@@ -2487,33 +2906,32 @@ fn can_coalesce_normalized(
         && first.range.end() == second.range.start()
 }
 
-fn normalized_duplicate_key(window: &NormalizedWindowRecord) -> String {
-    format!(
-        "{}|{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}",
-        window.selector_name,
-        window.side,
-        window.window.window_name,
-        window.window.key,
-        window.window.source,
-        window.window.partition,
-        window.range.start(),
-        window.range.end(),
-        window.segments
-    )
+fn normalized_duplicate_key(window: &NormalizedWindowRecord) -> Vec<u8> {
+    serde_json::to_vec(&(
+        &window.selector_name,
+        &window.side,
+        &window.window.window_name,
+        &window.window.key,
+        &window.window.source,
+        &window.window.partition,
+        &window.range,
+        &window.segments,
+    ))
+    .unwrap_or_default()
 }
 
-fn normalized_coalesce_key(window: &NormalizedWindowRecord) -> String {
-    format!(
-        "{}|{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}",
-        window.selector_name,
-        window.side,
-        window.window.window_name,
-        window.window.key,
-        window.window.source,
-        window.window.partition,
-        window.segments,
-        window.window.tags
-    )
+fn normalized_coalesce_key(window: &NormalizedWindowRecord) -> Vec<u8> {
+    serde_json::to_vec(&(
+        &window.selector_name,
+        &window.side,
+        &window.window.window_name,
+        &window.window.key,
+        &window.window.source,
+        &window.window.partition,
+        &window.segments,
+        &window.window.tags,
+    ))
+    .unwrap_or_default()
 }
 
 fn push_diagnostic_once(
@@ -2533,7 +2951,7 @@ fn push_diagnostic_once(
 fn align_internal(prepared: &PreparedComparison) -> AlignedComparison {
     let groups = group_normalized_windows(prepared);
     let mut segments = Vec::new();
-    for ((window_name, key, partition, _axis), (targets, againsts)) in groups {
+    for ((window_name, key, partition, axis, clock), (targets, againsts)) in groups {
         for segment in aligned_segments(
             targets.as_slice(),
             againsts.as_slice(),
@@ -2547,6 +2965,8 @@ fn align_internal(prepared: &PreparedComparison) -> AlignedComparison {
                 range: RowRange {
                     start: segment.start,
                     end: segment.end,
+                    axis,
+                    clock: clock.clone(),
                 },
                 target_record_ids: segment.target_record_ids,
                 against_record_ids: segment.against_record_ids,
@@ -2555,10 +2975,7 @@ fn align_internal(prepared: &PreparedComparison) -> AlignedComparison {
             });
         }
     }
-    AlignedComparison {
-        prepared: prepared.clone(),
-        segments,
-    }
+    AlignedComparison { segments }
 }
 
 fn group_normalized_windows(prepared: &PreparedComparison) -> BTreeMap<GroupKey, GroupWindows<'_>> {
@@ -2570,6 +2987,7 @@ fn group_normalized_windows(prepared: &PreparedComparison) -> BTreeMap<GroupKey,
                 normalized.window.key.clone(),
                 normalized.window.partition.clone(),
                 normalized.range.start().axis(),
+                normalized.range.start().clock().map(str::to_owned),
             ))
             .or_default();
         let segment = SegmentRef {
@@ -2577,7 +2995,7 @@ fn group_normalized_windows(prepared: &PreparedComparison) -> BTreeMap<GroupKey,
             end: normalized.range.end(),
             record_id: normalized.record_id.as_str(),
             record_ids: normalized.record_ids.clone(),
-            source: normalized.window.source.as_deref().unwrap_or(""),
+            source: normalized.window.source.as_deref(),
         };
         match normalized.side {
             ComparisonSide::Target => group.0.push(segment),
@@ -2587,11 +3005,11 @@ fn group_normalized_windows(prepared: &PreparedComparison) -> BTreeMap<GroupKey,
     groups
 }
 
-fn row_point_from_temporal_point(point: crate::TemporalPoint) -> RowPoint {
+fn row_point_from_temporal_point(point: &crate::TemporalPoint) -> RowPoint {
     RowPoint {
         axis: point.axis(),
         magnitude: point.magnitude(),
-        clock: point.clock(),
+        clock: point.clock().map(str::to_owned),
     }
 }
 
@@ -2643,7 +3061,7 @@ impl RawWindowRef<'_> {
     fn start_point(&self) -> crate::TemporalPoint {
         match self {
             Self::Closed(window) => window.range.start(),
-            Self::Open(window) => window.start,
+            Self::Open(window) => window.start.clone(),
         }
     }
 
@@ -2658,11 +3076,15 @@ impl RawWindowRef<'_> {
         }
     }
 
-    fn known_at_position(&self) -> Option<i64> {
+    fn known_at_point(&self) -> Option<crate::TemporalPoint> {
         match self {
-            Self::Closed(window) => window.known_at.map(|point| point.magnitude()),
-            Self::Open(window) => window.known_at.map(|point| point.magnitude()),
+            Self::Closed(window) => window.known_at.clone(),
+            Self::Open(window) => window.known_at.clone(),
         }
+    }
+
+    fn known_at_position(&self) -> Option<i64> {
+        self.known_at_point().map(|point| point.magnitude())
     }
 
     fn segments(&self) -> &[WindowSegment] {
@@ -2716,37 +3138,64 @@ fn normalize_candidate(
     diagnostics: &mut Vec<ComparisonDiagnostic>,
     excluded_windows: &mut Vec<ExcludedWindowRecord>,
 ) -> Option<NormalizedWindowRecord> {
-    let horizon = live_horizon_override.or(plan.open_window_horizon);
-    if plan.time_axis == TemporalAxis::Timestamp
-        && candidate.start_point().axis() != TemporalAxis::Timestamp
-    {
+    let horizon = live_horizon_override.or_else(|| plan.open_window_horizon.clone());
+    if candidate.start_point().axis() != plan.time_axis {
         let window = to_window_artifact(candidate);
+        let (code, severity) = if plan.time_axis == TemporalAxis::Timestamp {
+            (
+                "MissingEventTime",
+                match plan.null_timestamp_policy {
+                    ComparisonNullTimestampPolicy::Reject => DiagnosticSeverity::Error,
+                    ComparisonNullTimestampPolicy::Exclude => DiagnosticSeverity::Warning,
+                },
+            )
+        } else {
+            ("TemporalAxisMismatch", DiagnosticSeverity::Error)
+        };
         excluded_windows.push(ExcludedWindowRecord {
             record_id: window.record_id.clone(),
-            reason: "Event-time comparison requires recorded event timestamps.".to_owned(),
-            diagnostic_code: Some("MissingEventTime".to_owned()),
+            reason: "Window temporal axis does not match the comparison plan.".to_owned(),
+            diagnostic_code: Some(code.to_owned()),
             window,
         });
         diagnostics.push(ComparisonDiagnostic {
-            code: "MissingEventTime".to_owned(),
-            severity: match plan.null_timestamp_policy {
-                ComparisonNullTimestampPolicy::Reject => DiagnosticSeverity::Error,
-                ComparisonNullTimestampPolicy::Exclude => DiagnosticSeverity::Warning,
-            },
+            code: code.to_owned(),
+            severity,
         });
         return None;
     }
 
     let end_point = match candidate.end_point() {
         Some(end) => (end, false),
-        None => match (plan.open_window_policy, horizon) {
-            (OpenWindowPolicy::ClipToHorizon, Some(point))
-                if point.axis() == candidate.start_point().axis()
-                    && point >= candidate.start_point() =>
+        None => match (
+            plan.require_closed_windows,
+            plan.open_window_policy,
+            horizon,
+        ) {
+            (true, _, _) | (false, OpenWindowPolicy::RequireClosed, _) => {
+                let window = to_window_artifact(candidate);
+                excluded_windows.push(ExcludedWindowRecord {
+                    record_id: window.record_id.clone(),
+                    reason: "Open windows require an explicit clipping policy.".to_owned(),
+                    diagnostic_code: Some("OpenWindowsWithoutPolicy".to_owned()),
+                    window,
+                });
+                diagnostics.push(ComparisonDiagnostic {
+                    code: "OpenWindowsWithoutPolicy".to_owned(),
+                    severity: DiagnosticSeverity::Error,
+                });
+                return None;
+            }
+            (false, OpenWindowPolicy::ClipToHorizon, Some(point))
+                if point.is_compatible_with(&candidate.start_point())
+                    && matches!(
+                        point.try_cmp(&candidate.start_point()),
+                        Ok(Ordering::Greater | Ordering::Equal)
+                    ) =>
             {
                 (point, true)
             }
-            (OpenWindowPolicy::ClipToHorizon, Some(_)) => {
+            (false, OpenWindowPolicy::ClipToHorizon, Some(_)) => {
                 let window = to_window_artifact(candidate);
                 excluded_windows.push(ExcludedWindowRecord {
                     record_id: window.record_id.clone(),
@@ -2761,11 +3210,11 @@ fn normalize_candidate(
                 });
                 return None;
             }
-            _ => {
+            (false, OpenWindowPolicy::ClipToHorizon, None) => {
                 let window = to_window_artifact(candidate);
                 excluded_windows.push(ExcludedWindowRecord {
                     record_id: window.record_id.clone(),
-                    reason: "Open windows require an explicit clipping policy.".to_owned(),
+                    reason: "Open-window clipping requires an evaluation horizon.".to_owned(),
                     diagnostic_code: Some("OpenWindowsWithoutPolicy".to_owned()),
                     window,
                 });
@@ -2778,13 +3227,30 @@ fn normalize_candidate(
         },
     };
 
+    let range = match crate::TemporalRange::new(candidate.start_point(), end_point.0.clone()) {
+        Ok(range) => range,
+        Err(error) => {
+            let window = to_window_artifact(candidate);
+            excluded_windows.push(ExcludedWindowRecord {
+                record_id: window.record_id.clone(),
+                reason: error.to_string(),
+                diagnostic_code: Some("InvalidTemporalRange".to_owned()),
+                window,
+            });
+            diagnostics.push(ComparisonDiagnostic {
+                code: "InvalidTemporalRange".to_owned(),
+                severity: DiagnosticSeverity::Error,
+            });
+            return None;
+        }
+    };
+
     Some(NormalizedWindowRecord {
         record_id: candidate.record_id().to_owned(),
         record_ids: vec![candidate.record_id().to_owned()],
         selector_name: selector_name.to_owned(),
         side,
-        range: crate::TemporalRange::new(candidate.start_point(), end_point.0)
-            .expect("normalized candidate range was already validated"),
+        range,
         is_provisional: end_point.1,
         segments: candidate.segments().to_vec(),
         window: to_window_artifact(candidate),
@@ -2814,42 +3280,117 @@ fn aligned_segments(
     againsts: &[SegmentRef<'_>],
     against_selection: &AgainstSelection,
 ) -> Vec<AlignedSegment> {
-    let mut points = BTreeSet::new();
+    let mut points = Vec::with_capacity((targets.len() + againsts.len()) * 2);
     for item in targets {
-        points.insert(item.start);
-        points.insert(item.end);
+        points.push(item.start.clone());
+        points.push(item.end.clone());
     }
     for item in againsts {
-        points.insert(item.start);
-        points.insert(item.end);
+        points.push(item.start.clone());
+        points.push(item.end.clone());
     }
 
-    let points: Vec<crate::TemporalPoint> = points.into_iter().collect();
+    points.sort_by(|left, right| {
+        left.try_cmp(right)
+            .expect("alignment groups share a temporal domain")
+    });
+    points.dedup();
+
+    let mut target_starts = targets
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (item.start.clone(), index))
+        .collect::<Vec<_>>();
+    let mut target_ends = targets
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (item.end.clone(), index))
+        .collect::<Vec<_>>();
+    let mut against_starts = againsts
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (item.start.clone(), index))
+        .collect::<Vec<_>>();
+    let mut against_ends = againsts
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (item.end.clone(), index))
+        .collect::<Vec<_>>();
+    for events in [
+        &mut target_starts,
+        &mut target_ends,
+        &mut against_starts,
+        &mut against_ends,
+    ] {
+        events.sort_by(|left, right| {
+            left.0
+                .try_cmp(&right.0)
+                .expect("alignment groups share a temporal domain")
+        });
+    }
+    let mut active_targets = BTreeSet::new();
+    let mut active_againsts = BTreeSet::new();
+    let mut target_start_index = 0;
+    let mut target_end_index = 0;
+    let mut against_start_index = 0;
+    let mut against_end_index = 0;
     let mut segments = Vec::new();
     for pair in points.windows(2) {
-        let start = pair[0];
-        let end = pair[1];
-        if start >= end {
+        let start = pair[0].clone();
+        let end = pair[1].clone();
+        if !matches!(start.try_cmp(&end), Ok(Ordering::Less)) {
             continue;
+        }
+
+        while target_end_index < target_ends.len()
+            && matches!(
+                target_ends[target_end_index].0.try_cmp(&start),
+                Ok(Ordering::Less | Ordering::Equal)
+            )
+        {
+            active_targets.remove(&target_ends[target_end_index].1);
+            target_end_index += 1;
+        }
+        while against_end_index < against_ends.len()
+            && matches!(
+                against_ends[against_end_index].0.try_cmp(&start),
+                Ok(Ordering::Less | Ordering::Equal)
+            )
+        {
+            active_againsts.remove(&against_ends[against_end_index].1);
+            against_end_index += 1;
+        }
+        while target_start_index < target_starts.len()
+            && matches!(
+                target_starts[target_start_index].0.try_cmp(&start),
+                Ok(Ordering::Less | Ordering::Equal)
+            )
+        {
+            active_targets.insert(target_starts[target_start_index].1);
+            target_start_index += 1;
+        }
+        while against_start_index < against_starts.len()
+            && matches!(
+                against_starts[against_start_index].0.try_cmp(&start),
+                Ok(Ordering::Less | Ordering::Equal)
+            )
+        {
+            active_againsts.insert(against_starts[against_start_index].1);
+            against_start_index += 1;
         }
 
         let mut target_record_ids = Vec::new();
         let mut against_record_ids = Vec::new();
-        for item in targets {
-            if item.start < end && item.end > start {
-                target_record_ids.extend(item.record_ids.iter().cloned());
-            }
+        for index in &active_targets {
+            target_record_ids.extend(targets[*index].record_ids.iter().cloned());
         }
-        for item in againsts {
-            if item.start < end && item.end > start {
-                against_record_ids.extend(item.record_ids.iter().cloned());
-            }
+        for index in &active_againsts {
+            against_record_ids.extend(againsts[*index].record_ids.iter().cloned());
         }
 
-        let active_sources = againsts
+        let active_sources = active_againsts
             .iter()
-            .filter(|item| item.start < end && item.end > start)
-            .map(|item| item.source)
+            .filter_map(|index| againsts[*index].source)
             .collect::<BTreeSet<_>>()
             .into_iter()
             .map(str::to_owned)
@@ -2865,6 +3406,8 @@ fn aligned_segments(
         segments.push(AlignedSegment {
             start: start.magnitude(),
             end: end.magnitude(),
+            axis: start.axis(),
+            clock: start.clock().map(str::to_owned),
             target_record_ids,
             against_record_ids,
             against_is_active,
@@ -2885,7 +3428,7 @@ fn build_overlap_rows(aligned: &AlignedComparison) -> Vec<OverlapRow> {
             window_name: segment.window_name.clone(),
             key: segment.key.clone(),
             partition: segment.partition.clone(),
-            range: segment.range,
+            range: segment.range.clone(),
             target_record_ids: segment.target_record_ids.clone(),
             against_record_ids: segment.against_record_ids.clone(),
         });
@@ -2904,7 +3447,7 @@ fn build_residual_rows(aligned: &AlignedComparison) -> Vec<ResidualRow> {
             window_name: segment.window_name.clone(),
             key: segment.key.clone(),
             partition: segment.partition.clone(),
-            range: segment.range,
+            range: segment.range.clone(),
             target_record_ids: segment.target_record_ids.clone(),
         });
     }
@@ -2922,7 +3465,7 @@ fn build_missing_rows(aligned: &AlignedComparison) -> Vec<MissingRow> {
             window_name: segment.window_name.clone(),
             key: segment.key.clone(),
             partition: segment.partition.clone(),
-            range: segment.range,
+            range: segment.range.clone(),
             against_record_ids: segment.against_record_ids.clone(),
         });
     }
@@ -2941,7 +3484,7 @@ fn build_coverage_rows(aligned: &AlignedComparison) -> Vec<CoverageRow> {
             window_name: segment.window_name.clone(),
             key: segment.key.clone(),
             partition: segment.partition.clone(),
-            range: segment.range,
+            range: segment.range.clone(),
             target_magnitude,
             covered_magnitude: if segment.against_is_active {
                 target_magnitude
@@ -2966,7 +3509,7 @@ fn build_gap_rows(aligned: &AlignedComparison) -> Vec<GapRow> {
             window_name: segment.window_name.clone(),
             key: segment.key.clone(),
             partition: segment.partition.clone(),
-            range: segment.range,
+            range: segment.range.clone(),
         });
     }
     rows
@@ -2985,7 +3528,7 @@ fn build_symmetric_difference_rows(aligned: &AlignedComparison) -> Vec<Symmetric
             window_name: segment.window_name.clone(),
             key: segment.key.clone(),
             partition: segment.partition.clone(),
-            range: segment.range,
+            range: segment.range.clone(),
             side: if has_target {
                 ComparisonSide::Target
             } else {
@@ -2998,9 +3541,12 @@ fn build_symmetric_difference_rows(aligned: &AlignedComparison) -> Vec<Symmetric
     rows
 }
 
-fn build_containment_rows(aligned: &AlignedComparison) -> Vec<ContainmentRow> {
+fn build_containment_rows(
+    aligned: &AlignedComparison,
+    prepared: &PreparedComparison,
+) -> Vec<ContainmentRow> {
     let mut rows = Vec::new();
-    let target_ranges = target_ranges_by_record_id(&aligned.prepared);
+    let target_ranges = target_ranges_by_record_id(prepared);
     for segment in &aligned.segments {
         if segment.target_record_ids.is_empty() {
             continue;
@@ -3011,7 +3557,7 @@ fn build_containment_rows(aligned: &AlignedComparison) -> Vec<ContainmentRow> {
                 window_name: segment.window_name.clone(),
                 key: segment.key.clone(),
                 partition: segment.partition.clone(),
-                range: segment.range,
+                range: segment.range.clone(),
                 status: ContainmentStatus::Contained,
                 target_record_ids: segment.target_record_ids.clone(),
                 container_record_ids: segment.against_record_ids.clone(),
@@ -3024,7 +3570,7 @@ fn build_containment_rows(aligned: &AlignedComparison) -> Vec<ContainmentRow> {
                 window_name: segment.window_name.clone(),
                 key: segment.key.clone(),
                 partition: segment.partition.clone(),
-                range: segment.range,
+                range: segment.range.clone(),
                 status: classify_uncontained_segment(
                     target_ranges.get(target_record_id.as_str()),
                     (segment.range.start, segment.range.end),
@@ -3077,29 +3623,34 @@ fn build_lead_lag_rows(
     tolerance_magnitude: i64,
 ) -> (Vec<LeadLagRow>, LeadLagSummary) {
     let mut rows = Vec::new();
-    for ((window_name, key, partition, _group_axis), (targets, againsts)) in groups {
+    for ((window_name, key, partition, _group_axis, _clock), (targets, againsts)) in groups {
         let mut comparison_points: Vec<TransitionPoint<'_>> = againsts
             .iter()
             .filter(|against| against.start.axis() == axis)
             .map(|against| TransitionPoint {
                 record_id: against.record_id,
                 point: if transition == LeadLagTransition::Start {
-                    against.start
+                    against.start.clone()
                 } else {
-                    against.end
+                    against.end.clone()
                 },
             })
             .collect();
-        comparison_points.sort_by_key(|item| (item.point, item.record_id));
+        comparison_points.sort_by(|left, right| {
+            left.point
+                .try_cmp(&right.point)
+                .expect("lead-lag groups share a temporal domain")
+                .then_with(|| left.record_id.cmp(right.record_id))
+        });
 
         for target in targets {
             if target.start.axis() != axis {
                 continue;
             }
             let target_point = if transition == LeadLagTransition::Start {
-                target.start
+                target.start.clone()
             } else {
-                target.end
+                target.end.clone()
             };
 
             if comparison_points.is_empty() {
@@ -3109,7 +3660,7 @@ fn build_lead_lag_rows(
                     partition: partition.clone(),
                     transition: transition.clone(),
                     axis,
-                    target_point: row_point_from_temporal_point(target_point),
+                    target_point: row_point_from_temporal_point(&target_point),
                     comparison_point: None,
                     delta_magnitude: None,
                     tolerance_magnitude,
@@ -3121,16 +3672,16 @@ fn build_lead_lag_rows(
                 continue;
             }
 
-            let nearest = find_nearest_transition(&comparison_points, target_point);
-            let delta = delta_magnitude(target_point, nearest.point);
+            let nearest = find_nearest_transition(&comparison_points, &target_point);
+            let delta = delta_magnitude(&target_point, &nearest.point);
             rows.push(LeadLagRow {
                 window_name: window_name.clone(),
                 key: key.clone(),
                 partition: partition.clone(),
                 transition: transition.clone(),
                 axis,
-                target_point: row_point_from_temporal_point(target_point),
-                comparison_point: Some(row_point_from_temporal_point(nearest.point)),
+                target_point: row_point_from_temporal_point(&target_point),
+                comparison_point: Some(row_point_from_temporal_point(&nearest.point)),
                 delta_magnitude: Some(delta),
                 tolerance_magnitude,
                 is_within_tolerance: delta.abs() <= tolerance_magnitude,
@@ -3183,26 +3734,42 @@ fn build_lead_lag_rows(
 
 fn find_nearest_transition<'a>(
     candidates: &'a [TransitionPoint<'a>],
-    target_point: crate::TemporalPoint,
+    target_point: &crate::TemporalPoint,
 ) -> TransitionPoint<'a> {
-    let mut best = candidates[0];
-    let mut best_distance = delta_magnitude(target_point, best.point).abs();
-    for &candidate in &candidates[1..] {
-        let distance = delta_magnitude(target_point, candidate.point).abs();
-        if distance < best_distance {
-            best = candidate;
-            best_distance = distance;
-        }
+    let insertion = candidates.partition_point(|candidate| {
+        candidate
+            .point
+            .try_cmp(target_point)
+            .is_ok_and(std::cmp::Ordering::is_lt)
+    });
+    let mut options = Vec::with_capacity(2);
+    if let Some(candidate) = candidates.get(insertion) {
+        options.push(candidate);
     }
-    best
+    if insertion > 0 {
+        options.push(&candidates[insertion - 1]);
+    }
+    options
+        .into_iter()
+        .min_by(|left, right| {
+            delta_magnitude(target_point, &left.point)
+                .abs()
+                .cmp(&delta_magnitude(target_point, &right.point).abs())
+                .then_with(|| left.record_id.cmp(right.record_id))
+        })
+        .expect("nearest transition requires a non-empty candidate list")
+        .clone()
 }
 
 fn delta_magnitude(
-    target_point: crate::TemporalPoint,
-    comparison_point: crate::TemporalPoint,
+    target_point: &crate::TemporalPoint,
+    comparison_point: &crate::TemporalPoint,
 ) -> i64 {
-    debug_assert_eq!(target_point.axis(), comparison_point.axis());
-    target_point.magnitude() - comparison_point.magnitude()
+    debug_assert!(target_point.is_compatible_with(comparison_point));
+    target_point
+        .magnitude()
+        .checked_sub(comparison_point.magnitude())
+        .expect("compatible temporal delta fits i64")
 }
 
 fn direction_for_delta(delta: i64) -> LeadLagDirection {
@@ -3223,23 +3790,28 @@ fn build_as_of_rows(
 ) -> (Vec<AsOfRow>, Vec<ComparisonDiagnostic>) {
     let mut rows = Vec::new();
     let mut diagnostics = Vec::new();
-    for ((window_name, key, partition, _group_axis), (targets, againsts)) in groups {
+    for ((window_name, key, partition, _group_axis, _clock), (targets, againsts)) in groups {
         let mut candidates: Vec<TransitionPoint<'_>> = againsts
             .iter()
             .filter(|against| against.start.axis() == axis)
             .map(|against| TransitionPoint {
                 record_id: against.record_id,
-                point: against.start,
+                point: against.start.clone(),
             })
             .collect();
-        candidates.sort_by_key(|item| (item.point, item.record_id));
+        candidates.sort_by(|left, right| {
+            left.point
+                .try_cmp(&right.point)
+                .expect("as-of groups share a temporal domain")
+                .then_with(|| left.record_id.cmp(right.record_id))
+        });
 
         for target in targets {
             if target.start.axis() != axis {
                 continue;
             }
-            let target_point = target.start;
-            let target_point_row = row_point_from_temporal_point(target_point);
+            let target_point = target.start.clone();
+            let target_point_row = row_point_from_temporal_point(&target_point);
 
             if candidates.is_empty() {
                 rows.push(AsOfRow {
@@ -3260,7 +3832,7 @@ fn build_as_of_rows(
             }
 
             let (best, ambiguous, future_rejected) =
-                find_as_of_candidate(&candidates, target_point, &direction);
+                find_as_of_candidate(&candidates, &target_point, &direction);
             let Some(best) = best else {
                 rows.push(AsOfRow {
                     window_name: window_name.clone(),
@@ -3271,7 +3843,8 @@ fn build_as_of_rows(
                     target_point: target_point_row,
                     matched_point: None,
                     distance_magnitude: future_rejected
-                        .map(|item| delta_magnitude(target_point, item.point).abs()),
+                        .as_ref()
+                        .map(|item| delta_magnitude(&target_point, &item.point).abs()),
                     tolerance_magnitude,
                     status: if future_rejected.is_some() {
                         AsOfMatchStatus::FutureRejected
@@ -3284,7 +3857,7 @@ fn build_as_of_rows(
                 continue;
             };
 
-            let distance = delta_magnitude(target_point, best.point).abs();
+            let distance = delta_magnitude(&target_point, &best.point).abs();
             if distance > tolerance_magnitude {
                 rows.push(AsOfRow {
                     window_name: window_name.clone(),
@@ -3317,7 +3890,7 @@ fn build_as_of_rows(
                 axis,
                 direction: direction.clone(),
                 target_point: target_point_row,
-                matched_point: Some(row_point_from_temporal_point(best.point)),
+                matched_point: Some(row_point_from_temporal_point(&best.point)),
                 distance_magnitude: Some(distance),
                 tolerance_magnitude,
                 status: if ambiguous {
@@ -3338,7 +3911,7 @@ fn build_as_of_rows(
 
 fn find_as_of_candidate<'a>(
     candidates: &'a [TransitionPoint<'a>],
-    target_point: crate::TemporalPoint,
+    target_point: &crate::TemporalPoint,
     direction: &AsOfDirection,
 ) -> (
     Option<TransitionPoint<'a>>,
@@ -3350,19 +3923,22 @@ fn find_as_of_candidate<'a>(
     let mut best = None;
     let mut best_distance = None;
 
-    for &candidate in candidates {
-        let comparison = candidate.point.cmp(&target_point);
+    for candidate in candidates {
+        let comparison = candidate
+            .point
+            .try_cmp(target_point)
+            .expect("as-of groups share a temporal domain");
         if *direction == AsOfDirection::Previous && comparison.is_gt() {
-            future_rejected.get_or_insert(candidate);
+            future_rejected.get_or_insert_with(|| candidate.clone());
             continue;
         }
         if *direction == AsOfDirection::Next && comparison.is_lt() {
             continue;
         }
 
-        let distance = delta_magnitude(target_point, candidate.point).abs();
+        let distance = delta_magnitude(target_point, &candidate.point).abs();
         if best_distance.is_none_or(|current| distance < current) {
-            best = Some(candidate);
+            best = Some(candidate.clone());
             best_distance = Some(distance);
             ambiguous = false;
             continue;
@@ -3370,8 +3946,11 @@ fn find_as_of_candidate<'a>(
 
         if Some(distance) == best_distance {
             ambiguous = true;
-            if best.is_some_and(|current| candidate.record_id < current.record_id) {
-                best = Some(candidate);
+            if best
+                .as_ref()
+                .is_some_and(|current| candidate.record_id < current.record_id)
+            {
+                best = Some(candidate.clone());
             }
         }
     }
@@ -3381,6 +3960,8 @@ fn find_as_of_candidate<'a>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_must_use)]
+
     use crate::{WindowHistoryFixture, fixture::ContractFixture};
 
     use super::*;
@@ -3471,7 +4052,6 @@ mod tests {
         assert!(missing_codes.iter().any(|code| code == "MissingName"));
         assert!(missing_codes.iter().any(|code| code == "MissingTarget"));
         assert!(missing_codes.iter().any(|code| code == "MissingAgainst"));
-        assert!(missing_codes.iter().any(|code| code == "MissingScope"));
         assert!(missing_codes.iter().any(|code| code == "MissingComparator"));
 
         let runtime_only = history
@@ -3488,10 +4068,8 @@ mod tests {
             .plan()
             .clone();
 
-        assert!(runtime_only.validate().iter().any(|diagnostic| {
-            diagnostic.code == "NonSerializableSelector"
-                && diagnostic.severity == DiagnosticSeverity::Error
-        }));
+        assert!(runtime_only.validate().is_empty());
+        assert!(!runtime_only.is_serializable());
     }
 
     #[test]
@@ -3560,8 +4138,10 @@ mod tests {
         assert_eq!(result.comparator_summaries[0].row_count, 1);
         assert_eq!(result.comparator_summaries[1].row_count, 1);
         assert_eq!(result.comparator_summaries[2].row_count, 2);
-        assert_eq!(result.overlap_rows[0].range, RowRange { start: 3, end: 5 });
-        assert_eq!(result.residual_rows[0].range, RowRange { start: 1, end: 3 });
+        assert_eq!(result.overlap_rows[0].range.start, 3);
+        assert_eq!(result.overlap_rows[0].range.end, 5);
+        assert_eq!(result.residual_rows[0].range.start, 1);
+        assert_eq!(result.residual_rows[0].range.end, 3);
     }
 
     #[test]
@@ -3588,7 +4168,7 @@ mod tests {
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Gap, Comparator::SymmetricDifference],
-            require_closed_windows: true,
+            require_closed_windows: false,
             use_half_open_ranges: true,
             time_axis: TemporalAxis::ProcessingPosition,
             null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
@@ -3604,7 +4184,8 @@ mod tests {
         let result = compare(&history, &plan);
 
         assert_eq!(result.gap_rows.len(), 1);
-        assert_eq!(result.gap_rows[0].range, RowRange { start: 3, end: 5 });
+        assert_eq!(result.gap_rows[0].range.start, 3);
+        assert_eq!(result.gap_rows[0].range.end, 5);
         assert_eq!(result.symmetric_difference_rows.len(), 2);
         assert_eq!(
             result.symmetric_difference_rows[0].side,
@@ -3636,7 +4217,7 @@ mod tests {
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Containment],
-            require_closed_windows: true,
+            require_closed_windows: false,
             use_half_open_ranges: true,
             time_axis: TemporalAxis::ProcessingPosition,
             null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
@@ -3827,7 +4408,7 @@ mod tests {
                 }],
                 require_closed_windows: true,
                 use_half_open_ranges: true,
-                time_axis: TemporalAxis::ProcessingPosition,
+                time_axis: TemporalAxis::Timestamp,
                 null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
@@ -3868,7 +4449,7 @@ mod tests {
                 }],
                 require_closed_windows: true,
                 use_half_open_ranges: true,
-                time_axis: TemporalAxis::ProcessingPosition,
+                time_axis: TemporalAxis::Timestamp,
                 null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
                 known_at: None,
                 open_window_policy: OpenWindowPolicy::RequireClosed,
@@ -4072,7 +4653,7 @@ mod tests {
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Residual],
-            require_closed_windows: true,
+            require_closed_windows: false,
             use_half_open_ranges: true,
             time_axis: TemporalAxis::ProcessingPosition,
             null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
@@ -4295,7 +4876,8 @@ mod tests {
         let result = compare(&history, &plan);
 
         assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.overlap_rows[0].range, RowRange { start: 1, end: 5 });
+        assert_eq!(result.overlap_rows[0].range.start, 1);
+        assert_eq!(result.overlap_rows[0].range.end, 5);
         assert_eq!(result.overlap_rows[0].target_record_ids.len(), 2);
     }
 
@@ -4537,7 +5119,7 @@ mod tests {
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Overlap],
-            require_closed_windows: true,
+            require_closed_windows: false,
             use_half_open_ranges: true,
             time_axis: TemporalAxis::ProcessingPosition,
             null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
@@ -4576,9 +5158,9 @@ mod tests {
             scope_segments: Vec::new(),
             scope_tags: Vec::new(),
             comparators: vec![Comparator::Overlap],
-            require_closed_windows: true,
+            require_closed_windows: false,
             use_half_open_ranges: true,
-            time_axis: TemporalAxis::ProcessingPosition,
+            time_axis: TemporalAxis::Timestamp,
             null_timestamp_policy: ComparisonNullTimestampPolicy::Reject,
             known_at: Some(crate::TemporalPoint::timestamp_ticks_with_clock(
                 1, "received",

@@ -1,14 +1,14 @@
 # Spanfold Rust
 
-Rust 1.95.0 / Rust 2024 implementation of Spanfold's high-throughput library
-and CLI surface.
+Rust 1.95.0 / Rust 2024 experimental implementation of Spanfold's library and
+CLI surface. It is not yet a production or high-throughput release.
 
 The Rust package now covers the main comparison contract: typed temporal
 primitives, window histories, fixture parsing, staged preparation/alignment,
 core and advanced comparators, cohort/source-matrix/hierarchy analytics,
 deterministic exports, audit bundles, liveness helpers, and testing utilities.
 
-Private implementation planning specs live under `packages/rust/specs/`.
+Implementation planning specs live under `packages/rust/specs/`.
 
 ## Rust API
 
@@ -34,7 +34,7 @@ pipeline.ingest(
     DeviceStatus { device_id: "device-17".into(), is_online: false },
     Some("provider-a"),
     None,
-);
+).expect("ingest event");
 
 let result = pipeline
     .history()
@@ -87,22 +87,22 @@ cargo bench -p spanfold --bench spanfold_benchmarks
 
 | Area | Status |
 | --- | --- |
-| Core temporal model and window records | Conformance-passing |
+| Core temporal model and window records | Implemented; cross-language conformance gate pending |
 | Direct history queries, snapshots, grouping summaries | Implemented |
 | Window annotations and known-at annotation filtering | Implemented |
-| Fixture parsing and validation | Conformance-passing |
-| Comparison preparation and deterministic alignment | Conformance-passing |
-| Overlap, residual, missing, coverage, gap, symmetric difference | Conformance-passing |
-| Containment, lead/lag, as-of | Conformance-passing |
-| Known-at filtering, live horizons, row finality, changelog | Conformance-passing |
+| Fixture parsing and validation | Implemented; cross-language conformance gate pending |
+| Comparison preparation and deterministic alignment | Implemented; cross-language conformance gate pending |
+| Overlap, residual, missing, coverage, gap, symmetric difference | Implemented |
+| Containment, lead/lag, as-of | Implemented |
+| Known-at filtering, live horizons, row finality, changelog | Implemented |
 | Cohorts, source matrix, hierarchy, nested roll-ups | Implemented |
-| JSON, JSON Lines, Markdown, debug HTML, LLM context exports and configured run exports | Conformance-passing |
-| Fixture CLI, window JSONL audit CLI, audit bundles | Conformance-passing |
+| JSON, JSON Lines, Markdown, debug HTML, LLM context exports and configured run exports | Implemented; conformance gate pending |
+| Fixture CLI, window JSONL audit CLI, audit bundles | Implemented |
 | Event JSONL/CSV import and audit CLI | Implemented |
 | Liveness helpers | Implemented |
 | Testing helpers, snapshot normalization, virtual clocks | Implemented |
 | Pipeline emissions, batch ingestion, event-time recording, configured metadata, callbacks, boundary reasons, roll-up segment projection | Implemented |
-| Criterion/throughput benchmark suite | Implemented |
+| Criterion/throughput benchmark suite | Implemented; published workload baselines pending |
 
 ## Event Import Map
 

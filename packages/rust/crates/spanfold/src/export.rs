@@ -3,6 +3,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::Serialize;
@@ -39,7 +40,6 @@ pub enum ComparisonExportError {
 /// Configures optional debug HTML export during comparison execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComparisonDebugHtmlOptions {
-    enabled: bool,
     path: Option<PathBuf>,
 }
 
@@ -47,17 +47,13 @@ impl ComparisonDebugHtmlOptions {
     /// Returns options that do not write a debug HTML artifact.
     #[must_use]
     pub const fn disabled() -> Self {
-        Self {
-            enabled: false,
-            path: None,
-        }
+        Self { path: None }
     }
 
     /// Creates options that write a debug HTML artifact to a file.
     #[must_use]
     pub fn to_file(path: impl Into<PathBuf>) -> Self {
         Self {
-            enabled: true,
             path: Some(path.into()),
         }
     }
@@ -65,7 +61,7 @@ impl ComparisonDebugHtmlOptions {
     /// Gets whether debug HTML export is enabled.
     #[must_use]
     pub const fn enabled(&self) -> bool {
-        self.enabled
+        self.path.is_some()
     }
 
     /// Gets the destination file path when export is enabled.
@@ -73,22 +69,11 @@ impl ComparisonDebugHtmlOptions {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
-
-    pub(crate) fn export_if_enabled(
-        &self,
-        result: &ComparisonResult,
-    ) -> Result<(), ComparisonExportError> {
-        if let Some(path) = self.enabled.then_some(()).and(self.path.as_deref()) {
-            write_file(path, export_result_debug_html(result).as_bytes())?;
-        }
-        Ok(())
-    }
 }
 
 /// Configures optional LLM context export during comparison execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComparisonLlmContextOptions {
-    enabled: bool,
     path: Option<PathBuf>,
 }
 
@@ -96,17 +81,13 @@ impl ComparisonLlmContextOptions {
     /// Returns options that do not write an LLM context artifact.
     #[must_use]
     pub const fn disabled() -> Self {
-        Self {
-            enabled: false,
-            path: None,
-        }
+        Self { path: None }
     }
 
     /// Creates options that write deterministic LLM context JSON to a file.
     #[must_use]
     pub fn to_file(path: impl Into<PathBuf>) -> Self {
         Self {
-            enabled: true,
             path: Some(path.into()),
         }
     }
@@ -114,7 +95,7 @@ impl ComparisonLlmContextOptions {
     /// Gets whether LLM context export is enabled.
     #[must_use]
     pub const fn enabled(&self) -> bool {
-        self.enabled
+        self.path.is_some()
     }
 
     /// Gets the destination file path when export is enabled.
@@ -122,16 +103,31 @@ impl ComparisonLlmContextOptions {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
+}
 
-    pub(crate) fn export_if_enabled(
-        &self,
-        result: &ComparisonResult,
-    ) -> Result<(), ComparisonExportError> {
-        if let Some(path) = self.enabled.then_some(()).and(self.path.as_deref()) {
-            write_file(path, export_result_llm_context(result)?.as_bytes())?;
-        }
-        Ok(())
+pub(crate) fn export_configured_bundle(
+    result: &ComparisonResult,
+    debug_html: &ComparisonDebugHtmlOptions,
+    llm_context: &ComparisonLlmContextOptions,
+) -> Result<(), ComparisonExportError> {
+    let debug_payload = debug_html
+        .path
+        .as_deref()
+        .map(|_| export_result_debug_html(result));
+    let llm_payload = llm_context
+        .path
+        .as_deref()
+        .map(|_| export_result_llm_context(result))
+        .transpose()?;
+    let mut artifacts = Vec::new();
+    if let (Some(path), Some(payload)) = (debug_html.path.as_deref(), debug_payload.as_ref()) {
+        artifacts.push((path, payload.as_bytes()));
     }
+    if let (Some(path), Some(payload)) = (llm_context.path.as_deref(), llm_payload.as_ref()) {
+        artifacts.push((path, payload.as_bytes()));
+    }
+    write_files_atomically(&artifacts)?;
+    Ok(())
 }
 
 /// Exports a comparison plan as deterministic JSON.
@@ -145,7 +141,7 @@ pub fn export_result_json(result: &ComparisonResult) -> Result<String, Compariso
     ensure_exportable(&result.plan)?;
     Ok(serde_json::to_string_pretty(&build_result_json_value(
         result,
-    ))?)
+    )?)?)
 }
 
 /// Exports a comparison result as deterministic JSON Lines.
@@ -164,28 +160,7 @@ pub fn write_result_json_lines<W: Write>(
     mut writer: W,
 ) -> Result<(), ComparisonExportError> {
     ensure_exportable(&result.plan)?;
-    write_json_line(
-        &mut writer,
-        &json!({
-            "schema": ROW_SCHEMA,
-            "schemaVersion": SCHEMA_VERSION,
-            "artifact": "result-summary",
-            "planName": result.plan_name,
-            "isValid": result.is_valid,
-            "knownAt": result.known_at,
-            "evaluationHorizon": result.evaluation_horizon,
-            "diagnosticCount": result.diagnostics.len(),
-            "overlapRowCount": result.overlap_rows.len(),
-            "residualRowCount": result.residual_rows.len(),
-            "missingRowCount": result.missing_rows.len(),
-            "coverageRowCount": result.coverage_rows.len(),
-            "gapRowCount": result.gap_rows.len(),
-            "symmetricDifferenceRowCount": result.symmetric_difference_rows.len(),
-            "containmentRowCount": result.containment_rows.len(),
-            "leadLagRowCount": result.lead_lag_rows.len(),
-            "asOfRowCount": result.as_of_rows.len()
-        }),
-    )?;
+    write_json_line(&mut writer, &result_summary_json_value(result))?;
     write_json_lines(&mut writer, "overlap", &result.overlap_rows)?;
     write_json_lines(&mut writer, "residual", &result.residual_rows)?;
     write_json_lines(&mut writer, "missing", &result.missing_rows)?;
@@ -206,25 +181,7 @@ fn append_result_json_lines(
     result: &ComparisonResult,
     lines: &mut Vec<String>,
 ) -> Result<(), serde_json::Error> {
-    lines.push(serde_json::to_string(&json!({
-        "schema": ROW_SCHEMA,
-        "schemaVersion": SCHEMA_VERSION,
-        "artifact": "result-summary",
-        "planName": result.plan_name,
-        "isValid": result.is_valid,
-        "knownAt": result.known_at,
-        "evaluationHorizon": result.evaluation_horizon,
-        "diagnosticCount": result.diagnostics.len(),
-        "overlapRowCount": result.overlap_rows.len(),
-        "residualRowCount": result.residual_rows.len(),
-        "missingRowCount": result.missing_rows.len(),
-        "coverageRowCount": result.coverage_rows.len(),
-        "gapRowCount": result.gap_rows.len(),
-        "symmetricDifferenceRowCount": result.symmetric_difference_rows.len(),
-        "containmentRowCount": result.containment_rows.len(),
-        "leadLagRowCount": result.lead_lag_rows.len(),
-        "asOfRowCount": result.as_of_rows.len()
-    }))?);
+    lines.push(serde_json::to_string(&result_summary_json_value(result))?);
 
     append_json_lines(lines, "overlap", &result.overlap_rows)?;
     append_json_lines(lines, "residual", &result.residual_rows)?;
@@ -242,15 +199,89 @@ fn append_result_json_lines(
     Ok(())
 }
 
+fn result_summary_json_value(result: &ComparisonResult) -> Value {
+    json!({
+        "schema": ROW_SCHEMA,
+        "schemaVersion": SCHEMA_VERSION,
+        "artifact": "result-summary",
+        "planName": result.plan_name,
+        "isValid": result.is_valid,
+        "knownAt": result.known_at,
+        "evaluationHorizon": result.evaluation_horizon,
+        "diagnosticCount": result.diagnostics.len(),
+        "overlapRowCount": result.overlap_rows.len(),
+        "residualRowCount": result.residual_rows.len(),
+        "missingRowCount": result.missing_rows.len(),
+        "coverageRowCount": result.coverage_rows.len(),
+        "gapRowCount": result.gap_rows.len(),
+        "symmetricDifferenceRowCount": result.symmetric_difference_rows.len(),
+        "containmentRowCount": result.containment_rows.len(),
+        "leadLagRowCount": result.lead_lag_rows.len(),
+        "asOfRowCount": result.as_of_rows.len()
+    })
+}
+
 /// Exports a comparison result as deterministic LLM context JSON.
 pub fn export_result_llm_context(
     result: &ComparisonResult,
 ) -> Result<String, ComparisonExportError> {
     ensure_exportable(&result.plan)?;
-    let row_documents = export_result_json_lines(result)?
-        .into_iter()
-        .map(|line| serde_json::from_str::<Value>(&line))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut row_documents = vec![result_summary_json_value(result)];
+    for (row_type, rows) in [
+        (
+            "overlap",
+            build_row_values("overlap", &result.overlap_rows, &result.row_finalities)?,
+        ),
+        (
+            "residual",
+            build_row_values("residual", &result.residual_rows, &result.row_finalities)?,
+        ),
+        (
+            "missing",
+            build_row_values("missing", &result.missing_rows, &result.row_finalities)?,
+        ),
+        (
+            "coverage",
+            build_row_values("coverage", &result.coverage_rows, &result.row_finalities)?,
+        ),
+        (
+            "gap",
+            build_row_values("gap", &result.gap_rows, &result.row_finalities)?,
+        ),
+        (
+            "symmetric-difference",
+            build_row_values(
+                "symmetricDifference",
+                &result.symmetric_difference_rows,
+                &result.row_finalities,
+            )?,
+        ),
+        (
+            "containment",
+            build_row_values(
+                "containment",
+                &result.containment_rows,
+                &result.row_finalities,
+            )?,
+        ),
+        (
+            "lead-lag",
+            build_row_values("leadLag", &result.lead_lag_rows, &result.row_finalities)?,
+        ),
+        (
+            "asof",
+            build_row_values("asOf", &result.as_of_rows, &result.row_finalities)?,
+        ),
+    ] {
+        row_documents.extend(rows.into_iter().map(|row| {
+            let mut object = match row {
+                Value::Object(object) => object,
+                _ => Map::new(),
+            };
+            object.insert("rowType".to_owned(), Value::String(row_type.to_owned()));
+            Value::Object(object)
+        }));
+    }
 
     Ok(serde_json::to_string_pretty(&json!({
         "schema": LLM_CONTEXT_SCHEMA,
@@ -277,7 +308,7 @@ pub fn export_result_llm_context(
             "rowCounts": row_counts_json(result)
         },
         "resultMarkdown": export_result_markdown(result),
-        "fullResult": build_result_json_value(result),
+        "fullResult": build_result_json_value(result)?,
         "rowDocuments": row_documents
     }))?)
 }
@@ -290,14 +321,18 @@ fn ensure_exportable(plan: &ComparisonPlan) -> Result<(), ComparisonExportError>
 
 /// Exports a comparison result as deterministic Markdown.
 pub fn export_result_markdown(result: &ComparisonResult) -> String {
-    let mut text = format!("# {}\n\nvalid: {}\n\n", result.plan_name, result.is_valid);
-    if let Some(known_at) = result.known_at {
+    let mut text = format!(
+        "# {}\n\nvalid: {}\n\n",
+        escape_markdown(&result.plan_name),
+        result.is_valid
+    );
+    if let Some(known_at) = result.known_at.as_ref() {
         text.push_str(&format!(
             "known at: {:?}:{}\n\n",
             known_at.axis, known_at.magnitude
         ));
     }
-    if let Some(horizon) = result.evaluation_horizon {
+    if let Some(horizon) = result.evaluation_horizon.as_ref() {
         text.push_str(&format!(
             "evaluation horizon: {:?}:{}\n\n",
             horizon.axis, horizon.magnitude
@@ -308,7 +343,8 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
         for (index, diagnostic) in result.diagnostics.iter().enumerate() {
             text.push_str(&format!(
                 "- diagnostic[{index}]: {:?} {}\n",
-                diagnostic.severity, diagnostic.code
+                diagnostic.severity,
+                escape_markdown(&diagnostic.code)
             ));
         }
         text.push('\n');
@@ -344,12 +380,29 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
         result.row_finalities.len()
     ));
 
+    text.push_str("## Row Evidence\n\n");
+    append_markdown_rows(&mut text, "overlap", &result.overlap_rows);
+    append_markdown_rows(&mut text, "residual", &result.residual_rows);
+    append_markdown_rows(&mut text, "missing", &result.missing_rows);
+    append_markdown_rows(&mut text, "coverage", &result.coverage_rows);
+    append_markdown_rows(&mut text, "gap", &result.gap_rows);
+    append_markdown_rows(
+        &mut text,
+        "symmetricDifference",
+        &result.symmetric_difference_rows,
+    );
+    append_markdown_rows(&mut text, "containment", &result.containment_rows);
+    append_markdown_rows(&mut text, "leadLag", &result.lead_lag_rows);
+    append_markdown_rows(&mut text, "asOf", &result.as_of_rows);
+    text.push('\n');
+
     if !result.comparator_summaries.is_empty() {
         text.push_str("## Comparator Summaries\n\n");
         for summary in &result.comparator_summaries {
             text.push_str(&format!(
                 "- {} rows={}\n",
-                summary.comparator_name, summary.row_count
+                escape_markdown(&summary.comparator_name),
+                summary.row_count
             ));
         }
         text.push('\n');
@@ -360,7 +413,9 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
         for summary in &result.coverage_summaries {
             text.push_str(&format!(
                 "- {} {} ratio={:.6}\n",
-                summary.window_name, summary.key, summary.coverage_ratio
+                escape_markdown(&summary.window_name),
+                escape_markdown(&summary.key),
+                summary.coverage_ratio
             ));
         }
         text.push('\n');
@@ -389,12 +444,40 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
         for (index, item) in result.extension_metadata.iter().enumerate() {
             text.push_str(&format!(
                 "- extensionMetadata[{index}]: {}.{}={}\n",
-                item.extension_id, item.key, item.value
+                escape_markdown(&item.extension_id),
+                escape_markdown(&item.key),
+                escape_markdown(&item.value)
             ));
         }
     }
 
     text
+}
+
+fn append_markdown_rows<T: Serialize>(text: &mut String, label: &str, rows: &[T]) {
+    for (index, row) in rows.iter().enumerate() {
+        let payload =
+            serde_json::to_string(row).unwrap_or_else(|_| "<serialization-error>".to_owned());
+        text.push_str(&format!(
+            "- {}[{}]: `{}`\n",
+            escape_markdown(label),
+            index,
+            escape_markdown(&payload)
+        ));
+    }
+}
+
+fn escape_markdown(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('#', "\\#")
+        .replace('*', "\\*")
+        .replace('_', "\\_")
+        .replace('`', "\\`")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('|', "\\|")
+        .replace('>', "\\>")
 }
 
 /// Exports a comparison result as self-contained debug HTML.
@@ -434,7 +517,7 @@ pub fn export_result_debug_html(result: &ComparisonResult) -> String {
         }
     )
     .expect("write debug html");
-    if let Some(horizon) = result.evaluation_horizon {
+    if let Some(horizon) = result.evaluation_horizon.as_ref() {
         write!(
             html,
             "<span class=\"badge live\">Live horizon {}</span>",
@@ -442,7 +525,7 @@ pub fn export_result_debug_html(result: &ComparisonResult) -> String {
         )
         .expect("write debug html");
     }
-    if let Some(known_at) = result.known_at {
+    if let Some(known_at) = result.known_at.as_ref() {
         write!(
             html,
             "<span class=\"badge\">Known at {}</span>",
@@ -556,7 +639,10 @@ fn append_debug_json_section(
                 write!(
                     html,
                     "<tr><td class=\"mono\"><pre>{}</pre></td></tr>",
-                    escape_html(&serde_json::to_string_pretty(row).unwrap_or_default())
+                    escape_html(
+                        &serde_json::to_string_pretty(row)
+                            .unwrap_or_else(|_| "<serialization-error>".to_owned())
+                    )
                 )
                 .expect("write debug html");
             }
@@ -593,7 +679,10 @@ fn append_debug_diagnostics(html: &mut String, result: &ComparisonResult) {
         write!(
             html,
             "<tr><td class=\"mono\"><pre>{}</pre></td></tr>",
-            escape_html(&serde_json::to_string_pretty(&value).unwrap_or_default())
+            escape_html(
+                &serde_json::to_string_pretty(&value)
+                    .unwrap_or_else(|_| "<serialization-error>".to_owned())
+            )
         )
         .expect("write debug html");
     }
@@ -622,7 +711,10 @@ fn append_debug_metadata(html: &mut String, result: &ComparisonResult) {
         write!(
             html,
             "<tr><td class=\"mono\"><pre>{}</pre></td></tr>",
-            escape_html(&serde_json::to_string_pretty(&value).unwrap_or_default())
+            escape_html(
+                &serde_json::to_string_pretty(&value)
+                    .unwrap_or_else(|_| "<serialization-error>".to_owned())
+            )
         )
         .expect("write debug html");
     }
@@ -676,7 +768,10 @@ fn append_debug_row_table<T: Serialize>(html: &mut String, label: &str, rows: &[
         write!(
             html,
             "<tr><td class=\"mono\"><pre>{}</pre></td></tr>",
-            escape_html(&serde_json::to_string_pretty(&value).unwrap_or_default())
+            escape_html(
+                &serde_json::to_string_pretty(&value)
+                    .unwrap_or_else(|_| "<serialization-error>".to_owned())
+            )
         )
         .expect("write debug html");
     }
@@ -699,7 +794,10 @@ fn append_debug_pretty_json(html: &mut String, title: &str, value: Option<&Value
         html,
         "<section class=\"panel\"><h2>{}</h2><pre>{}</pre></section>",
         escape_html(title),
-        escape_html(&serde_json::to_string_pretty(&payload).unwrap_or_default())
+        escape_html(
+            &serde_json::to_string_pretty(&payload)
+                .unwrap_or_else(|_| "<serialization-error>".to_owned())
+        )
     )
     .expect("write debug html");
 }
@@ -713,13 +811,59 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-fn write_file(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)?;
+fn write_files_atomically(files: &[(&Path, &[u8])]) -> Result<(), std::io::Error> {
+    if files.is_empty() {
+        return Ok(());
     }
-    fs::write(path, content)
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut destinations = std::collections::BTreeSet::new();
+    for (path, _) in files {
+        if !destinations.insert((*path).to_owned()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "duplicate export destination",
+            ));
+        }
+    }
+    let mut staged = Vec::with_capacity(files.len());
+    for (path, content) in files {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("artifact");
+        let temporary = path.with_file_name(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let result = (|| {
+            let mut file = fs::File::create(&temporary)?;
+            file.write_all(content)?;
+            file.sync_all()
+        })();
+        if let Err(error) = result {
+            for (_, temporary) in &staged {
+                let _ = fs::remove_file(temporary);
+            }
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        staged.push((*path, temporary));
+    }
+    for (path, temporary) in &staged {
+        if let Err(error) = fs::rename(temporary, path) {
+            for (_, remaining) in &staged {
+                let _ = fs::remove_file(remaining);
+            }
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 fn append_json_lines<T: Serialize>(
@@ -727,13 +871,14 @@ fn append_json_lines<T: Serialize>(
     row_type: &str,
     rows: &[T],
 ) -> Result<(), serde_json::Error> {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
+        let row_id = crate::comparison::stable_row_id_for_export(row_type, row);
         lines.push(serde_json::to_string(&json!({
             "schema": ROW_SCHEMA,
             "schemaVersion": SCHEMA_VERSION,
             "artifact": "result-row",
             "rowType": row_type,
-            "rowId": format!("{row_type}[{index}]"),
+            "rowId": row_id,
             "row": row
         }))?);
     }
@@ -745,7 +890,8 @@ fn write_json_lines<W: Write, T: Serialize>(
     row_type: &str,
     rows: &[T],
 ) -> Result<(), ComparisonExportError> {
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
+        let row_id = crate::comparison::stable_row_id_for_export(row_type, row);
         write_json_line(
             writer,
             &json!({
@@ -753,7 +899,7 @@ fn write_json_lines<W: Write, T: Serialize>(
                 "schemaVersion": SCHEMA_VERSION,
                 "artifact": "result-row",
                 "rowType": row_type,
-                "rowId": format!("{row_type}[{index}]"),
+                "rowId": row_id,
                 "row": row
             }),
         )?;
@@ -802,7 +948,7 @@ fn build_plan_json_value(plan: &ComparisonPlan) -> Value {
             "useHalfOpenRanges": plan.use_half_open_ranges,
             "timeAxis": format!("{:?}", plan.time_axis),
             "openWindowPolicy": format!("{:?}", plan.open_window_policy),
-            "openWindowHorizon": plan.open_window_horizon.map(|point| json!({
+            "openWindowHorizon": plan.open_window_horizon.as_ref().map(|point| json!({
                 "axis": format!("{:?}", point.axis()),
                 "position": point.magnitude(),
                 "clock": point.clock()
@@ -813,7 +959,7 @@ fn build_plan_json_value(plan: &ComparisonPlan) -> Value {
                 ComparisonDuplicateWindowPolicy::Preserve => "Preserve",
                 ComparisonDuplicateWindowPolicy::Reject => "Reject",
             },
-            "knownAt": plan.known_at.map(|point| json!({
+            "knownAt": plan.known_at.as_ref().map(|point| json!({
                 "axis": format!("{:?}", point.axis()),
                 "position": point.magnitude(),
                 "clock": point.clock()
@@ -824,7 +970,7 @@ fn build_plan_json_value(plan: &ComparisonPlan) -> Value {
             "includeAlignedSegments": plan.output.include_aligned_segments,
             "includeExplainData": plan.output.include_explain_data
         },
-        "diagnostics": []
+        "diagnostics": plan.validate()
     })
 }
 
@@ -846,11 +992,14 @@ fn selector_json(selector: &ComparisonSelector) -> Value {
             }),
         );
     }
+    if let Some(object) = value.as_object_mut() {
+        object.insert("expression".to_owned(), selector.export_expression());
+    }
     value
 }
 
-fn build_result_json_value(result: &ComparisonResult) -> Value {
-    json!({
+fn build_result_json_value(result: &ComparisonResult) -> Result<Value, ComparisonExportError> {
+    Ok(json!({
         "schema": RESULT_SCHEMA,
         "schemaVersion": SCHEMA_VERSION,
         "artifact": "result",
@@ -863,21 +1012,21 @@ fn build_result_json_value(result: &ComparisonResult) -> Value {
         "aligned": result.aligned,
         "comparatorSummaries": result.comparator_summaries,
         "rows": {
-            "overlap": build_row_values("overlap", &result.overlap_rows, &result.row_finalities),
-            "residual": build_row_values("residual", &result.residual_rows, &result.row_finalities),
-            "missing": build_row_values("missing", &result.missing_rows, &result.row_finalities),
-            "coverage": build_row_values("coverage", &result.coverage_rows, &result.row_finalities),
-            "gap": build_row_values("gap", &result.gap_rows, &result.row_finalities),
-            "symmetricDifference": build_row_values("symmetricDifference", &result.symmetric_difference_rows, &result.row_finalities),
-            "containment": build_row_values("containment", &result.containment_rows, &result.row_finalities),
-            "leadLag": build_row_values("leadLag", &result.lead_lag_rows, &result.row_finalities),
-            "asOf": build_row_values("asOf", &result.as_of_rows, &result.row_finalities)
+            "overlap": build_row_values("overlap", &result.overlap_rows, &result.row_finalities)?,
+            "residual": build_row_values("residual", &result.residual_rows, &result.row_finalities)?,
+            "missing": build_row_values("missing", &result.missing_rows, &result.row_finalities)?,
+            "coverage": build_row_values("coverage", &result.coverage_rows, &result.row_finalities)?,
+            "gap": build_row_values("gap", &result.gap_rows, &result.row_finalities)?,
+            "symmetricDifference": build_row_values("symmetricDifference", &result.symmetric_difference_rows, &result.row_finalities)?,
+            "containment": build_row_values("containment", &result.containment_rows, &result.row_finalities)?,
+            "leadLag": build_row_values("leadLag", &result.lead_lag_rows, &result.row_finalities)?,
+            "asOf": build_row_values("asOf", &result.as_of_rows, &result.row_finalities)?
         },
         "rowFinalities": result.row_finalities,
         "extensionMetadata": result.extension_metadata,
         "coverageSummaries": result.coverage_summaries,
         "leadLagSummaries": result.lead_lag_summaries
-    })
+    }))
 }
 
 fn build_plan_payload(plan: &ComparisonPlan) -> Value {
@@ -894,26 +1043,30 @@ fn build_row_values<T: Serialize>(
     row_type: &str,
     rows: &[T],
     finalities: &[crate::ComparisonRowFinality],
-) -> Vec<Value> {
+) -> Result<Vec<Value>, ComparisonExportError> {
+    let finality_by_id = finalities
+        .iter()
+        .map(|item| {
+            (
+                (item.row_type.as_str(), item.row_id.as_str()),
+                &item.finality,
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
     rows.iter()
-        .enumerate()
-        .map(|(index, row)| {
-            let mut object = match serde_json::to_value(row).unwrap_or(Value::Null) {
+        .map(|row| {
+            let mut object = match serde_json::to_value(row)? {
                 Value::Object(object) => object,
                 _ => Map::new(),
             };
-            let row_id = format!("{row_type}[{index}]");
-            let finality = finalities
-                .iter()
-                .find(|item| item.row_type == row_type && item.row_id == row_id)
-                .map(|item| item.finality.clone())
+            let row_id = crate::comparison::stable_row_id_for_export(row_type, row);
+            let finality = finality_by_id
+                .get(&(row_type, row_id.as_str()))
+                .map(|item| (*item).clone())
                 .unwrap_or(ComparisonFinality::Final);
             object.insert("rowId".to_owned(), Value::String(row_id));
-            object.insert(
-                "finality".to_owned(),
-                serde_json::to_value(finality).unwrap_or(Value::String("Final".to_owned())),
-            );
-            Value::Object(object)
+            object.insert("finality".to_owned(), serde_json::to_value(finality)?);
+            Ok(Value::Object(object))
         })
         .collect()
 }
@@ -972,7 +1125,7 @@ mod tests {
         let lines = export_result_json_lines(&result).expect("json lines");
         assert_eq!(lines.len(), 5);
         assert!(lines[0].contains("\"artifact\":\"result-summary\""));
-        assert!(lines[1].contains("\"rowId\":\"overlap[0]\""));
+        assert!(lines[1].contains("\"rowId\":\"overlap:"));
 
         let mut streamed = Vec::new();
         write_result_json_lines(&result, &mut streamed).expect("streaming json lines");
@@ -1119,7 +1272,7 @@ mod tests {
         let json = export_result_json(&result).expect("json");
         assert!(json.contains("\"coverageSummaries\""));
         assert!(json.contains("\"rowFinalities\""));
-        assert!(json.contains("\"rowId\": \"overlap[0]\""));
+        assert!(json.contains("\"rowId\": \"overlap:"));
         assert!(json.contains("\"finality\": \"Final\""));
     }
 }

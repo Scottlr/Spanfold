@@ -1,7 +1,10 @@
+use std::cmp::Ordering;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Temporal axis used by a point or range.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum TemporalAxis {
     /// Monotonic ingestion or processing position.
@@ -11,18 +14,21 @@ pub enum TemporalAxis {
 }
 
 /// A typed temporal point.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+///
+/// Timestamp points are comparable only when their clock identities match.
+/// Processing positions have no clock identity.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TemporalPoint {
     axis: TemporalAxis,
     magnitude: i64,
-    #[serde(skip_deserializing)]
-    clock: Option<&'static str>,
+    clock: Option<String>,
 }
 
 impl TemporalPoint {
     /// Creates a processing-position point.
     #[must_use]
-    pub const fn position(position: i64) -> Self {
+    pub fn position(position: i64) -> Self {
         Self {
             axis: TemporalAxis::ProcessingPosition,
             magnitude: position,
@@ -30,9 +36,12 @@ impl TemporalPoint {
         }
     }
 
-    /// Creates a timestamp point from ticks.
+    /// Creates a timestamp point from opaque ticks.
+    ///
+    /// The unit and epoch are part of the clock contract supplied by the
+    /// caller; values from different contracts must use different clock IDs.
     #[must_use]
-    pub const fn timestamp_ticks(ticks: i64) -> Self {
+    pub fn timestamp_ticks(ticks: i64) -> Self {
         Self {
             axis: TemporalAxis::Timestamp,
             magnitude: ticks,
@@ -41,36 +50,83 @@ impl TemporalPoint {
     }
 
     /// Creates a timestamp point from ticks and a stable clock identity.
+    /// The clock ID identifies the unit/epoch contract; Spanfold does not
+    /// reinterpret or convert ticks.
     #[must_use]
-    pub const fn timestamp_ticks_with_clock(ticks: i64, clock: &'static str) -> Self {
+    pub fn timestamp_ticks_with_clock(ticks: i64, clock: impl Into<String>) -> Self {
         Self {
             axis: TemporalAxis::Timestamp,
             magnitude: ticks,
-            clock: Some(clock),
+            clock: Some(clock.into()),
         }
     }
 
     /// Returns the point axis.
     #[must_use]
-    pub const fn axis(self) -> TemporalAxis {
+    pub const fn axis(&self) -> TemporalAxis {
         self.axis
     }
 
     /// Returns the point magnitude.
     #[must_use]
-    pub const fn magnitude(self) -> i64 {
+    pub const fn magnitude(&self) -> i64 {
         self.magnitude
     }
 
     /// Returns the point clock identity, when any.
     #[must_use]
-    pub const fn clock(self) -> Option<&'static str> {
-        self.clock
+    pub fn clock(&self) -> Option<&str> {
+        self.clock.as_deref()
+    }
+
+    /// Returns whether two points belong to the same temporal domain.
+    #[must_use]
+    pub fn is_compatible_with(&self, other: &Self) -> bool {
+        self.axis == other.axis
+            && (self.axis != TemporalAxis::Timestamp || self.clock == other.clock)
+    }
+
+    /// Compares two points after checking axis and clock compatibility.
+    pub fn try_cmp(&self, other: &Self) -> Result<Ordering, TemporalPointError> {
+        if self.axis != other.axis {
+            return Err(TemporalPointError::AxisMismatch {
+                left: self.axis,
+                right: other.axis,
+            });
+        }
+        if self.axis == TemporalAxis::Timestamp && self.clock != other.clock {
+            return Err(TemporalPointError::ClockMismatch {
+                left: self.clock.clone(),
+                right: other.clock.clone(),
+            });
+        }
+        Ok(self.magnitude.cmp(&other.magnitude))
     }
 }
 
+/// Error returned when temporal points are compared across incompatible domains.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum TemporalPointError {
+    /// Points use different temporal axes.
+    #[error("temporal point axis mismatch: left={left:?}, right={right:?}")]
+    AxisMismatch {
+        /// Left axis.
+        left: TemporalAxis,
+        /// Right axis.
+        right: TemporalAxis,
+    },
+    /// Timestamp points use different clocks.
+    #[error("temporal point clock mismatch: left={left:?}, right={right:?}")]
+    ClockMismatch {
+        /// Left clock.
+        left: Option<String>,
+        /// Right clock.
+        right: Option<String>,
+    },
+}
+
 /// A half-open temporal range, `[start, end)`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TemporalRange {
     start: TemporalPoint,
     end: TemporalPoint,
@@ -79,7 +135,8 @@ pub struct TemporalRange {
 impl TemporalRange {
     /// Creates a half-open temporal range.
     ///
-    /// The start and end points must share an axis, and `start <= end`.
+    /// The start and end points must share an axis and timestamp clock, and
+    /// `start <= end` within that domain.
     pub fn new(start: TemporalPoint, end: TemporalPoint) -> Result<Self, TemporalRangeError> {
         if start.axis() != end.axis() {
             return Err(TemporalRangeError::AxisMismatch {
@@ -88,8 +145,19 @@ impl TemporalRange {
             });
         }
 
-        if start > end {
+        if start.axis() == TemporalAxis::Timestamp && start.clock != end.clock {
+            return Err(TemporalRangeError::ClockMismatch {
+                start: start.clock.clone(),
+                end: end.clock.clone(),
+            });
+        }
+
+        if start.magnitude > end.magnitude {
             return Err(TemporalRangeError::EndBeforeStart { start, end });
+        }
+
+        if end.magnitude.checked_sub(start.magnitude).is_none() {
+            return Err(TemporalRangeError::MagnitudeOverflow { start, end });
         }
 
         Ok(Self { start, end })
@@ -102,25 +170,46 @@ impl TemporalRange {
 
     /// Returns the inclusive start point.
     #[must_use]
-    pub const fn start(self) -> TemporalPoint {
-        self.start
+    pub fn start(&self) -> TemporalPoint {
+        self.start.clone()
     }
 
     /// Returns the exclusive end point.
     #[must_use]
-    pub const fn end(self) -> TemporalPoint {
-        self.end
+    pub fn end(&self) -> TemporalPoint {
+        self.end.clone()
     }
 
     /// Returns the non-negative range magnitude.
     #[must_use]
-    pub fn magnitude(self) -> i64 {
-        self.end.magnitude() - self.start.magnitude()
+    pub fn magnitude(&self) -> i64 {
+        // `new` and validated deserialization reject an overflowing duration.
+        self.end
+            .magnitude
+            .checked_sub(self.start.magnitude)
+            .expect("validated temporal range magnitude")
+    }
+}
+
+impl<'de> Deserialize<'de> for TemporalRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawRange {
+            start: TemporalPoint,
+            end: TemporalPoint,
+        }
+
+        let raw = RawRange::deserialize(deserializer)?;
+        Self::new(raw.start, raw.end).map_err(serde::de::Error::custom)
     }
 }
 
 /// Temporal range construction error.
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum TemporalRangeError {
     /// Start and end use different temporal axes.
     #[error("temporal range axis mismatch: start={start:?}, end={end:?}")]
@@ -130,9 +219,25 @@ pub enum TemporalRangeError {
         /// End axis.
         end: TemporalAxis,
     },
+    /// Timestamp endpoints use different clocks.
+    #[error("temporal range clock mismatch: start={start:?}, end={end:?}")]
+    ClockMismatch {
+        /// Start clock.
+        start: Option<String>,
+        /// End clock.
+        end: Option<String>,
+    },
     /// End point is before start point.
     #[error("temporal range end is before start: start={start:?}, end={end:?}")]
     EndBeforeStart {
+        /// Start point.
+        start: TemporalPoint,
+        /// End point.
+        end: TemporalPoint,
+    },
+    /// The range duration cannot be represented as an `i64`.
+    #[error("temporal range magnitude overflows i64: start={start:?}, end={end:?}")]
+    MagnitudeOverflow {
         /// Start point.
         start: TemporalPoint,
         /// End point.
@@ -174,9 +279,35 @@ mod tests {
     }
 
     #[test]
-    fn ranges_reject_end_before_start() {
-        let error = TemporalRange::positions(5, 3).expect_err("reversed range should fail");
+    fn ranges_reject_mixed_clocks_and_overflowing_magnitude() {
+        let error = TemporalRange::new(
+            TemporalPoint::timestamp_ticks_with_clock(1, "provider-a"),
+            TemporalPoint::timestamp_ticks_with_clock(2, "provider-b"),
+        )
+        .expect_err("mixed clocks should fail");
+        assert!(matches!(error, TemporalRangeError::ClockMismatch { .. }));
 
-        assert!(matches!(error, TemporalRangeError::EndBeforeStart { .. }));
+        let error = TemporalRange::new(
+            TemporalPoint::position(i64::MIN),
+            TemporalPoint::position(i64::MAX),
+        )
+        .expect_err("overflowing magnitude should fail");
+        assert!(matches!(
+            error,
+            TemporalRangeError::MagnitudeOverflow { .. }
+        ));
+    }
+
+    #[test]
+    fn points_do_not_order_across_domains() {
+        assert!(matches!(
+            TemporalPoint::position(1).try_cmp(&TemporalPoint::timestamp_ticks(1)),
+            Err(TemporalPointError::AxisMismatch { .. })
+        ));
+        assert!(matches!(
+            TemporalPoint::timestamp_ticks_with_clock(1, "a")
+                .try_cmp(&TemporalPoint::timestamp_ticks_with_clock(1, "b")),
+            Err(TemporalPointError::ClockMismatch { .. })
+        ));
     }
 }

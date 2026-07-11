@@ -1,7 +1,11 @@
 [package]
 name = "spanfold"
 version = "0.1.0"
-description = "High-throughput temporal state-window recording and comparison for Rust."
+description = "Experimental temporal state-window recording and comparison for Rust."
+readme = "../../README.md"
+documentation = "https://docs.rs/spanfold"
+keywords = ["temporal", "interval", "comparison", "state"]
+categories = ["data-structures", "algorithms"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

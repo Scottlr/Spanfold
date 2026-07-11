@@ -192,6 +192,7 @@ impl<'a> WindowComparisonBuilder<'a> {
         self.plan.scope_window = scope.window_name;
         self.plan.scope_key = scope.key;
         self.plan.scope_partition = scope.partition;
+        self.plan.time_axis = scope.time_axis;
         self.plan.scope_segments = scope.segment_filters;
         self.plan.scope_tags = scope.tag_filters;
         self
@@ -245,6 +246,7 @@ impl<'a> WindowComparisonBuilder<'a> {
     /// Clips open windows to a processing-position horizon.
     #[must_use]
     pub fn clip_open_windows_to_position(mut self, position: i64) -> Self {
+        self.plan.require_closed_windows = false;
         self.plan.open_window_policy = OpenWindowPolicy::ClipToHorizon;
         self.plan.open_window_horizon = Some(TemporalPoint::position(position));
         self
@@ -373,8 +375,7 @@ impl<'a> WindowComparisonBuilder<'a> {
         llm_context: &crate::ComparisonLlmContextOptions,
     ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
         let result = self.run();
-        debug_html.export_if_enabled(&result)?;
-        llm_context.export_if_enabled(&result)?;
+        crate::export::export_configured_bundle(&result, debug_html, llm_context)?;
         Ok(result)
     }
 
@@ -408,8 +409,7 @@ impl<'a> WindowComparisonBuilder<'a> {
         llm_context: &crate::ComparisonLlmContextOptions,
     ) -> Result<crate::ComparisonResult, crate::ComparisonExportError> {
         let result = self.run_live(evaluation_horizon);
-        debug_html.export_if_enabled(&result)?;
-        llm_context.export_if_enabled(&result)?;
+        crate::export::export_configured_bundle(&result, debug_html, llm_context)?;
         Ok(result)
     }
 

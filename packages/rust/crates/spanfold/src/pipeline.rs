@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     marker::PhantomData,
     sync::Arc,
 };
@@ -87,10 +87,10 @@ struct OpenState {
 
 #[derive(Clone, Debug, Default)]
 struct ParentState {
-    children: BTreeMap<String, bool>,
+    active_children: HashSet<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ChildContext<'a> {
     lineage: &'a str,
     key: &'a str,
@@ -121,8 +121,8 @@ struct WindowObservation {
 impl ParentState {
     fn view(&self) -> ChildActivityView {
         ChildActivityView {
-            active_count: self.children.values().filter(|active| **active).count(),
-            total_count: self.children.len(),
+            active_count: self.active_children.len(),
+            total_count: self.active_children.len(),
         }
     }
 }
@@ -245,6 +245,26 @@ pub enum EventPipelineBuildError {
     /// A window or roll-up name was configured more than once.
     #[error("duplicate window name '{0}'")]
     DuplicateWindowName(String),
+    /// A segment projection cannot produce a deterministic unique shape.
+    #[error("invalid segment projection: {0}")]
+    InvalidSegmentProjection(String),
+}
+
+/// Error returned when an event cannot be committed to the pipeline history.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum IngestionError {
+    /// The event's temporal point is incompatible with an active window.
+    #[error(transparent)]
+    Temporal(#[from] crate::TemporalRangeError),
+    /// The processing-position counter cannot advance further.
+    #[error("processing position overflow")]
+    ProcessingPositionOverflow,
+    /// The stable window-record counter cannot allocate another ID.
+    #[error("window record id overflow")]
+    RecordIdOverflow,
+    /// Runtime segment values produced a non-unique projected shape.
+    #[error("invalid segment projection: {0}")]
+    InvalidSegmentProjection(String),
 }
 
 /// Window transition kind emitted during ingestion.
@@ -266,6 +286,9 @@ pub struct WindowEmission {
     /// Logical key.
     pub key: String,
     /// Window record ID.
+    ///
+    /// Pipeline-generated IDs are unique within one pipeline instance. They are
+    /// intentionally not globally durable; use semantic row IDs for exports.
     pub record_id: WindowRecordId,
     /// Processing position for the transition.
     pub position: i64,
@@ -354,8 +377,8 @@ pub struct EventPipeline<T> {
     window_callbacks: BTreeMap<String, WindowCallbackSet>,
     record_windows: bool,
     history: WindowHistory,
-    active: BTreeMap<RuntimeStateKey, OpenState>,
-    parents: BTreeMap<RuntimeStateKey, ParentState>,
+    active: HashMap<RuntimeStateKey, OpenState>,
+    parents: HashMap<RuntimeStateKey, ParentState>,
     position: i64,
     next_record_id: u64,
     marker: PhantomData<T>,
@@ -631,7 +654,13 @@ impl<T> EventPipelineBuilder<T> {
     }
 
     /// Builds the pipeline.
+    ///
+    /// # Panics
+    ///
+    /// Panics when configuration is invalid. Use [`Self::try_build`] when
+    /// configuration originates outside the program.
     #[must_use]
+    #[track_caller]
     pub fn build(self) -> EventPipeline<T> {
         self.try_build().expect("valid pipeline configuration")
     }
@@ -639,6 +668,7 @@ impl<T> EventPipelineBuilder<T> {
     /// Builds the pipeline or returns a configuration error.
     pub fn try_build(self) -> Result<EventPipeline<T>, EventPipelineBuildError> {
         validate_window_names(&self.windows)?;
+        validate_segment_projections(&self.windows)?;
         let window_callbacks = collect_window_callbacks(&self.windows);
         Ok(EventPipeline {
             windows: self.windows,
@@ -647,8 +677,8 @@ impl<T> EventPipelineBuilder<T> {
             window_callbacks,
             record_windows: self.record_windows,
             history: WindowHistory::new(),
-            active: BTreeMap::new(),
-            parents: BTreeMap::new(),
+            active: HashMap::new(),
+            parents: HashMap::new(),
             position: 0,
             next_record_id: 0,
             marker: PhantomData,
@@ -777,7 +807,13 @@ impl<T> WindowPipelineBuilder<T> {
     }
 
     /// Builds the pipeline.
+    ///
+    /// # Panics
+    ///
+    /// Panics when configuration is invalid. Use [`Self::try_build`] when
+    /// configuration originates outside the program.
     #[must_use]
+    #[track_caller]
     pub fn build(self) -> EventPipeline<T> {
         self.builder.build()
     }
@@ -805,7 +841,7 @@ impl<T> EventPipeline<T> {
     #[must_use]
     pub fn metadata(&self) -> EventPipelineMetadata {
         EventPipelineMetadata {
-            event_type: None,
+            event_type: Some(std::any::type_name::<T>().to_owned()),
             windows: self.windows.iter().map(window_metadata).collect(),
         }
     }
@@ -816,30 +852,55 @@ impl<T> EventPipeline<T> {
         event: T,
         source: Option<&str>,
         partition: Option<&str>,
-    ) -> IngestionResult {
-        self.position += 1;
+    ) -> Result<IngestionResult, IngestionError> {
+        let next_position = self
+            .position
+            .checked_add(1)
+            .ok_or(IngestionError::ProcessingPositionOverflow)?;
+        let max_new_records = self
+            .windows
+            .iter()
+            .map(window_definition_count)
+            .try_fold(0_u64, |total, count| total.checked_add(count))
+            .ok_or(IngestionError::RecordIdOverflow)?;
+        if self.next_record_id > u64::MAX.saturating_sub(max_new_records) {
+            return Err(IngestionError::RecordIdOverflow);
+        }
         let event_point = self.event_time.as_ref().map_or_else(
-            || TemporalPoint::position(self.position),
+            || TemporalPoint::position(next_position),
             |selector| TemporalPoint::timestamp_ticks(selector(&event)),
         );
+        for active in self.active.values() {
+            TemporalRange::new(active.start.clone(), event_point.clone())?;
+        }
+        self.position = next_position;
         let mut emissions = Vec::new();
-        for definition in self.windows.clone() {
-            self.ingest_definition(
-                &definition,
+        let windows = std::mem::take(&mut self.windows);
+        let mut ingestion_error = None;
+        for definition in &windows {
+            if let Err(error) = self.ingest_definition(
+                definition,
                 &event,
-                event_point,
+                event_point.clone(),
                 source,
                 partition,
                 &mut emissions,
-            );
+            ) {
+                ingestion_error = Some(error);
+                break;
+            }
+        }
+        self.windows = windows;
+        if let Some(error) = ingestion_error {
+            return Err(error);
         }
         for emission in &emissions {
             self.invoke_callbacks(emission);
         }
-        IngestionResult {
+        Ok(IngestionResult {
             processing_position: self.position,
             emissions,
-        }
+        })
     }
 
     /// Ingests multiple events sequentially and returns all emitted transitions.
@@ -848,18 +909,18 @@ impl<T> EventPipeline<T> {
         events: I,
         source: Option<&str>,
         partition: Option<&str>,
-    ) -> IngestionResult
+    ) -> Result<IngestionResult, IngestionError>
     where
         I: IntoIterator<Item = T>,
     {
         let mut emissions = Vec::new();
         for event in events {
-            emissions.extend(self.ingest(event, source, partition).emissions);
+            emissions.extend(self.ingest(event, source, partition)?.emissions);
         }
-        IngestionResult {
+        Ok(IngestionResult {
             processing_position: self.position,
             emissions,
-        }
+        })
     }
 
     fn ingest_definition(
@@ -870,7 +931,7 @@ impl<T> EventPipeline<T> {
         source: Option<&str>,
         partition: Option<&str>,
         emissions: &mut Vec<WindowEmission>,
-    ) {
+    ) -> Result<(), IngestionError> {
         let key = (definition.key)(event);
         let is_active = (definition.is_active)(event);
         let segments = if is_active {
@@ -901,13 +962,13 @@ impl<T> EventPipeline<T> {
             state_key,
             window_name: definition.name.clone(),
             key: key.clone(),
-            event_point,
+            event_point: event_point.clone(),
             source: source.map(str::to_owned),
             partition: partition.map(str::to_owned),
             is_active,
             segments: segments.clone(),
             tags: tags.clone(),
-        }));
+        })?);
 
         if is_active {
             if let Some(previous) = previous
@@ -922,7 +983,7 @@ impl<T> EventPipeline<T> {
                         previous_child: ChildContext {
                             lineage: &definition.name,
                             key: &key,
-                            event_point,
+                            event_point: event_point.clone(),
                             is_active: true,
                             segments: &previous.segments,
                             tags: &previous.tags,
@@ -931,8 +992,8 @@ impl<T> EventPipeline<T> {
                         current_tags: &tags,
                     },
                     emissions,
-                );
-                return;
+                )?;
+                return Ok(());
             }
             self.sync_rollups(
                 &definition.rollups,
@@ -942,13 +1003,13 @@ impl<T> EventPipeline<T> {
                 ChildContext {
                     lineage: &definition.name,
                     key: &key,
-                    event_point,
+                    event_point: event_point.clone(),
                     is_active: true,
                     segments: &segments,
                     tags: &tags,
                 },
                 emissions,
-            );
+            )?;
         } else if let Some(previous) = previous {
             self.sync_rollups(
                 &definition.rollups,
@@ -958,13 +1019,13 @@ impl<T> EventPipeline<T> {
                 ChildContext {
                     lineage: &definition.name,
                     key: &key,
-                    event_point,
+                    event_point: event_point.clone(),
                     is_active: false,
                     segments: &previous.segments,
                     tags: &previous.tags,
                 },
                 emissions,
-            );
+            )?;
         } else {
             self.sync_rollups(
                 &definition.rollups,
@@ -974,14 +1035,15 @@ impl<T> EventPipeline<T> {
                 ChildContext {
                     lineage: &definition.name,
                     key: &key,
-                    event_point,
+                    event_point: event_point.clone(),
                     is_active: false,
                     segments: &[],
                     tags: &[],
                 },
                 emissions,
-            );
+            )?;
         }
+        Ok(())
     }
 
     fn sync_rollups(
@@ -992,10 +1054,18 @@ impl<T> EventPipeline<T> {
         partition: Option<&str>,
         child: ChildContext<'_>,
         emissions: &mut Vec<WindowEmission>,
-    ) {
+    ) -> Result<(), IngestionError> {
         for definition in definitions {
-            self.sync_rollup(definition, event, source, partition, child, emissions);
+            self.sync_rollup(
+                definition,
+                event,
+                source,
+                partition,
+                child.clone(),
+                emissions,
+            )?;
         }
+        Ok(())
     }
 
     fn sync_rollup(
@@ -1006,8 +1076,8 @@ impl<T> EventPipeline<T> {
         partition: Option<&str>,
         child: ChildContext<'_>,
         emissions: &mut Vec<WindowEmission>,
-    ) {
-        let projected_segments = project_segments(&definition.segment_projection, child.segments);
+    ) -> Result<(), IngestionError> {
+        let projected_segments = project_segments(&definition.segment_projection, child.segments)?;
         let segment_context = stable_segments(&projected_segments);
         let key = (definition.key)(event);
         let state_key = (
@@ -1018,9 +1088,11 @@ impl<T> EventPipeline<T> {
             segment_context.clone(),
         );
         let parent_state = self.parents.entry(state_key).or_default();
-        parent_state
-            .children
-            .insert(child.key.to_owned(), child.is_active);
+        if child.is_active {
+            parent_state.active_children.insert(child.key.to_owned());
+        } else {
+            parent_state.active_children.remove(child.key);
+        }
         let is_active = (definition.is_active)(parent_state.view());
         emissions.extend(self.sync_window_state(WindowObservation {
             state_key: (
@@ -1032,13 +1104,13 @@ impl<T> EventPipeline<T> {
             ),
             window_name: definition.name.clone(),
             key: key.clone(),
-            event_point: child.event_point,
+            event_point: child.event_point.clone(),
             source: source.map(str::to_owned),
             partition: partition.map(str::to_owned),
             is_active,
             segments: projected_segments.clone(),
             tags: child.tags.to_vec(),
-        }));
+        })?);
 
         self.sync_rollups(
             &definition.rollups,
@@ -1048,13 +1120,14 @@ impl<T> EventPipeline<T> {
             ChildContext {
                 lineage: &definition.name,
                 key: &key,
-                event_point: child.event_point,
+                event_point: child.event_point.clone(),
                 is_active,
                 segments: &projected_segments,
                 tags: child.tags,
             },
             emissions,
-        );
+        )?;
+        Ok(())
     }
 
     fn sync_rollup_segment_transition(
@@ -1065,14 +1138,14 @@ impl<T> EventPipeline<T> {
         partition: Option<&str>,
         transition: RollupSegmentTransition<'_>,
         emissions: &mut Vec<WindowEmission>,
-    ) {
+    ) -> Result<(), IngestionError> {
         for definition in definitions {
             let previous_projected = project_segments(
                 &definition.segment_projection,
                 transition.previous_child.segments,
-            );
+            )?;
             let current_projected =
-                project_segments(&definition.segment_projection, transition.current_segments);
+                project_segments(&definition.segment_projection, transition.current_segments)?;
             if previous_projected != current_projected {
                 self.sync_rollup(
                     definition,
@@ -1081,10 +1154,10 @@ impl<T> EventPipeline<T> {
                     partition,
                     ChildContext {
                         is_active: false,
-                        ..transition.previous_child
+                        ..transition.previous_child.clone()
                     },
                     emissions,
-                );
+                )?;
                 self.sync_rollup(
                     definition,
                     event,
@@ -1093,13 +1166,13 @@ impl<T> EventPipeline<T> {
                     ChildContext {
                         lineage: transition.previous_child.lineage,
                         key: transition.previous_child.key,
-                        event_point: transition.previous_child.event_point,
+                        event_point: transition.previous_child.event_point.clone(),
                         is_active: true,
                         segments: transition.current_segments,
                         tags: transition.current_tags,
                     },
                     emissions,
-                );
+                )?;
             } else {
                 self.sync_rollup(
                     definition,
@@ -1109,56 +1182,77 @@ impl<T> EventPipeline<T> {
                     ChildContext {
                         lineage: transition.previous_child.lineage,
                         key: transition.previous_child.key,
-                        event_point: transition.previous_child.event_point,
+                        event_point: transition.previous_child.event_point.clone(),
                         is_active: true,
                         segments: transition.current_segments,
                         tags: transition.current_tags,
                     },
                     emissions,
-                );
+                )?;
             }
         }
+        Ok(())
     }
 
-    fn sync_window_state(&mut self, observation: WindowObservation) -> Vec<WindowEmission> {
+    fn sync_window_state(
+        &mut self,
+        observation: WindowObservation,
+    ) -> Result<Vec<WindowEmission>, IngestionError> {
         if observation.is_active {
             if let Some(previous) = self.active.get(&observation.state_key) {
                 if previous.segments == observation.segments {
-                    return Vec::new();
+                    if previous.tags != observation.tags {
+                        if let Some(state) = self.active.get_mut(&observation.state_key) {
+                            state.tags = observation.tags.clone();
+                        }
+                        if self.record_windows
+                            && let Some(id) = self
+                                .active
+                                .get(&observation.state_key)
+                                .map(|state| state.id.clone())
+                        {
+                            self.history.update_open_tags(&id, observation.tags.clone());
+                        }
+                    }
+                    return Ok(Vec::new());
                 }
                 let mut emissions = Vec::new();
                 let changes = segment_changes(&previous.segments, &observation.segments);
                 if let Some(emission) = self.close_window_state(
                     &observation.state_key,
-                    observation.event_point,
+                    observation.event_point.clone(),
                     Some(WindowBoundaryReason::SegmentChanged),
                     changes,
-                ) {
+                )? {
                     emissions.push(emission);
                 }
-                emissions.push(self.open_window_state(observation));
-                return emissions;
+                emissions.push(self.open_window_state(observation)?);
+                return Ok(emissions);
             }
-            return vec![self.open_window_state(observation)];
+            return Ok(vec![self.open_window_state(observation)?]);
         }
 
-        self.close_window_state(
-            &observation.state_key,
-            observation.event_point,
-            Some(WindowBoundaryReason::ActivePredicateEnded),
-            Vec::new(),
-        )
-        .into_iter()
-        .collect()
+        Ok(self
+            .close_window_state(
+                &observation.state_key,
+                observation.event_point,
+                Some(WindowBoundaryReason::ActivePredicateEnded),
+                Vec::new(),
+            )?
+            .into_iter()
+            .collect())
     }
 
-    fn open_window_state(&mut self, observation: WindowObservation) -> WindowEmission {
-        let id = self.next_id();
+    fn open_window_state(
+        &mut self,
+        observation: WindowObservation,
+    ) -> Result<WindowEmission, IngestionError> {
+        let id = self.next_id()?;
         let open = OpenWindow {
             id: id.clone(),
             window_name: observation.window_name.clone(),
             key: observation.key.clone(),
-            start: observation.event_point,
+            start: observation.event_point.clone(),
             known_at: None,
             source: observation.source.clone(),
             partition: observation.partition.clone(),
@@ -1172,14 +1266,14 @@ impl<T> EventPipeline<T> {
             observation.state_key,
             OpenState {
                 id: id.clone(),
-                start: observation.event_point,
+                start: observation.event_point.clone(),
                 source: observation.source.clone(),
                 partition: observation.partition.clone(),
                 segments: observation.segments.clone(),
                 tags: observation.tags.clone(),
             },
         );
-        WindowEmission {
+        Ok(WindowEmission {
             kind: WindowTransitionKind::Opened,
             window_name: observation.window_name,
             key: observation.key,
@@ -1191,7 +1285,7 @@ impl<T> EventPipeline<T> {
             tags: observation.tags,
             boundary_reason: None,
             boundary_changes: Vec::new(),
-        }
+        })
     }
 
     fn close_window_state(
@@ -1200,8 +1294,12 @@ impl<T> EventPipeline<T> {
         event_point: TemporalPoint,
         boundary_reason: Option<WindowBoundaryReason>,
         boundary_changes: Vec<WindowBoundaryChange>,
-    ) -> Option<WindowEmission> {
-        let open_state = self.active.remove(state_key)?;
+    ) -> Result<Option<WindowEmission>, IngestionError> {
+        let Some(open_state) = self.active.get(state_key).cloned() else {
+            return Ok(None);
+        };
+        let range = TemporalRange::new(open_state.start.clone(), event_point.clone())?;
+        self.active.remove(state_key);
         let emission = WindowEmission {
             kind: WindowTransitionKind::Closed,
             window_name: state_key.0.clone(),
@@ -1215,9 +1313,7 @@ impl<T> EventPipeline<T> {
             boundary_reason,
             boundary_changes: boundary_changes.clone(),
         };
-        if self.record_windows
-            && let Ok(range) = TemporalRange::new(open_state.start, event_point)
-        {
+        if self.record_windows {
             self.history.remove_open(&open_state.id);
             self.history.push_closed(ClosedWindow {
                 id: open_state.id,
@@ -1233,7 +1329,7 @@ impl<T> EventPipeline<T> {
                 boundary_changes,
             });
         }
-        Some(emission)
+        Ok(Some(emission))
     }
 
     fn invoke_callbacks(&self, emission: &WindowEmission) {
@@ -1252,10 +1348,13 @@ impl<T> EventPipeline<T> {
         }
     }
 
-    fn next_id(&mut self) -> WindowRecordId {
+    fn next_id(&mut self) -> Result<WindowRecordId, IngestionError> {
         let id = WindowRecordId::new(format!("pipeline-{:04}", self.next_record_id));
-        self.next_record_id += 1;
-        id
+        self.next_record_id = self
+            .next_record_id
+            .checked_add(1)
+            .ok_or(IngestionError::RecordIdOverflow)?;
+        Ok(id)
     }
 }
 
@@ -1264,6 +1363,22 @@ fn window_metadata<T>(definition: &WindowDefinition<T>) -> WindowMetadata {
         name: definition.name.clone(),
         rollups: definition.rollups.iter().map(rollup_metadata).collect(),
     }
+}
+
+fn window_definition_count<T>(definition: &WindowDefinition<T>) -> u64 {
+    1 + definition
+        .rollups
+        .iter()
+        .map(rollup_definition_count)
+        .sum::<u64>()
+}
+
+fn rollup_definition_count<T>(definition: &RollUpDefinition<T>) -> u64 {
+    1 + definition
+        .rollups
+        .iter()
+        .map(rollup_definition_count)
+        .sum::<u64>()
 }
 
 fn rollup_metadata<T>(definition: &RollUpDefinition<T>) -> WindowMetadata {
@@ -1282,6 +1397,49 @@ fn validate_window_names<T>(
         for rollup in &window.rollups {
             validate_rollup_name(rollup, &mut names)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_segment_projections<T>(
+    windows: &[WindowDefinition<T>],
+) -> Result<(), EventPipelineBuildError> {
+    for window in windows {
+        for rollup in &window.rollups {
+            validate_rollup_projection(rollup)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_rollup_projection<T>(
+    rollup: &RollUpDefinition<T>,
+) -> Result<(), EventPipelineBuildError> {
+    let mut projected_names = BTreeSet::new();
+    for (original, projected) in &rollup.segment_projection.renamed_names {
+        if original.trim().is_empty() || projected.trim().is_empty() {
+            return Err(EventPipelineBuildError::InvalidSegmentProjection(
+                "segment names cannot be empty".to_owned(),
+            ));
+        }
+        if !projected_names.insert(projected) {
+            return Err(EventPipelineBuildError::InvalidSegmentProjection(format!(
+                "multiple renames target '{projected}'"
+            )));
+        }
+        if rollup
+            .segment_projection
+            .renamed_names
+            .keys()
+            .any(|name| name != original && name == projected)
+        {
+            return Err(EventPipelineBuildError::InvalidSegmentProjection(format!(
+                "rename target '{projected}' collides with a source name"
+            )));
+        }
+    }
+    for child in &rollup.rollups {
+        validate_rollup_projection(child)?;
     }
     Ok(())
 }
@@ -1345,14 +1503,14 @@ fn collect_window_callbacks_for_rollup<T>(
 fn project_segments(
     projection: &RollUpSegmentProjection,
     segments: &[WindowSegment],
-) -> Vec<WindowSegment> {
+) -> Result<Vec<WindowSegment>, IngestionError> {
     if segments.is_empty()
         || (projection.preserved_names.is_none()
             && projection.dropped_names.is_empty()
             && projection.renamed_names.is_empty()
             && projection.value_transforms.is_empty())
     {
-        return segments.to_vec();
+        return Ok(segments.to_vec());
     }
 
     let mut projected = Vec::new();
@@ -1368,11 +1526,11 @@ fn project_segments(
             .get(&segment.name)
             .cloned()
             .unwrap_or_else(|| segment.name.clone());
-        assert!(
-            selected_projected_names.insert(projected_name.clone()),
-            "Roll-up segment projection produced duplicate segment '{}'.",
-            projected_name
-        );
+        if !selected_projected_names.insert(projected_name.clone()) {
+            return Err(IngestionError::InvalidSegmentProjection(format!(
+                "projected segment '{projected_name}' is not unique"
+            )));
+        }
         let value = projection.value_transforms.get(&segment.name).map_or_else(
             || segment.value.clone(),
             |transform| transform(&segment.value),
@@ -1399,7 +1557,7 @@ fn project_segments(
         }
     }
 
-    projected
+    Ok(projected)
 }
 
 fn should_keep_segment(projection: &RollUpSegmentProjection, name: &str) -> bool {
@@ -1413,17 +1571,16 @@ fn should_keep_segment(projection: &RollUpSegmentProjection, name: &str) -> bool
 }
 
 fn stable_segments(segments: &[WindowSegment]) -> String {
-    if segments.is_empty() {
-        return String::new();
-    }
     let mut stable = String::new();
     for segment in segments {
-        stable.push_str(segment.parent_name.as_deref().unwrap_or_default());
-        stable.push('/');
-        stable.push_str(&segment.name);
-        stable.push('=');
-        stable.push_str(&format!("{:?}", segment.value));
-        stable.push(';');
+        let parent = segment.parent_name.as_deref().unwrap_or_default();
+        let value = serde_json::to_string(&segment.value).unwrap_or_default();
+        for part in [parent, segment.name.as_str(), value.as_str()] {
+            stable.push_str(&part.len().to_string());
+            stable.push(':');
+            stable.push_str(part);
+            stable.push('|');
+        }
     }
     stable
 }
@@ -1433,18 +1590,17 @@ fn segment_changes(
     current: &[WindowSegment],
 ) -> Vec<WindowBoundaryChange> {
     let mut changes = Vec::new();
-    for index in 0..previous.len().max(current.len()) {
-        let before = previous.get(index);
-        let after = current.get(index);
+    let mut names = BTreeSet::new();
+    names.extend(previous.iter().map(|segment| segment.name.as_str()));
+    names.extend(current.iter().map(|segment| segment.name.as_str()));
+    for name in names {
+        let before = previous.iter().find(|segment| segment.name == name);
+        let after = current.iter().find(|segment| segment.name == name);
         if before == after {
             continue;
         }
-        let segment_name = before.map_or_else(
-            || after.expect("current segment exists").name.clone(),
-            |segment| segment.name.clone(),
-        );
         changes.push(WindowBoundaryChange {
-            segment_name,
+            segment_name: name.to_owned(),
             previous_value: before.map(|segment| segment.value.clone()),
             current_value: after.map(|segment| segment.value.clone()),
         });
@@ -1467,6 +1623,8 @@ fn add_rollup<T>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_must_use)]
+
     use super::*;
     use std::sync::{Arc, Mutex};
 
@@ -1490,28 +1648,32 @@ mod tests {
             )
             .build();
 
-        let first = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-1",
-                fixture_id: "fixture-1",
-                price: 0.0,
-                observed_at: 100,
-            },
-            Some("provider-a"),
-            None,
-        );
-        let second = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-1",
-                fixture_id: "fixture-1",
-                price: 1.2,
-                observed_at: 130,
-            },
-            Some("provider-a"),
-            None,
-        );
+        let first = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 0.0,
+                    observed_at: 100,
+                },
+                Some("provider-a"),
+                None,
+            )
+            .expect("first ingest");
+        let second = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 1.2,
+                    observed_at: 130,
+                },
+                Some("provider-a"),
+                None,
+            )
+            .expect("second ingest");
 
         assert_eq!(first.emissions[0].kind, WindowTransitionKind::Opened);
         assert_eq!(second.emissions[0].kind, WindowTransitionKind::Closed);
@@ -1639,26 +1801,28 @@ mod tests {
             )
             .build();
 
-        let result = pipeline.ingest_many(
-            [
-                PriceTick {
-                    selection_id: "selection-1",
-                    market_id: "market-1",
-                    fixture_id: "fixture-1",
-                    price: 0.0,
-                    observed_at: 100,
-                },
-                PriceTick {
-                    selection_id: "selection-1",
-                    market_id: "market-1",
-                    fixture_id: "fixture-1",
-                    price: 1.1,
-                    observed_at: 101,
-                },
-            ],
-            Some("provider-a"),
-            None,
-        );
+        let result = pipeline
+            .ingest_many(
+                [
+                    PriceTick {
+                        selection_id: "selection-1",
+                        market_id: "market-1",
+                        fixture_id: "fixture-1",
+                        price: 0.0,
+                        observed_at: 100,
+                    },
+                    PriceTick {
+                        selection_id: "selection-1",
+                        market_id: "market-1",
+                        fixture_id: "fixture-1",
+                        price: 1.1,
+                        observed_at: 101,
+                    },
+                ],
+                Some("provider-a"),
+                None,
+            )
+            .expect("ingest many");
 
         assert_eq!(result.processing_position, 2);
         assert_eq!(
@@ -1716,28 +1880,32 @@ mod tests {
             )
             .build();
 
-        let first = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-1",
-                fixture_id: "fixture-1",
-                price: 0.0,
-                observed_at: 100,
-            },
-            Some("provider-a"),
-            None,
-        );
-        let second = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-2",
-                fixture_id: "fixture-1",
-                price: 0.0,
-                observed_at: 101,
-            },
-            Some("provider-a"),
-            None,
-        );
+        let first = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 0.0,
+                    observed_at: 100,
+                },
+                Some("provider-a"),
+                None,
+            )
+            .expect("first ingest");
+        let second = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-2",
+                    fixture_id: "fixture-1",
+                    price: 0.0,
+                    observed_at: 101,
+                },
+                Some("provider-a"),
+                None,
+            )
+            .expect("second ingest");
 
         assert_eq!(first.emissions.len(), 1);
         assert_eq!(
@@ -1909,7 +2077,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "duplicate segment 'phase'")]
     fn rollup_rejects_duplicate_projected_segment_names() {
         let mut pipeline = for_events::<PriceTick>()
             .record_windows()
@@ -1933,17 +2100,20 @@ mod tests {
             )
             .build();
 
-        pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "InPlay",
-                fixture_id: "Suspended",
-                price: 1.01,
-                observed_at: 100,
-            },
-            None,
-            None,
-        );
+        let error = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "InPlay",
+                    fixture_id: "Suspended",
+                    price: 1.01,
+                    observed_at: 100,
+                },
+                None,
+                None,
+            )
+            .expect_err("duplicate projected names must be rejected");
+        assert!(matches!(error, IngestionError::InvalidSegmentProjection(_)));
     }
 
     #[test]
@@ -2055,17 +2225,19 @@ mod tests {
             None,
             None,
         );
-        let result = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-1",
-                fixture_id: "fixture-1",
-                price: 1.1,
-                observed_at: 101,
-            },
-            None,
-            None,
-        );
+        let result = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 1.1,
+                    observed_at: 101,
+                },
+                None,
+                None,
+            )
+            .expect("ingest");
 
         assert_eq!(
             pipeline.history().closed_windows()[0].boundary_reason,
@@ -2092,32 +2264,84 @@ mod tests {
             )
             .build();
 
-        let opened = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-1",
-                fixture_id: "fixture-1",
-                price: 0.0,
-                observed_at: 100,
-            },
-            None,
-            None,
-        );
-        let closed = pipeline.ingest(
-            PriceTick {
-                selection_id: "selection-1",
-                market_id: "market-1",
-                fixture_id: "fixture-1",
-                price: 1.1,
-                observed_at: 101,
-            },
-            None,
-            None,
-        );
+        let opened = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 0.0,
+                    observed_at: 100,
+                },
+                None,
+                None,
+            )
+            .expect("open ingest");
+        let closed = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 1.1,
+                    observed_at: 101,
+                },
+                None,
+                None,
+            )
+            .expect("close ingest");
 
         assert_eq!(opened.emissions.len(), 1);
         assert_eq!(closed.emissions.len(), 1);
         assert!(pipeline.history().open_windows().is_empty());
+        assert!(pipeline.history().closed_windows().is_empty());
+    }
+
+    #[test]
+    fn ingest_rejects_backwards_event_time_without_mutating_state() {
+        let mut pipeline = for_events::<PriceTick>()
+            .record_windows()
+            .with_event_time(|tick| tick.observed_at)
+            .track_window(
+                "SelectionSuspension",
+                |tick| tick.selection_id,
+                |tick| tick.price == 0.0,
+            )
+            .build();
+
+        pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 0.0,
+                    observed_at: 10,
+                },
+                None,
+                None,
+            )
+            .expect("initial event");
+        let error = pipeline
+            .ingest(
+                PriceTick {
+                    selection_id: "selection-1",
+                    market_id: "market-1",
+                    fixture_id: "fixture-1",
+                    price: 1.1,
+                    observed_at: 9,
+                },
+                None,
+                None,
+            )
+            .expect_err("backwards event must be rejected");
+
+        assert!(matches!(
+            error,
+            IngestionError::Temporal(crate::TemporalRangeError::EndBeforeStart { .. })
+        ));
+        assert_eq!(pipeline.processing_position(), 1);
+        assert_eq!(pipeline.history().open_windows().len(), 1);
         assert!(pipeline.history().closed_windows().is_empty());
     }
 }

@@ -47,7 +47,7 @@ impl From<String> for LaneKey {
 }
 
 /// A deterministic lane liveness state change.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LaneLivenessSignal {
     /// Source or lane identifier.
     pub lane: String,
@@ -65,6 +65,56 @@ pub struct LaneLivenessSignal {
     /// Silence threshold magnitude on the same axis as the tracked points.
     #[serde(rename = "silenceThresholdMagnitude")]
     pub silence_threshold_magnitude: i64,
+}
+
+impl<'de> Deserialize<'de> for LaneLivenessSignal {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawSignal {
+            lane: String,
+            partition: Option<String>,
+            #[serde(rename = "isSilent")]
+            is_silent: bool,
+            #[serde(rename = "occurredAt")]
+            occurred_at: TemporalPoint,
+            #[serde(rename = "evaluatedAt")]
+            evaluated_at: TemporalPoint,
+            #[serde(rename = "silenceThresholdMagnitude")]
+            silence_threshold_magnitude: i64,
+        }
+
+        let raw = RawSignal::deserialize(deserializer)?;
+        if raw.lane.trim().is_empty() {
+            return Err(serde::de::Error::custom("lane cannot be empty"));
+        }
+        if raw.silence_threshold_magnitude <= 0 {
+            return Err(serde::de::Error::custom(
+                "silence threshold must be greater than zero",
+            ));
+        }
+        if !raw.occurred_at.is_compatible_with(&raw.evaluated_at)
+            || !matches!(
+                raw.occurred_at.try_cmp(&raw.evaluated_at),
+                Ok(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+            )
+        {
+            return Err(serde::de::Error::custom(
+                "liveness signal points must share a domain and occurredAt must not be after evaluatedAt",
+            ));
+        }
+        Ok(Self {
+            lane: raw.lane,
+            partition: raw.partition,
+            is_silent: raw.is_silent,
+            occurred_at: raw.occurred_at,
+            evaluated_at: raw.evaluated_at,
+            silence_threshold_magnitude: raw.silence_threshold_magnitude,
+        })
+    }
 }
 
 impl LaneLivenessSignal {
@@ -154,6 +204,15 @@ pub enum LaneLivenessError {
         /// Unknown lane key.
         lane: LaneKey,
     },
+    /// Timestamp points use different clocks.
+    #[error("liveness point clock mismatch")]
+    ClockMismatch,
+    /// Observations cannot arrive before the last evaluation horizon.
+    #[error("observation cannot precede the last liveness check")]
+    ObservationBeforeLastCheck,
+    /// Silence threshold arithmetic overflowed.
+    #[error("liveness silence horizon overflowed")]
+    ArithmeticOverflow,
 }
 
 /// Deterministic heartbeat/silence tracker for a fixed set of lanes.
@@ -191,7 +250,7 @@ impl LaneLivenessTracker {
             if states.contains_key(&lane) {
                 return Err(LaneLivenessError::DuplicateLane { lane });
             }
-            states.insert(lane.clone(), LaneState::new(lane, started_at));
+            states.insert(lane.clone(), LaneState::new(lane, started_at.clone()));
         }
 
         if states.is_empty() {
@@ -199,7 +258,7 @@ impl LaneLivenessTracker {
         }
 
         Ok(Self {
-            started_at,
+            started_at: started_at.clone(),
             last_check_at: started_at,
             silence_threshold_magnitude,
             lanes: states,
@@ -225,8 +284,8 @@ impl LaneLivenessTracker {
 
     /// Returns the tracker start point.
     #[must_use]
-    pub const fn started_at(&self) -> TemporalPoint {
-        self.started_at
+    pub fn started_at(&self) -> TemporalPoint {
+        self.started_at.clone()
     }
 
     /// Returns the configured silence threshold magnitude.
@@ -263,9 +322,18 @@ impl LaneLivenessTracker {
         lane: LaneKey,
         observed_at: TemporalPoint,
     ) -> Result<Vec<LaneLivenessSignal>, LaneLivenessError> {
-        self.ensure_axis(observed_at)?;
-        if observed_at < self.started_at {
+        self.ensure_compatible(&observed_at)?;
+        if matches!(
+            observed_at.try_cmp(&self.started_at),
+            Ok(std::cmp::Ordering::Less)
+        ) {
             return Err(LaneLivenessError::ObservationBeforeStart);
+        }
+        if matches!(
+            observed_at.try_cmp(&self.last_check_at),
+            Ok(std::cmp::Ordering::Less)
+        ) {
+            return Err(LaneLivenessError::ObservationBeforeLastCheck);
         }
 
         let Some(state) = self.lanes.get_mut(&lane) else {
@@ -273,19 +341,20 @@ impl LaneLivenessTracker {
         };
         if state
             .last_observed_at
-            .is_some_and(|last_observed_at| observed_at < last_observed_at)
+            .as_ref()
+            .is_some_and(|last_observed_at| observed_at.magnitude() < last_observed_at.magnitude())
         {
             return Err(LaneLivenessError::ObservationMovedBackwards { lane });
         }
 
-        state.last_observed_at = Some(observed_at);
+        state.last_observed_at = Some(observed_at.clone());
         if !state.has_reported_state || state.is_silent {
             state.has_reported_state = true;
             state.is_silent = false;
             return Ok(vec![LaneLivenessSignal::new(
                 &state.key,
                 false,
-                observed_at,
+                observed_at.clone(),
                 observed_at,
                 self.silence_threshold_magnitude,
             )]);
@@ -299,23 +368,37 @@ impl LaneLivenessTracker {
         &mut self,
         horizon: TemporalPoint,
     ) -> Result<Vec<LaneLivenessSignal>, LaneLivenessError> {
-        self.ensure_axis(horizon)?;
-        if horizon < self.started_at {
+        self.ensure_compatible(&horizon)?;
+        if matches!(
+            horizon.try_cmp(&self.started_at),
+            Ok(std::cmp::Ordering::Less)
+        ) {
             return Err(LaneLivenessError::HorizonBeforeStart);
         }
-        if horizon < self.last_check_at {
+        if matches!(
+            horizon.try_cmp(&self.last_check_at),
+            Ok(std::cmp::Ordering::Less)
+        ) {
             return Err(LaneLivenessError::HorizonMovedBackwards);
         }
 
-        self.last_check_at = horizon;
+        self.last_check_at = horizon.clone();
         let threshold = self.silence_threshold_magnitude;
         let mut signals = Vec::new();
         for state in self.lanes.values_mut() {
             let silence_started_at = add_magnitude(
-                state.last_observed_at.unwrap_or(state.started_at),
+                state
+                    .last_observed_at
+                    .clone()
+                    .unwrap_or_else(|| state.started_at.clone()),
                 threshold,
-            );
-            if state.is_silent || horizon < silence_started_at {
+            )?;
+            if state.is_silent
+                || matches!(
+                    horizon.try_cmp(&silence_started_at),
+                    Ok(std::cmp::Ordering::Less)
+                )
+            {
                 continue;
             }
 
@@ -325,27 +408,37 @@ impl LaneLivenessTracker {
                 &state.key,
                 true,
                 silence_started_at,
-                horizon,
+                horizon.clone(),
                 threshold,
             ));
         }
         Ok(signals)
     }
 
-    fn ensure_axis(&self, point: TemporalPoint) -> Result<(), LaneLivenessError> {
+    fn ensure_compatible(&self, point: &TemporalPoint) -> Result<(), LaneLivenessError> {
         let expected = self.started_at.axis();
         let actual = point.axis();
         if expected != actual {
             return Err(LaneLivenessError::AxisMismatch { expected, actual });
         }
+        if !self.started_at.is_compatible_with(point) {
+            return Err(LaneLivenessError::ClockMismatch);
+        }
         Ok(())
     }
 }
 
-fn add_magnitude(point: TemporalPoint, magnitude: i64) -> TemporalPoint {
+fn add_magnitude(point: TemporalPoint, magnitude: i64) -> Result<TemporalPoint, LaneLivenessError> {
+    let value = point
+        .magnitude()
+        .checked_add(magnitude)
+        .ok_or(LaneLivenessError::ArithmeticOverflow)?;
     match point.axis() {
-        TemporalAxis::ProcessingPosition => TemporalPoint::position(point.magnitude() + magnitude),
-        TemporalAxis::Timestamp => TemporalPoint::timestamp_ticks(point.magnitude() + magnitude),
+        TemporalAxis::ProcessingPosition => Ok(TemporalPoint::position(value)),
+        TemporalAxis::Timestamp => Ok(match point.clock() {
+            Some(clock) => TemporalPoint::timestamp_ticks_with_clock(value, clock),
+            None => TemporalPoint::timestamp_ticks(value),
+        }),
     }
 }
 
@@ -357,7 +450,7 @@ mod tests {
     fn first_observation_emits_alive_once() {
         let started_at = TemporalPoint::timestamp_ticks(100);
         let mut tracker =
-            LaneLivenessTracker::for_lanes(started_at, 30, ["lane-a"]).expect("tracker");
+            LaneLivenessTracker::for_lanes(started_at.clone(), 30, ["lane-a"]).expect("tracker");
 
         let first = tracker
             .observe("lane-a", TemporalPoint::timestamp_ticks(105))
@@ -377,7 +470,7 @@ mod tests {
     fn check_emits_silence_once_when_lane_expires() {
         let started_at = TemporalPoint::timestamp_ticks(100);
         let mut tracker =
-            LaneLivenessTracker::for_lanes(started_at, 30, ["lane-a"]).expect("tracker");
+            LaneLivenessTracker::for_lanes(started_at.clone(), 30, ["lane-a"]).expect("tracker");
         tracker
             .observe("lane-a", TemporalPoint::timestamp_ticks(105))
             .expect("observation");
@@ -404,7 +497,7 @@ mod tests {
     fn observation_after_silence_emits_recovery() {
         let started_at = TemporalPoint::timestamp_ticks(100);
         let mut tracker =
-            LaneLivenessTracker::for_lanes(started_at, 30, ["lane-a"]).expect("tracker");
+            LaneLivenessTracker::for_lanes(started_at.clone(), 30, ["lane-a"]).expect("tracker");
 
         tracker
             .observe("lane-a", started_at)
@@ -425,7 +518,7 @@ mod tests {
     fn check_can_emit_silence_for_lane_that_never_reported() {
         let started_at = TemporalPoint::timestamp_ticks(100);
         let mut tracker =
-            LaneLivenessTracker::for_lanes(started_at, 30, ["lane-a"]).expect("tracker");
+            LaneLivenessTracker::for_lanes(started_at.clone(), 30, ["lane-a"]).expect("tracker");
 
         let signal = tracker
             .check(TemporalPoint::timestamp_ticks(140))
@@ -441,7 +534,7 @@ mod tests {
     fn tracker_rejects_unknown_lane() {
         let started_at = TemporalPoint::timestamp_ticks(100);
         let mut tracker =
-            LaneLivenessTracker::for_lanes(started_at, 30, ["lane-a"]).expect("tracker");
+            LaneLivenessTracker::for_lanes(started_at.clone(), 30, ["lane-a"]).expect("tracker");
 
         let error = tracker
             .observe("lane-b", started_at)

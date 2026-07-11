@@ -14,6 +14,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
     process::ExitCode,
 };
 
@@ -32,12 +33,12 @@ enum Command {
     /// Validate a Spanfold fixture plan.
     ValidatePlan {
         /// Fixture JSON path.
-        fixture: String,
+        fixture: PathBuf,
     },
     /// Compare a Spanfold fixture.
     Compare {
         /// Fixture JSON path.
-        fixture: String,
+        fixture: PathBuf,
         /// Output format.
         #[arg(long, default_value = "json")]
         format: OutputFormat,
@@ -45,20 +46,20 @@ enum Command {
     /// Explain a Spanfold fixture as Markdown.
     Explain {
         /// Fixture JSON path.
-        fixture: String,
+        fixture: PathBuf,
     },
     /// Write a full audit artifact bundle from a fixture.
     Audit {
         /// Fixture JSON path.
-        fixture: String,
+        fixture: PathBuf,
         /// Output directory.
         #[arg(long)]
-        out: String,
+        out: PathBuf,
     },
     /// Write an audit artifact bundle from flat window JSONL.
     AuditWindows {
         /// Window JSONL path.
-        windows: String,
+        windows: PathBuf,
         /// Window name to use when rows omit `windowName`.
         #[arg(long)]
         window: Option<String>,
@@ -82,26 +83,26 @@ enum Command {
         live_horizon_position: Option<i64>,
         /// Output directory.
         #[arg(long)]
-        out: String,
+        out: PathBuf,
     },
     /// Convert event JSONL to flat Spanfold window JSONL.
     ImportEvents {
         /// Event JSONL path.
-        events: String,
+        events: PathBuf,
         /// Event import map JSON path.
         #[arg(long)]
-        map: String,
+        map: PathBuf,
         /// Output window JSONL path.
         #[arg(long)]
-        out: String,
+        out: PathBuf,
     },
     /// Import event JSONL and write a full audit artifact bundle.
     AuditEvents {
         /// Event JSONL path.
-        events: String,
+        events: PathBuf,
         /// Event import map JSON path.
         #[arg(long)]
-        map: String,
+        map: PathBuf,
         /// Target source.
         #[arg(long)]
         target: String,
@@ -110,7 +111,7 @@ enum Command {
         against: Vec<String>,
         /// Output directory.
         #[arg(long)]
-        out: String,
+        out: PathBuf,
     },
 }
 
@@ -129,21 +130,82 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli) {
         Ok(code) => code,
-        Err(message) => {
+        Err(error) => {
             eprintln!(
-                "{{\"error\":{}}}",
-                serde_json::to_string(&message).expect("valid json")
+                "{{\"code\":\"{}\",\"error\":{}}}",
+                error.kind,
+                serde_json::to_string(&error.message).expect("valid json")
             );
-            ExitCode::from(2)
+            ExitCode::from(error.kind.exit_code())
         }
     }
 }
 
-fn run(cli: Cli) -> Result<ExitCode, String> {
+#[derive(Clone, Copy, Debug)]
+enum CliErrorKind {
+    Input,
+    Io,
+    Export,
+}
+
+impl CliErrorKind {
+    const fn exit_code(self) -> u8 {
+        match self {
+            Self::Input => 2,
+            Self::Io => 3,
+            Self::Export => 4,
+        }
+    }
+}
+
+impl std::fmt::Display for CliErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Input => "input",
+            Self::Io => "io",
+            Self::Export => "export",
+        })
+    }
+}
+
+#[derive(Debug)]
+struct CliError {
+    kind: CliErrorKind,
+    message: String,
+}
+
+impl CliError {
+    fn io(error: impl std::fmt::Display) -> Self {
+        Self {
+            kind: CliErrorKind::Io,
+            message: error.to_string(),
+        }
+    }
+
+    fn export(error: impl std::fmt::Display) -> Self {
+        Self {
+            kind: CliErrorKind::Export,
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<String> for CliError {
+    fn from(message: String) -> Self {
+        Self {
+            kind: CliErrorKind::Input,
+            message,
+        }
+    }
+}
+
+fn run(cli: Cli) -> Result<ExitCode, CliError> {
     match cli.command {
         Command::ValidatePlan { fixture } => {
             let fixture = load_fixture(&fixture)?;
-            let result = fixture.execute();
+            let result = fixture
+                .execute_checked()
+                .map_err(|error| error.to_string())?;
             let payload = serde_json::json!({
                 "isValid": result.is_valid,
                 "diagnostics": result.diagnostics.into_iter().map(|item| item.code).collect::<Vec<_>>(),
@@ -160,14 +222,14 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         }
         Command::Compare { fixture, format } => {
             let fixture = load_fixture(&fixture)?;
-            let result = fixture.execute();
+            let result = fixture
+                .execute_checked()
+                .map_err(|error| error.to_string())?;
             let format = match format {
-                OutputFormat::Json => {
-                    export_result_json(&result).map_err(|error| error.to_string())?
-                }
+                OutputFormat::Json => export_result_json(&result).map_err(CliError::export)?,
                 OutputFormat::Markdown => export_result_markdown(&result),
                 OutputFormat::LlmContext => {
-                    export_result_llm_context(&result).map_err(|error| error.to_string())?
+                    export_result_llm_context(&result).map_err(CliError::export)?
                 }
             };
             println!("{format}");
@@ -179,12 +241,21 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         }
         Command::Explain { fixture } => {
             let fixture = load_fixture(&fixture)?;
-            println!("{}", export_result_markdown(&fixture.execute()));
-            Ok(ExitCode::SUCCESS)
+            let result = fixture
+                .execute_checked()
+                .map_err(|error| error.to_string())?;
+            println!("{}", export_result_markdown(&result));
+            Ok(if result.is_valid {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            })
         }
         Command::Audit { fixture, out } => {
             let fixture = load_fixture(&fixture)?;
-            let result = fixture.execute();
+            let result = fixture
+                .execute_checked()
+                .map_err(|error| error.to_string())?;
             write_audit_bundle(&result, &out)?;
             Ok(if result.is_valid {
                 ExitCode::SUCCESS
@@ -221,8 +292,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             })
         }
         Command::ImportEvents { events, map, out } => {
-            let windows = import_events(&events, &map)?;
-            write_windows_jsonl(&windows, &out)?;
+            import_events_to_file(&events, &map, &out)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::AuditEvents {
@@ -244,24 +314,23 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     }
 }
 
-fn load_fixture(path: &str) -> Result<ContractFixture, String> {
-    let json = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    ContractFixture::parse_json(&json).map_err(|error| error.to_string())
+fn load_fixture(path: &Path) -> Result<ContractFixture, CliError> {
+    let json = fs::read_to_string(path).map_err(CliError::io)?;
+    ContractFixture::parse_json(&json).map_err(|error| error.to_string().into())
 }
 
-fn write_audit_bundle(result: &spanfold::ComparisonResult, out: &str) -> Result<(), String> {
-    fs::create_dir_all(out).map_err(|error| error.to_string())?;
-    let json = export_result_json(result).map_err(|error| error.to_string())?;
+fn write_audit_bundle(result: &spanfold::ComparisonResult, out: &Path) -> Result<(), CliError> {
+    fs::create_dir_all(out).map_err(CliError::io)?;
+    let json = export_result_json(result).map_err(CliError::export)?;
     let markdown = export_result_markdown(result);
-    let llm = export_result_llm_context(result).map_err(|error| error.to_string())?;
+    let llm = export_result_llm_context(result).map_err(CliError::export)?;
     let html = export_result_debug_html(result);
-    fs::write(format!("{out}/comparison.json"), &json).map_err(|error| error.to_string())?;
-    fs::write(format!("{out}/comparison.md"), &markdown).map_err(|error| error.to_string())?;
-    fs::write(format!("{out}/comparison.llm.json"), &llm).map_err(|error| error.to_string())?;
-    fs::write(format!("{out}/comparison.html"), html).map_err(|error| error.to_string())?;
-    let jsonl = fs::File::create(format!("{out}/comparison.rows.jsonl"))
-        .map_err(|error| error.to_string())?;
-    write_result_json_lines(result, jsonl).map_err(|error| error.to_string())?;
+    fs::write(out.join("comparison.json"), &json).map_err(CliError::io)?;
+    fs::write(out.join("comparison.md"), &markdown).map_err(CliError::io)?;
+    fs::write(out.join("comparison.llm.json"), &llm).map_err(CliError::io)?;
+    fs::write(out.join("comparison.html"), html).map_err(CliError::io)?;
+    let jsonl = fs::File::create(out.join("comparison.rows.jsonl")).map_err(CliError::io)?;
+    write_result_json_lines(result, jsonl).map_err(CliError::export)?;
     let manifest = serde_json::json!({
         "schema": "spanfold.audit.bundle",
         "schemaVersion": 0,
@@ -280,8 +349,8 @@ fn write_audit_bundle(result: &spanfold::ComparisonResult, out: &str) -> Result<
             "manifest": "manifest.json"
         }
     });
-    let manifest = serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
-    fs::write(format!("{out}/manifest.json"), &manifest).map_err(|error| error.to_string())?;
+    let manifest = serde_json::to_string_pretty(&manifest).map_err(CliError::export)?;
+    fs::write(out.join("manifest.json"), &manifest).map_err(CliError::io)?;
     println!("{manifest}");
     Ok(())
 }
@@ -311,28 +380,31 @@ struct WindowAuditOptions<'a> {
 }
 
 fn compare_windows_jsonl(
-    path: &str,
+    path: &Path,
     options: WindowAuditOptions<'_>,
 ) -> Result<spanfold::ComparisonResult, String> {
     if options.against.is_empty() {
         return Err("audit-windows requires at least one --against value".to_owned());
     }
     let comparators = parse_comparators(options.comparators)?;
-    let lines = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let path_label = path.display().to_string();
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let reader = BufReader::new(file);
     let mut builder = WindowHistoryFixture::new();
-    for (index, line) in lines.lines().enumerate() {
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.map_err(|error| format!("{path_label}:{}: {error}", index + 1))?;
         if line.trim().is_empty() {
             continue;
         }
-        let row: JsonlWindow =
-            serde_json::from_str(line).map_err(|error| format!("{path}:{}: {error}", index + 1))?;
+        let row: JsonlWindow = serde_json::from_str(&line)
+            .map_err(|error| format!("{path_label}:{}: {error}", index + 1))?;
         let window_name = row
             .window_name
             .as_deref()
             .or(options.default_window_name)
             .ok_or_else(|| {
                 format!(
-                    "{path}:{}: windowName missing and --window not supplied",
+                    "{path_label}:{}: windowName missing and --window not supplied",
                     index + 1
                 )
             })?;
@@ -402,30 +474,65 @@ fn parse_comparators(values: &[String]) -> Result<Vec<Comparator>, String> {
     };
     declarations
         .into_iter()
-        .map(|value| {
-            Comparator::parse(&value).ok_or_else(|| format!("unknown comparator: {value}"))
-        })
+        .map(|value| Comparator::parse_result(&value).map_err(|error| error.to_string()))
         .collect()
 }
 
-fn import_events(path: &str, map_path: &str) -> Result<Vec<ImportedWindow>, String> {
+fn import_events(path: &Path, map_path: &Path) -> Result<Vec<ImportedWindow>, String> {
     let import_map = read_import_map(map_path)?;
     let input = import_map.input.as_deref().unwrap_or("jsonl");
+    let mut windows = Vec::new();
     match input {
-        "jsonl" => import_events_jsonl(path, &import_map),
-        "csv" => import_events_csv(path, &import_map),
+        "jsonl" => import_events_jsonl(path, &import_map, &mut windows),
+        "csv" => import_events_csv(path, &import_map, &mut windows),
+        _ => Err(format!("unsupported event input format: {input}")),
+    }?;
+    Ok(windows)
+}
+
+fn import_events_to_file(path: &Path, map_path: &Path, output: &Path) -> Result<(), String> {
+    let import_map = read_import_map(map_path)?;
+    let input = import_map.input.as_deref().unwrap_or("jsonl");
+    let file = fs::File::create(output).map_err(|error| error.to_string())?;
+    let mut sink = JsonlWindowSink { writer: file };
+    match input {
+        "jsonl" => import_events_jsonl(path, &import_map, &mut sink),
+        "csv" => import_events_csv(path, &import_map, &mut sink),
         _ => Err(format!("unsupported event input format: {input}")),
     }
 }
 
+trait ImportedWindowSink {
+    fn push(&mut self, window: ImportedWindow) -> Result<(), String>;
+}
+
+impl ImportedWindowSink for Vec<ImportedWindow> {
+    fn push(&mut self, window: ImportedWindow) -> Result<(), String> {
+        self.push(window);
+        Ok(())
+    }
+}
+
+struct JsonlWindowSink<W> {
+    writer: W,
+}
+
+impl<W: Write> ImportedWindowSink for JsonlWindowSink<W> {
+    fn push(&mut self, window: ImportedWindow) -> Result<(), String> {
+        let line = serde_json::to_string(&window).map_err(|error| error.to_string())?;
+        writeln!(self.writer, "{line}").map_err(|error| error.to_string())
+    }
+}
+
 fn import_events_jsonl(
-    path: &str,
+    path: &Path,
     import_map: &EventImportMap,
-) -> Result<Vec<ImportedWindow>, String> {
+    sink: &mut impl ImportedWindowSink,
+) -> Result<(), String> {
+    let path_label = path.display().to_string();
     let file = fs::File::open(path).map_err(|error| error.to_string())?;
     let reader = BufReader::new(file);
     let mut active: BTreeMap<ImportStateKey, ImportState> = BTreeMap::new();
-    let mut windows = Vec::new();
     let mut last_position: Option<i64> = None;
 
     for (index, line) in reader.lines().enumerate() {
@@ -434,41 +541,51 @@ fn import_events_jsonl(
             continue;
         }
         let event: serde_json::Value = serde_json::from_str(&line)
-            .map_err(|error| format!("{path}:{}: {error}", index + 1))?;
+            .map_err(|error| format!("{path_label}:{}: {error}", index + 1))?;
         process_import_event(
             &event,
             import_map,
-            path,
+            &path_label,
             index + 1,
             &mut active,
-            &mut windows,
+            sink,
             &mut last_position,
         )?;
     }
 
-    close_remaining_imported_windows(active, &mut windows);
-    Ok(windows)
+    close_remaining_imported_windows(active, sink)?;
+    Ok(())
 }
 
 fn import_events_csv(
-    path: &str,
+    path: &Path,
     import_map: &EventImportMap,
-) -> Result<Vec<ImportedWindow>, String> {
+    sink: &mut impl ImportedWindowSink,
+) -> Result<(), String> {
+    let path_label = path.display().to_string();
     let file = fs::File::open(path).map_err(|error| error.to_string())?;
     let mut lines = BufReader::new(file).lines();
     let Some(header_line) = lines.next() else {
-        return Err(format!("{path}: CSV input is empty"));
+        return Err(format!("{path_label}: CSV input is empty"));
     };
     let header_line = header_line.map_err(|error| error.to_string())?;
-    let headers = parse_csv_record(&header_line).map_err(|error| format!("{path}:1: {error}"))?;
+    let headers =
+        parse_csv_record(&header_line).map_err(|error| format!("{path_label}:1: {error}"))?;
     if headers.is_empty() {
         return Err(format!(
-            "{path}:1: CSV header must contain at least one column"
+            "{path_label}:1: CSV header must contain at least one column"
         ));
+    }
+    let mut header_names = std::collections::BTreeSet::new();
+    for header in &headers {
+        if header.value.trim().is_empty() || !header_names.insert(header.value.clone()) {
+            return Err(format!(
+                "{path_label}:1: CSV headers must be non-empty and unique"
+            ));
+        }
     }
 
     let mut active: BTreeMap<ImportStateKey, ImportState> = BTreeMap::new();
-    let mut windows = Vec::new();
     let mut last_position: Option<i64> = None;
 
     for (index, line) in lines.enumerate() {
@@ -477,32 +594,32 @@ fn import_events_csv(
         if line.trim().is_empty() {
             continue;
         }
-        let fields =
-            parse_csv_record(&line).map_err(|error| format!("{path}:{line_number}: {error}"))?;
+        let fields = parse_csv_record(&line)
+            .map_err(|error| format!("{path_label}:{line_number}: {error}"))?;
         if fields.len() != headers.len() {
             return Err(format!(
-                "{path}:{line_number}: CSV row has {} fields, expected {}",
+                "{path_label}:{line_number}: CSV row has {} fields, expected {}",
                 fields.len(),
                 headers.len()
             ));
         }
         let mut event = serde_json::Map::new();
         for (header, field) in headers.iter().zip(fields) {
-            event.insert(header.clone(), csv_field_to_json(&field));
+            event.insert(header.value.clone(), csv_field_to_json(&field));
         }
         process_import_event(
             &serde_json::Value::Object(event),
             import_map,
-            path,
+            &path_label,
             line_number,
             &mut active,
-            &mut windows,
+            sink,
             &mut last_position,
         )?;
     }
 
-    close_remaining_imported_windows(active, &mut windows);
-    Ok(windows)
+    close_remaining_imported_windows(active, sink)?;
+    Ok(())
 }
 
 fn process_import_event(
@@ -511,7 +628,7 @@ fn process_import_event(
     path: &str,
     line_number: usize,
     active: &mut BTreeMap<ImportStateKey, ImportState>,
-    windows: &mut Vec<ImportedWindow>,
+    sink: &mut impl ImportedWindowSink,
     last_position: &mut Option<i64>,
 ) -> Result<(), String> {
     let position = select_i64(event, &import_map.position, path, line_number)?;
@@ -548,7 +665,7 @@ fn process_import_event(
         if is_active {
             if let Some(state) = active.get_mut(&state_key) {
                 if state.segments != segments {
-                    windows.push(state.to_window_for_key(&state_key, Some(position)));
+                    sink.push(state.to_window_for_key(&state_key, Some(position)))?;
                     *state = ImportState {
                         start_position: position,
                         segments,
@@ -569,7 +686,7 @@ fn process_import_event(
         }
 
         if let Some(state) = active.remove(&state_key) {
-            windows.push(state.to_window_for_key(&state_key, Some(position)));
+            sink.push(state.to_window_for_key(&state_key, Some(position)))?;
         }
     }
     Ok(())
@@ -577,11 +694,12 @@ fn process_import_event(
 
 fn close_remaining_imported_windows(
     active: BTreeMap<ImportStateKey, ImportState>,
-    windows: &mut Vec<ImportedWindow>,
-) {
+    sink: &mut impl ImportedWindowSink,
+) -> Result<(), String> {
     for (state_key, state) in active {
-        windows.push(state.to_window_for_key(&state_key, None));
+        sink.push(state.to_window_for_key(&state_key, None))?;
     }
+    Ok(())
 }
 
 fn compare_imported_windows(
@@ -650,25 +768,68 @@ fn compare_imported_windows(
     Ok(compare(&history, &plan))
 }
 
-fn write_windows_jsonl(windows: &[ImportedWindow], path: &str) -> Result<(), String> {
-    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
-    for window in windows {
-        let line = serde_json::to_string(window).map_err(|error| error.to_string())?;
-        writeln!(file, "{line}").map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-fn read_import_map(path: &str) -> Result<EventImportMap, String> {
+fn read_import_map(path: &Path) -> Result<EventImportMap, String> {
+    let path_label = path.display().to_string();
     let json = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let import_map: EventImportMap =
-        serde_json::from_str(&json).map_err(|error| format!("{path}: {error}"))?;
-    if import_map.windows.is_empty() {
-        return Err(format!(
-            "{path}: $.windows must contain at least one window"
-        ));
-    }
+        serde_json::from_str(&json).map_err(|error| format!("{path_label}: {error}"))?;
+    import_map.validate(&path_label)?;
     Ok(import_map)
+}
+
+impl EventImportMap {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        if self.windows.is_empty() {
+            return Err(format!(
+                "{path}: $.windows must contain at least one window"
+            ));
+        }
+        if self.source.field().trim().is_empty() || self.position.field().trim().is_empty() {
+            return Err(format!("{path}: source and position fields are required"));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for window in &self.windows {
+            if window.name.trim().is_empty() || !names.insert(window.name.as_str()) {
+                return Err(format!("{path}: window names must be non-empty and unique"));
+            }
+            window.active.validate(path)?;
+            for selector in window.segments.iter().chain(window.tags.iter()) {
+                if selector.name.trim().is_empty() || selector.selector.field().trim().is_empty() {
+                    return Err(format!(
+                        "{path}: named selectors require non-empty names and fields"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl EventPredicate {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        if self.field.trim().is_empty() {
+            return Err(format!("{path}: predicate field cannot be empty"));
+        }
+        let operators = [
+            self.equals.is_some(),
+            self.not_equals.is_some(),
+            self.greater_than.is_some(),
+            self.greater_than_or_equal.is_some(),
+            self.less_than.is_some(),
+            self.less_than_or_equal.is_some(),
+            self.is_true.is_some(),
+            self.is_false.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count();
+        if operators != 1 {
+            return Err(format!(
+                "{path}: each predicate must declare exactly one operator"
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn apply_jsonl_metadata(
@@ -783,8 +944,19 @@ fn select_field<'a>(
     line_number: usize,
 ) -> Result<&'a serde_json::Value, String> {
     let mut current = event;
-    for field in field_path.split('.') {
-        let Some(next) = current.get(field) else {
+    let fields = parse_field_path(field_path)
+        .map_err(|error| format!("{path}:{line_number}: invalid field '{field_path}': {error}"))?;
+    for field in fields {
+        let next = match field {
+            FieldPathPart::Name(field) => current.get(&field).or_else(|| {
+                current
+                    .as_array()
+                    .and_then(|_| field.parse::<usize>().ok())
+                    .and_then(|index| current.get(index))
+            }),
+            FieldPathPart::Index(index) => current.get(index),
+        };
+        let Some(next) = next else {
             return Err(format!(
                 "{path}:{line_number}: missing event field '{field_path}'"
             ));
@@ -792,6 +964,77 @@ fn select_field<'a>(
         current = next;
     }
     Ok(current)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum FieldPathPart {
+    Name(String),
+    Index(usize),
+}
+
+fn parse_field_path(field_path: &str) -> Result<Vec<FieldPathPart>, &'static str> {
+    if let Some(pointer) = field_path.strip_prefix('/') {
+        if pointer.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Ok(pointer
+            .split('/')
+            .map(|field| FieldPathPart::Name(field.replace("~1", "/").replace("~0", "~")))
+            .collect());
+    }
+
+    let mut parts = Vec::new();
+    let mut name = String::new();
+    let mut chars = field_path.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '.' => {
+                if name.is_empty() {
+                    return Err("empty path segment");
+                }
+                parts.push(FieldPathPart::Name(std::mem::take(&mut name)));
+            }
+            '[' => {
+                if !name.is_empty() {
+                    parts.push(FieldPathPart::Name(std::mem::take(&mut name)));
+                }
+                let mut index = String::new();
+                let mut closed = false;
+                while let Some(next) = chars.next() {
+                    if next == ']' {
+                        closed = true;
+                        break;
+                    }
+                    index.push(next);
+                }
+                if !closed {
+                    return Err("unmatched opening bracket");
+                }
+                if !index.chars().all(|digit| digit.is_ascii_digit()) {
+                    return Err("array indexes must be non-negative integers");
+                }
+                let index = index
+                    .parse::<usize>()
+                    .map_err(|_| "array index is too large")?;
+                parts.push(FieldPathPart::Index(index));
+                if chars.peek() == Some(&'.') {
+                    chars.next();
+                }
+            }
+            ']' => return Err("unmatched closing bracket"),
+            _ => name.push(character),
+        }
+    }
+    if field_path.ends_with('.') {
+        return Err("empty path segment");
+    }
+    if !name.is_empty() {
+        parts.push(FieldPathPart::Name(name));
+    }
+    if parts.is_empty() {
+        return Err("field path is empty");
+    }
+    Ok(parts)
 }
 
 fn evaluate_predicate(
@@ -820,23 +1063,31 @@ fn evaluate_predicate(
     }
     if let Some(expected) = &predicate.greater_than {
         evaluated = true;
-        matches &= compare_numbers(&primitive, expected, |left, right| left > right)
-            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+        matches &= compare_numbers(&primitive, expected, |ordering| {
+            ordering == std::cmp::Ordering::Greater
+        })
+        .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
     }
     if let Some(expected) = &predicate.greater_than_or_equal {
         evaluated = true;
-        matches &= compare_numbers(&primitive, expected, |left, right| left >= right)
-            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+        matches &= compare_numbers(&primitive, expected, |ordering| {
+            ordering != std::cmp::Ordering::Less
+        })
+        .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
     }
     if let Some(expected) = &predicate.less_than {
         evaluated = true;
-        matches &= compare_numbers(&primitive, expected, |left, right| left < right)
-            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+        matches &= compare_numbers(&primitive, expected, |ordering| {
+            ordering == std::cmp::Ordering::Less
+        })
+        .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
     }
     if let Some(expected) = &predicate.less_than_or_equal {
         evaluated = true;
-        matches &= compare_numbers(&primitive, expected, |left, right| left <= right)
-            .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
+        matches &= compare_numbers(&primitive, expected, |ordering| {
+            ordering != std::cmp::Ordering::Greater
+        })
+        .ok_or_else(|| numeric_predicate_error(path, line_number, predicate))?;
     }
     if predicate.is_true.unwrap_or(false) {
         evaluated = true;
@@ -865,17 +1116,26 @@ fn numeric_predicate_error(path: &str, line_number: usize, predicate: &EventPred
 fn compare_numbers(
     left: &PrimitiveValue,
     right: &PrimitiveValue,
-    compare: impl FnOnce(f64, f64) -> bool,
+    compare: impl FnOnce(std::cmp::Ordering) -> bool,
 ) -> Option<bool> {
-    Some(compare(primitive_to_f64(left)?, primitive_to_f64(right)?))
-}
-
-fn primitive_to_f64(value: &PrimitiveValue) -> Option<f64> {
-    match value {
-        PrimitiveValue::Integer(value) => Some(*value as f64),
-        PrimitiveValue::Float(value) => Some(*value),
-        PrimitiveValue::String(_) | PrimitiveValue::Bool(_) | PrimitiveValue::Null => None,
-    }
+    let ordering = match (left, right) {
+        (PrimitiveValue::Integer(left), PrimitiveValue::Integer(right)) => left.cmp(right),
+        (PrimitiveValue::Float(left), PrimitiveValue::Float(right)) => left.partial_cmp(right)?,
+        (PrimitiveValue::Integer(left), PrimitiveValue::Float(right)) => {
+            if left.unsigned_abs() > (1_u64 << 53) {
+                return None;
+            }
+            (*left as f64).partial_cmp(right)?
+        }
+        (PrimitiveValue::Float(left), PrimitiveValue::Integer(right)) => {
+            if right.unsigned_abs() > (1_u64 << 53) {
+                return None;
+            }
+            left.partial_cmp(&(*right as f64))?
+        }
+        _ => return None,
+    };
+    Some(compare(ordering))
 }
 
 fn primitive_from_json(value: &serde_json::Value) -> Result<PrimitiveValue, &'static str> {
@@ -886,7 +1146,7 @@ fn primitive_from_json(value: &serde_json::Value) -> Result<PrimitiveValue, &'st
             if let Some(integer) = value.as_i64() {
                 Ok(PrimitiveValue::Integer(integer))
             } else if let Some(float) = value.as_f64() {
-                Ok(PrimitiveValue::Float(float))
+                PrimitiveValue::try_float(float).map_err(|_| "must be a finite JSON number")
             } else {
                 Err("must be a finite JSON number")
             }
@@ -908,10 +1168,17 @@ fn primitive_to_string(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-fn parse_csv_record(line: &str) -> Result<Vec<String>, &'static str> {
+#[derive(Clone, Debug)]
+struct CsvField {
+    value: String,
+    quoted: bool,
+}
+
+fn parse_csv_record(line: &str) -> Result<Vec<CsvField>, &'static str> {
     let mut fields = Vec::new();
     let mut field = String::new();
     let mut in_quotes = false;
+    let mut was_quoted = false;
     let mut chars = line.chars().peekable();
 
     while let Some(character) = chars.next() {
@@ -922,10 +1189,15 @@ fn parse_csv_record(line: &str) -> Result<Vec<String>, &'static str> {
             }
             '"' => {
                 in_quotes = !in_quotes;
+                was_quoted = true;
             }
             ',' if !in_quotes => {
-                fields.push(field);
+                fields.push(CsvField {
+                    value: field,
+                    quoted: was_quoted,
+                });
                 field = String::new();
+                was_quoted = false;
             }
             _ => field.push(character),
         }
@@ -934,12 +1206,18 @@ fn parse_csv_record(line: &str) -> Result<Vec<String>, &'static str> {
     if in_quotes {
         return Err("CSV row contains an unterminated quoted field");
     }
-    fields.push(field);
+    fields.push(CsvField {
+        value: field,
+        quoted: was_quoted,
+    });
     Ok(fields)
 }
 
-fn csv_field_to_json(field: &str) -> serde_json::Value {
-    let trimmed = field.trim();
+fn csv_field_to_json(field: &CsvField) -> serde_json::Value {
+    if field.quoted {
+        return serde_json::Value::String(field.value.clone());
+    }
+    let trimmed = field.value.trim();
     if trimmed.is_empty() {
         return serde_json::Value::Null;
     }
@@ -956,7 +1234,7 @@ fn csv_field_to_json(field: &str) -> serde_json::Value {
     {
         return serde_json::Value::Number(number);
     }
-    serde_json::Value::String(field.to_owned())
+    serde_json::Value::String(field.value.clone())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1034,6 +1312,7 @@ impl ImportState {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EventImportMap {
     input: Option<String>,
     source: FieldSelector,
@@ -1044,6 +1323,7 @@ struct EventImportMap {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EventWindowMap {
     name: String,
     key: Option<FieldSelector>,
@@ -1055,6 +1335,7 @@ struct EventWindowMap {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EventPredicate {
     field: String,
     equals: Option<PrimitiveValue>,
@@ -1090,6 +1371,7 @@ impl FieldSelector {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawNamedFieldSelector {
     name: String,
     field: String,
@@ -1161,7 +1443,7 @@ mod tests {
         .expect("write second row");
 
         let result = compare_windows_jsonl(
-            file.path().to_str().expect("utf8 path"),
+            file.path(),
             WindowAuditOptions {
                 default_window_name: Some("DeviceOffline"),
                 target: "provider-a",
@@ -1200,7 +1482,7 @@ mod tests {
         let comparators = vec![String::from("residual")];
 
         let result = compare_windows_jsonl(
-            file.path().to_str().expect("utf8 path"),
+            file.path(),
             WindowAuditOptions {
                 default_window_name: Some("DeviceOffline"),
                 target: "provider-a",
@@ -1219,5 +1501,19 @@ mod tests {
         assert_eq!(result.comparator_summaries[0].comparator_name, "residual");
         assert_eq!(result.residual_rows.len(), 2);
         assert!(result.has_provisional_rows());
+    }
+
+    #[test]
+    fn field_selection_supports_embedded_array_indexes_and_json_pointers() {
+        let event = serde_json::json!({
+            "items": [{"name": "first"}],
+            "a/b": {"~key": 7}
+        });
+        let dotted =
+            select_field(&event, "items[0].name", "events.jsonl", 1).expect("embedded array path");
+        assert_eq!(dotted, &serde_json::Value::String("first".to_owned()));
+        let pointer =
+            select_field(&event, "/a~1b/~0key", "events.jsonl", 1).expect("escaped JSON pointer");
+        assert_eq!(pointer, &serde_json::json!(7));
     }
 }

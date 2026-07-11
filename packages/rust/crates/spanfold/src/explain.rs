@@ -134,7 +134,7 @@ impl AlignedComparison {
     /// Renders a deterministic explanation in the requested format.
     #[must_use]
     pub fn explain_with_format(&self, format: ComparisonExplanationFormat) -> String {
-        let mut out = self.prepared.explain_with_format(format);
+        let mut out = String::new();
         write_section(&mut out, format, "Alignment");
         write_item(&mut out, "segments", &self.segments.len().to_string());
         for (index, segment) in self.segments.iter().enumerate() {
@@ -304,6 +304,22 @@ fn parse_cohort_evidence(
         .strip_suffix(']')?
         .parse::<usize>()
         .ok()?;
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&metadata.value) {
+        return Some(CohortEvidenceMetadata {
+            segment_index,
+            rule: value.get("rule")?.as_str()?.to_owned(),
+            required_count: value.get("required")?.as_u64()? as usize,
+            active_count: value.get("activeCount")?.as_u64()? as usize,
+            is_active: value.get("isActive")?.as_bool()?,
+            active_sources: value
+                .get("activeSources")?
+                .as_array()?
+                .iter()
+                .map(|source| source.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>()?,
+            raw_value: metadata.value.clone(),
+        });
+    }
     let fields = parse_metadata_fields(&metadata.value);
     Some(CohortEvidenceMetadata {
         segment_index,
@@ -424,7 +440,7 @@ mod tests {
         );
 
         let explanation = result.explain();
-        assert!(explanation.contains("overlap[0]"));
+        assert!(explanation.contains("overlap:"));
         assert!(explanation.contains("finality[0]"));
         assert_eq!(result.final_row_finalities().len(), 1);
         assert!(result.provisional_row_finalities().is_empty());
