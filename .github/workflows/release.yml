@@ -1,0 +1,117 @@
+name: NuGet Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish .NET packages
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/dotnet
+
+    steps:
+      - name: Check out release revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          configured_version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)"
+          test -n "$configured_version"
+          test "$version" = "$configured_version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Restore
+        run: dotnet restore Spanfold.slnx
+
+      - name: Test
+        run: dotnet test Spanfold.slnx --no-restore --configuration Release
+
+      - name: Pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/package
+          dotnet pack src/Spanfold/Spanfold.csproj --no-restore --configuration Release --output artifacts/package
+          dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj --no-restore --configuration Release --output artifacts/package
+          dotnet pack src/Spanfold.Cli/Spanfold.Cli.csproj --no-restore --configuration Release --output artifacts/package
+
+      - name: Verify package contents and dependency metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "artifacts/package/Spanfold.${VERSION}.nupkg"
+          test -f "artifacts/package/Spanfold.${VERSION}.snupkg"
+          test -f "artifacts/package/Spanfold.Testing.${VERSION}.nupkg"
+          test -f "artifacts/package/Spanfold.Testing.${VERSION}.snupkg"
+          test -f "artifacts/package/Spanfold.Cli.${VERSION}.nupkg"
+          test -f "artifacts/package/Spanfold.Cli.${VERSION}.snupkg"
+          unzip -Z1 "artifacts/package/Spanfold.${VERSION}.nupkg" | grep -Fx 'README.md'
+          unzip -Z1 "artifacts/package/Spanfold.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.dll'
+          unzip -Z1 "artifacts/package/Spanfold.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.xml'
+          unzip -Z1 "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Testing.dll'
+          unzip -p "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" '*.nuspec' | grep -F '<dependency id="Spanfold"'
+          unzip -Z1 "artifacts/package/Spanfold.Cli.${VERSION}.nupkg" | grep -F 'Spanfold.Cli.dll'
+
+      - name: Authenticate to NuGet.org
+        id: nuget_login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: scottlr
+
+      - name: Publish packages
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          source_url='https://api.nuget.org/v3/index.json'
+          dotnet nuget push "artifacts/package/Spanfold.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/package/Spanfold.Cli.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+
+      - name: Preserve release packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nuget-${{ env.VERSION }}
+          path: |
+            packages/dotnet/artifacts/package/*.nupkg
+            packages/dotnet/artifacts/package/*.snupkg
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_flags=()
+          if [[ "$VERSION" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            artifacts/package/*.nupkg \
+            artifacts/package/*.snupkg \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Spanfold $VERSION" \
+            --generate-notes \
+            --verify-tag \
+            "${release_flags[@]}"
