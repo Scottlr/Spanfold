@@ -54,5 +54,26 @@ public sealed class EmissionCallbackTests
         Assert.Throws<ArgumentNullException>(() => builder.OnEmission(null!));
     }
 
+    [Fact]
+    public void CallbackFailureReportsCommittedResultAndRunsRemainingCallbacks()
+    {
+        var callbacks = 0;
+        var pipeline = Spanfold
+            .For<PriceTick>()
+            .OnEmission(_ => throw new InvalidOperationException("first"))
+            .OnEmission(_ => callbacks++)
+            .Window(
+                "SelectionSuspension",
+                key: tick => tick.SelectionId,
+                isActive: tick => tick.Price == 0m)
+            .Build();
+
+        var exception = Assert.Throws<IngestionCallbackException<PriceTick>>(() =>
+            pipeline.Ingest(new PriceTick("selection-1", 0m)));
+
+        Assert.Single(exception.Result.Emissions);
+        Assert.Equal(1, callbacks);
+    }
+
     private sealed record PriceTick(string SelectionId, decimal Price);
 }
