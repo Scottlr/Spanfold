@@ -75,5 +75,26 @@ public sealed class EmissionCallbackTests
         Assert.Equal(1, callbacks);
     }
 
+    [Fact]
+    public void ReentrantIngestionIsRejected()
+    {
+        EventPipeline<PriceTick>? pipeline = null;
+        pipeline = Spanfold
+            .For<PriceTick>()
+            .OnEmission(_ => pipeline!.Ingest(new PriceTick("nested", 1m)))
+            .Window(
+                "SelectionSuspension",
+                key: tick => tick.SelectionId,
+                isActive: tick => tick.Price == 0m)
+            .Build();
+
+        var exception = Assert.Throws<IngestionCallbackException<PriceTick>>(() =>
+            pipeline.Ingest(new PriceTick("selection-1", 0m)));
+
+        Assert.Contains(exception.CallbackErrors, error =>
+            error is InvalidOperationException invalid
+            && invalid.Message.Contains("single-writer and non-reentrant", StringComparison.Ordinal));
+    }
+
     private sealed record PriceTick(string SelectionId, decimal Price);
 }
