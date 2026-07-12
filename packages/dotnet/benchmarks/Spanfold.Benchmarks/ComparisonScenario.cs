@@ -7,5 +7,6 @@ public enum ComparisonScenario
     Large = 2,
     HighOverlap = 3,
     HighCardinality = 4,
-    ManySource = 5
+    ManySource = 5,
+    DenseSingleScope = 6
 }

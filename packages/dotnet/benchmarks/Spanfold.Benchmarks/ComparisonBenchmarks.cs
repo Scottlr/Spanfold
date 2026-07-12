@@ -13,9 +13,11 @@ public class ComparisonBenchmarks
     [Params(
         ComparisonScenario.Small,
         ComparisonScenario.Medium,
+        ComparisonScenario.Large,
         ComparisonScenario.HighOverlap,
         ComparisonScenario.HighCardinality,
-        ComparisonScenario.ManySource)]
+        ComparisonScenario.ManySource,
+        ComparisonScenario.DenseSingleScope)]
     public ComparisonScenario Scenario { get; set; }
 
     [GlobalSetup]
