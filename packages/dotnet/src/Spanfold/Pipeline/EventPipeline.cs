@@ -84,6 +84,7 @@ public sealed class EventPipeline<TEvent>
     /// <returns>The emissions produced by the event.</returns>
     public IngestionResult<TEvent> Ingest(TEvent @event, object? source, object? partition)
     {
+        var eventTime = this.eventTimeSelector?.Invoke(@event);
         this.processingPosition++;
         List<WindowEmission<TEvent>>? emissions = null;
 
@@ -98,16 +99,38 @@ public sealed class EventPipeline<TEvent>
         History.Record(
             result.Emissions,
             this.processingPosition,
-            this.eventTimeSelector?.Invoke(@event));
+            eventTime);
 
+        List<Exception>? callbackErrors = null;
         foreach (var emission in result.Emissions)
         {
-            InvokeWindowCallbacks(emission);
+            try
+            {
+                InvokeWindowCallbacks(emission);
+            }
+            catch (Exception exception)
+            {
+                callbackErrors ??= [];
+                callbackErrors.Add(exception);
+            }
 
             foreach (var callback in this.emissionCallbacks)
             {
-                callback(emission);
+                try
+                {
+                    callback(emission);
+                }
+                catch (Exception exception)
+                {
+                    callbackErrors ??= [];
+                    callbackErrors.Add(exception);
+                }
             }
+        }
+
+        if (callbackErrors is not null)
+        {
+            throw new IngestionCallbackException<TEvent>(result, callbackErrors);
         }
 
         return result;
