@@ -99,6 +99,8 @@ public sealed class ComparisonExportTests
         Assert.Equal("result-summary", summary.RootElement.GetProperty("artifact").GetString());
         Assert.Equal("result-row", row.RootElement.GetProperty("artifact").GetString());
         Assert.Equal("overlap[0]", row.RootElement.GetProperty("rowId").GetString());
+        Assert.Equal("Final", row.RootElement.GetProperty("finality").GetString());
+        Assert.Equal(1, row.RootElement.GetProperty("version").GetInt32());
     }
 
     [Fact]
