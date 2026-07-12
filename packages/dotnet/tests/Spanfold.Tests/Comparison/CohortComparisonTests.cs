@@ -276,8 +276,8 @@ public sealed class CohortComparisonTests
 
         Assert.Contains(result.ExtensionMetadata, metadata =>
             metadata.ExtensionId == "spanfold.cohort"
-            && metadata.Value.Contains("required=2", StringComparison.Ordinal)
-            && metadata.Value.Contains("isActive=false", StringComparison.Ordinal));
+            && metadata.Value.Contains("\"required\":2", StringComparison.Ordinal)
+            && metadata.Value.Contains("\"isActive\":false", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -286,13 +286,13 @@ public sealed class CohortComparisonTests
         var pipeline = CreatePipeline();
 
         AddClosedWindow(pipeline, source: "source-a", start: 1, end: 11);
-        AddClosedWindow(pipeline, source: "source-b", start: 1, end: 6);
+        AddClosedWindow(pipeline, source: "source-b;=,", start: 1, end: 6);
 
         var result = pipeline.History
             .Compare("Source A vs typed cohort evidence")
             .Target("source-a", selector => selector.Source("source-a"))
             .AgainstCohort("cohort", cohort => cohort
-                .Sources("source-b", "source-c")
+                .Sources("source-b;=,", "source-c")
                 .Activity(CohortActivity.AtLeast(2)))
             .Within(scope => scope.Window("SelectionPriced"))
             .Using(comparators => comparators.Residual())
@@ -304,8 +304,8 @@ public sealed class CohortComparisonTests
 
         Assert.Equal("at-least", inactive.Rule);
         Assert.Equal(2, inactive.RequiredCount);
-        Assert.Contains("source-b", inactive.ActiveSources);
-        Assert.Contains("required=2", inactive.RawValue);
+        Assert.Contains("source-b;=,", inactive.ActiveSources);
+        Assert.Contains("\"required\":2", inactive.RawValue);
     }
 
     [Fact]
@@ -329,7 +329,8 @@ public sealed class CohortComparisonTests
         var html = result.ExportDebugHtml();
 
         Assert.Contains("spanfold.cohort", html);
-        Assert.Contains("required=2", html);
+        Assert.Contains("required", html);
+        Assert.Contains("isActive", html);
     }
 
     private static EventPipeline<PriceUpdate> CreatePipeline()
