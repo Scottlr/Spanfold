@@ -33,7 +33,7 @@ public sealed class ComparisonResult
     /// <param name="asOfRows">Rows emitted by the as-of comparator.</param>
     /// <param name="rowFinalities">Finality metadata for materialized rows.</param>
     /// <param name="extensionMetadata">Serializable metadata emitted by comparison extensions.</param>
-    public ComparisonResult(
+    internal ComparisonResult(
         ComparisonPlan plan,
         IEnumerable<ComparisonPlanDiagnostic> diagnostics,
         PreparedComparison? prepared = null,

@@ -12,6 +12,7 @@ namespace Spanfold;
 /// <param name="Key">The logical window key.</param>
 /// <param name="Partition">The optional partition identity.</param>
 /// <param name="Range">The uncovered temporal range.</param>
+/// <param name="BoundaryRecordIds">The records bounding this gap.</param>
 public sealed record GapRow(
     string WindowName,
     object Key,
