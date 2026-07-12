@@ -70,6 +70,22 @@ public sealed class OneLevelRollUpRuntimeTests
     }
 
     [Fact]
+    public void InactiveRollUpStateCanBeTrimmedBetweenBatches()
+    {
+        var pipeline = CreatePipeline();
+
+        pipeline.Ingest(new PriceTick("selection-1", "market-1", 0m));
+        pipeline.Ingest(new PriceTick("selection-1", "market-1", 1.01m));
+        pipeline.TrimInactiveState();
+
+        var result = pipeline.Ingest(new PriceTick("selection-1", "market-1", 0m));
+
+        Assert.Contains(result.Emissions, emission =>
+            emission.WindowName == "MarketSuspension"
+            && emission.Kind == WindowTransitionKind.Opened);
+    }
+
+    [Fact]
     public void ActiveChildMovesBetweenParentKeysAtomically()
     {
         var pipeline = CreatePipeline();
