@@ -203,8 +203,20 @@ public sealed class WindowHistoryQuery
     /// <returns>The latest matching window, or null when no window matches.</returns>
     public WindowRecord? LatestWindow()
     {
-        var matches = Windows();
-        return matches.Count == 0 ? null : matches[^1];
+        var windows = this.windows ?? this.history.Windows;
+        WindowRecord? latest = null;
+
+        for (var i = 0; i < windows.Count; i++)
+        {
+            var candidate = windows[i];
+            if (Matches(candidate)
+                && (latest is null || CompareWindows(latest, candidate) < 0))
+            {
+                latest = candidate;
+            }
+        }
+
+        return latest;
     }
 
     /// <summary>
