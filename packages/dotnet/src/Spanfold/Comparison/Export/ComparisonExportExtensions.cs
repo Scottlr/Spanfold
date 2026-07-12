@@ -146,7 +146,7 @@ public static class ComparisonExportExtensions
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(fullPath, result.ExportDebugHtml());
+        WriteAtomically(fullPath, result.ExportDebugHtml());
     }
 
     /// <summary>
@@ -172,6 +172,24 @@ public static class ComparisonExportExtensions
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(fullPath, result.ExportLlmContext());
+        WriteAtomically(fullPath, result.ExportLlmContext());
+    }
+
+    private static void WriteAtomically(string path, string content)
+    {
+        var directory = Path.GetDirectoryName(path)!;
+        var temporary = Path.Combine(directory, "." + Path.GetFileName(path) + ".tmp-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllText(temporary, content);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
     }
 }

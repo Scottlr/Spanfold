@@ -571,18 +571,12 @@ public static class SpanfoldCli
     private static string WriteAuditBundle(ComparisonResult result, string outputDirectory)
     {
         var fullDirectory = Path.GetFullPath(outputDirectory);
-        Directory.CreateDirectory(fullDirectory);
 
         const string jsonFileName = "comparison.json";
         const string markdownFileName = "comparison.md";
         const string debugHtmlFileName = "comparison.html";
         const string llmContextFileName = "comparison.llm.json";
         const string manifestFileName = "manifest.json";
-
-        File.WriteAllText(Path.Combine(fullDirectory, jsonFileName), result.ExportJson());
-        File.WriteAllText(Path.Combine(fullDirectory, markdownFileName), result.ExportMarkdown());
-        File.WriteAllText(Path.Combine(fullDirectory, debugHtmlFileName), result.ExportDebugHtml());
-        File.WriteAllText(Path.Combine(fullDirectory, llmContextFileName), result.ExportLlmContext());
 
         var manifest = ExportAuditManifest(
             result,
@@ -592,7 +586,53 @@ public static class SpanfoldCli
                 debugHtmlFileName,
                 llmContextFileName,
                 manifestFileName));
-        File.WriteAllText(Path.Combine(fullDirectory, manifestFileName), manifest);
+        var parentDirectory = Directory.GetParent(fullDirectory)?.FullName
+            ?? throw new InvalidOperationException("Audit bundle output must have a parent directory.");
+        Directory.CreateDirectory(parentDirectory);
+        var temporaryDirectory = Path.Combine(parentDirectory, "." + Path.GetFileName(fullDirectory) + ".tmp-" + Guid.NewGuid().ToString("N"));
+        var backupDirectory = Path.Combine(parentDirectory, "." + Path.GetFileName(fullDirectory) + ".old-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(temporaryDirectory);
+            File.WriteAllText(Path.Combine(temporaryDirectory, jsonFileName), result.ExportJson());
+            File.WriteAllText(Path.Combine(temporaryDirectory, markdownFileName), result.ExportMarkdown());
+            File.WriteAllText(Path.Combine(temporaryDirectory, debugHtmlFileName), result.ExportDebugHtml());
+            File.WriteAllText(Path.Combine(temporaryDirectory, llmContextFileName), result.ExportLlmContext());
+            File.WriteAllText(Path.Combine(temporaryDirectory, manifestFileName), manifest);
+
+            if (Directory.Exists(fullDirectory))
+            {
+                Directory.Move(fullDirectory, backupDirectory);
+            }
+
+            Directory.Move(temporaryDirectory, fullDirectory);
+            if (Directory.Exists(backupDirectory))
+            {
+                Directory.Delete(backupDirectory, recursive: true);
+            }
+        }
+        catch
+        {
+            if (!Directory.Exists(fullDirectory) && Directory.Exists(backupDirectory))
+            {
+                Directory.Move(backupDirectory, fullDirectory);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryDirectory))
+            {
+                Directory.Delete(temporaryDirectory, recursive: true);
+            }
+
+            if (Directory.Exists(backupDirectory))
+            {
+                Directory.Delete(backupDirectory, recursive: true);
+            }
+        }
+
         return manifest;
     }
 
