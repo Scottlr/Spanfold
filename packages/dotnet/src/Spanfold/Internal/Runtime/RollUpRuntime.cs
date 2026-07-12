@@ -278,7 +278,7 @@ internal sealed class RollUpRuntime<TEvent>
         return this.definition.KeyComparer.Equals(left.Key, right.Key)
             && EqualityComparer<object?>.Default.Equals(left.Source, right.Source)
             && EqualityComparer<object?>.Default.Equals(left.Partition, right.Partition)
-            && string.Equals(left.SegmentContext, right.SegmentContext, StringComparison.Ordinal);
+            && Equals(left.SegmentContext, right.SegmentContext);
     }
 
     private void PropagateToParents(
@@ -307,28 +307,7 @@ internal sealed class RollUpRuntime<TEvent>
         }
     }
 
-    private static string StableSegments(IReadOnlyList<WindowSegment> segments)
-    {
-        if (segments.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var builder = new System.Text.StringBuilder();
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var segment = segments[i];
-            builder
-                .Append(segment.ParentName ?? string.Empty)
-                .Append('/')
-                .Append(segment.Name)
-                .Append('=')
-                .Append(segment.Value)
-                .Append(';');
-        }
-
-        return builder.ToString();
-    }
+    private static SegmentContext StableSegments(IReadOnlyList<WindowSegment> segments) => new(segments);
 
     private static bool SegmentContextsEqual(
         IReadOnlyList<WindowSegment> left,
@@ -418,7 +397,7 @@ internal sealed class RollUpRuntime<TEvent>
         object Key,
         object? Source,
         object? Partition,
-        string SegmentContext);
+        SegmentContext SegmentContext);
 
     private sealed class RollUpStateKeyComparer : IEqualityComparer<RollUpStateKey>
     {
@@ -434,7 +413,7 @@ internal sealed class RollUpRuntime<TEvent>
             return this.keyComparer.Equals(x.Key, y.Key)
                 && EqualityComparer<object?>.Default.Equals(x.Source, y.Source)
                 && EqualityComparer<object?>.Default.Equals(x.Partition, y.Partition)
-                && string.Equals(x.SegmentContext, y.SegmentContext, StringComparison.Ordinal);
+                && Equals(x.SegmentContext, y.SegmentContext);
         }
 
         public int GetHashCode(RollUpStateKey obj)

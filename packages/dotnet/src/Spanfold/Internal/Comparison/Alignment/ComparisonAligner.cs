@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Spanfold;
+using Spanfold.Internal.Keys;
 
 namespace Spanfold.Internal.Comparison;
 
@@ -23,7 +24,8 @@ internal static class ComparisonAligner
                 StableObjectValue(window.Window.Key),
                 StableObjectValue(window.Window.Source),
                 StableObjectValue(window.Window.Partition),
-                StableSegments(window.Segments));
+                StableSegments(window.Segments),
+                new SegmentContext(window.Segments));
         }
 
         Array.Sort(windows, static (left, right) => Compare(left, right));
@@ -195,7 +197,7 @@ internal static class ComparisonAligner
         return string.Equals(first.Window.Window.WindowName, second.Window.Window.WindowName, StringComparison.Ordinal)
             && string.Equals(first.KeySort, second.KeySort, StringComparison.Ordinal)
             && string.Equals(first.PartitionSort, second.PartitionSort, StringComparison.Ordinal)
-            && string.Equals(first.SegmentSort, second.SegmentSort, StringComparison.Ordinal)
+            && first.SegmentContext.Equals(second.SegmentContext)
             && EqualityComparer<object>.Default.Equals(first.Window.Window.Key, second.Window.Window.Key)
             && EqualityComparer<object?>.Default.Equals(first.Window.Window.Partition, second.Window.Window.Partition);
     }
@@ -243,5 +245,6 @@ internal static class ComparisonAligner
         string KeySort,
         string SourceSort,
         string PartitionSort,
-        string SegmentSort);
+        string SegmentSort,
+        SegmentContext SegmentContext);
 }
