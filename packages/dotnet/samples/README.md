@@ -29,7 +29,7 @@ dotnet run --project samples/Spanfold.OperationsExample/Spanfold.OperationsExamp
    windows, then compares the resulting histories.
 5. `Spanfold.DistributedQuorum` uses cohort comparison and source matrices to
    reason about replicated observations.
-6. `Spanfold.SpaceMissionResearch` combines hierarchy, cohorts, tags, live windows,
+6. `Spanfold.SpaceMissionResearch` combines hierarchy, tags, live windows,
    snapshots, and annotations in a more demanding analysis.
 7. `Spanfold.OperationsExample` focuses on practical export workflows.
 
