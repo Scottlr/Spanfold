@@ -55,7 +55,7 @@ internal static class ComparisonExporter
             var row = result.OverlapRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "overlap", i);
+                WriteRowEnvelopeStart(writer, finalities, "overlap", row);
                 WriteOverlapRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -66,7 +66,7 @@ internal static class ComparisonExporter
             var row = result.ResidualRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "residual", i);
+                WriteRowEnvelopeStart(writer, finalities, "residual", row);
                 WriteResidualRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -77,7 +77,7 @@ internal static class ComparisonExporter
             var row = result.MissingRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "missing", i);
+                WriteRowEnvelopeStart(writer, finalities, "missing", row);
                 WriteMissingRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -88,7 +88,7 @@ internal static class ComparisonExporter
             var row = result.CoverageRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "coverage", i);
+                WriteRowEnvelopeStart(writer, finalities, "coverage", row);
                 WriteCoverageRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -99,7 +99,7 @@ internal static class ComparisonExporter
             var row = result.GapRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "gap", i);
+                WriteRowEnvelopeStart(writer, finalities, "gap", row);
                 WriteGapRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -110,7 +110,7 @@ internal static class ComparisonExporter
             var row = result.SymmetricDifferenceRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "symmetricDifference", i);
+                WriteRowEnvelopeStart(writer, finalities, "symmetricDifference", row);
                 WriteSymmetricDifferenceRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -121,7 +121,7 @@ internal static class ComparisonExporter
             var row = result.ContainmentRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "containment", i);
+                WriteRowEnvelopeStart(writer, finalities, "containment", row);
                 WriteContainmentRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -132,7 +132,7 @@ internal static class ComparisonExporter
             var row = result.LeadLagRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "leadLag", i);
+                WriteRowEnvelopeStart(writer, finalities, "leadLag", row);
                 WriteLeadLagRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -143,7 +143,7 @@ internal static class ComparisonExporter
             var row = result.AsOfRows[i];
             yield return ExportJsonLine(writer =>
             {
-                WriteRowEnvelopeStart(writer, finalities, "asOf", i);
+                WriteRowEnvelopeStart(writer, finalities, "asOf", row);
                 WriteAsOfRowFields(writer, row);
                 writer.WriteEndObject();
             });
@@ -341,9 +341,9 @@ internal static class ComparisonExporter
         Utf8JsonWriter writer,
         IReadOnlyDictionary<string, ComparisonRowFinality> finalities,
         string rowType,
-        int index)
+        object row)
     {
-        var rowId = rowType + "[" + index.ToString(CultureInfo.InvariantCulture) + "]";
+        var rowId = ComparisonRowIdentity.Create(rowType, row);
         writer.WriteStartObject();
         writer.WriteString("schema", RowSchema);
         writer.WriteNumber("schemaVersion", SchemaVersion);
@@ -629,7 +629,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.OverlapRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "overlap", i, () => WriteOverlapRowFields(writer, result.OverlapRows[i]));
+            WriteRowObject(writer, finalities, "overlap", result.OverlapRows[i], () => WriteOverlapRowFields(writer, result.OverlapRows[i]));
         }
 
         writer.WriteEndArray();
@@ -637,7 +637,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.ResidualRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "residual", i, () => WriteResidualRowFields(writer, result.ResidualRows[i]));
+            WriteRowObject(writer, finalities, "residual", result.ResidualRows[i], () => WriteResidualRowFields(writer, result.ResidualRows[i]));
         }
 
         writer.WriteEndArray();
@@ -645,7 +645,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.MissingRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "missing", i, () => WriteMissingRowFields(writer, result.MissingRows[i]));
+            WriteRowObject(writer, finalities, "missing", result.MissingRows[i], () => WriteMissingRowFields(writer, result.MissingRows[i]));
         }
 
         writer.WriteEndArray();
@@ -653,7 +653,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.CoverageRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "coverage", i, () => WriteCoverageRowFields(writer, result.CoverageRows[i]));
+            WriteRowObject(writer, finalities, "coverage", result.CoverageRows[i], () => WriteCoverageRowFields(writer, result.CoverageRows[i]));
         }
 
         writer.WriteEndArray();
@@ -661,7 +661,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.GapRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "gap", i, () => WriteGapRowFields(writer, result.GapRows[i]));
+            WriteRowObject(writer, finalities, "gap", result.GapRows[i], () => WriteGapRowFields(writer, result.GapRows[i]));
         }
 
         writer.WriteEndArray();
@@ -669,7 +669,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.SymmetricDifferenceRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "symmetricDifference", i, () => WriteSymmetricDifferenceRowFields(writer, result.SymmetricDifferenceRows[i]));
+            WriteRowObject(writer, finalities, "symmetricDifference", result.SymmetricDifferenceRows[i], () => WriteSymmetricDifferenceRowFields(writer, result.SymmetricDifferenceRows[i]));
         }
 
         writer.WriteEndArray();
@@ -677,7 +677,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.ContainmentRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "containment", i, () => WriteContainmentRowFields(writer, result.ContainmentRows[i]));
+            WriteRowObject(writer, finalities, "containment", result.ContainmentRows[i], () => WriteContainmentRowFields(writer, result.ContainmentRows[i]));
         }
 
         writer.WriteEndArray();
@@ -685,7 +685,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.LeadLagRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "leadLag", i, () => WriteLeadLagRowFields(writer, result.LeadLagRows[i]));
+            WriteRowObject(writer, finalities, "leadLag", result.LeadLagRows[i], () => WriteLeadLagRowFields(writer, result.LeadLagRows[i]));
         }
 
         writer.WriteEndArray();
@@ -693,7 +693,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < result.AsOfRows.Count; i++)
         {
-            WriteRowObject(writer, finalities, "asOf", i, () => WriteAsOfRowFields(writer, result.AsOfRows[i]));
+            WriteRowObject(writer, finalities, "asOf", result.AsOfRows[i], () => WriteAsOfRowFields(writer, result.AsOfRows[i]));
         }
 
         writer.WriteEndArray();
@@ -704,10 +704,10 @@ internal static class ComparisonExporter
         Utf8JsonWriter writer,
         IReadOnlyDictionary<string, ComparisonFinality> finalities,
         string rowType,
-        int index,
+        object row,
         Action writeFields)
     {
-        var rowId = rowType + "[" + index.ToString(CultureInfo.InvariantCulture) + "]";
+        var rowId = ComparisonRowIdentity.Create(rowType, row);
         writer.WriteStartObject();
         writer.WriteString("rowId", rowId);
         writer.WriteString(

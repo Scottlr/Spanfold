@@ -98,7 +98,7 @@ public sealed class ComparisonExportTests
 
         Assert.Equal("result-summary", summary.RootElement.GetProperty("artifact").GetString());
         Assert.Equal("result-row", row.RootElement.GetProperty("artifact").GetString());
-        Assert.Equal("overlap[0]", row.RootElement.GetProperty("rowId").GetString());
+        Assert.StartsWith("overlap:", row.RootElement.GetProperty("rowId").GetString());
         Assert.Equal("Final", row.RootElement.GetProperty("finality").GetString());
         Assert.Equal(1, row.RootElement.GetProperty("version").GetInt32());
     }
@@ -166,7 +166,7 @@ public sealed class ComparisonExportTests
         Assert.Equal("spanfold.comparison.result", root.GetProperty("fullResult").GetProperty("schema").GetString());
         Assert.Equal(2, root.GetProperty("rowDocuments").GetArrayLength());
         Assert.Equal("result-summary", root.GetProperty("rowDocuments")[0].GetProperty("artifact").GetString());
-        Assert.Equal("overlap[0]", root.GetProperty("rowDocuments")[1].GetProperty("rowId").GetString());
+        Assert.StartsWith("overlap:", root.GetProperty("rowDocuments")[1].GetProperty("rowId").GetString());
     }
 
     [Fact]

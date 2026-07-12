@@ -5,5 +5,6 @@ internal enum SnapshotNormalization
 {
     None = 0,
     RecordIds = 1,
-    Default = RecordIds
+    RowIds = 2,
+    Default = RecordIds | RowIds
 }

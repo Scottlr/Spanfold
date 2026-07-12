@@ -32,9 +32,11 @@ public sealed class VirtualClockLiveTests
             () => pipeline.Ingest(new DeviceSignal("device-1", IsOnline: true), source: "provider-a"),
             horizon => RunResidual(pipeline, horizon));
 
-        var entry = Assert.Single(ComparisonChangelog.Create(previous.RowFinalities, current.RowFinalities));
-        Assert.Equal(ComparisonFinality.Revised, entry.Finality);
-        Assert.Equal("residual[0]", entry.SupersedesRowId);
+        var entries = ComparisonChangelog.Create(previous.RowFinalities, current.RowFinalities);
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, entry => entry.Finality == ComparisonFinality.Retracted);
+        Assert.Contains(entries, entry => entry.Finality == ComparisonFinality.Final);
+        Assert.All(entries, entry => Assert.StartsWith("residual:", entry.RowId));
     }
 
     [Fact]

@@ -48,6 +48,11 @@ internal static partial class SnapshotAssert
             .Replace('\r', '\n')
             .TrimEnd();
 
+        if ((normalization & SnapshotNormalization.RowIds) == SnapshotNormalization.RowIds)
+        {
+            normalized = NormalizeRowIds(normalized);
+        }
+
         if ((normalization & SnapshotNormalization.RecordIds) == SnapshotNormalization.RecordIds)
         {
             normalized = NormalizeRecordIds(normalized);
@@ -68,6 +73,25 @@ internal static partial class SnapshotAssert
                 replacement = "<record-id:" + next.ToString(System.Globalization.CultureInfo.InvariantCulture) + ">";
                 ids.Add(match.Value, replacement);
                 next++;
+            }
+
+            return replacement;
+        });
+    }
+
+    private static string NormalizeRowIds(string value)
+    {
+        var nextByType = new Dictionary<string, int>(StringComparer.Ordinal);
+        var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        return RowIdRegex().Replace(value, match =>
+        {
+            if (!replacements.TryGetValue(match.Value, out var replacement))
+            {
+                var type = match.Groups["type"].Value;
+                nextByType.TryGetValue(type, out var next);
+                replacement = type + "[" + next.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]";
+                nextByType[type] = next + 1;
+                replacements.Add(match.Value, replacement);
             }
 
             return replacement;
@@ -120,4 +144,7 @@ internal static partial class SnapshotAssert
 
     [GeneratedRegex("[a-f0-9]{64}", RegexOptions.CultureInvariant)]
     private static partial Regex RecordIdRegex();
+
+    [GeneratedRegex("(?<type>[A-Za-z][A-Za-z0-9]*):[a-f0-9]{64}", RegexOptions.CultureInvariant)]
+    private static partial Regex RowIdRegex();
 }
