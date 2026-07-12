@@ -12,14 +12,13 @@
 
 When a predicate changes — a service goes down, a threshold is crossed, a status flips — Spanfold records that period as a window. When you have multiple sources reporting the same condition, Spanfold tells you exactly where they agreed, diverged, lagged, or left gaps.
 
-## Build the preview
+## Install the preview
 
-The packages are not published to NuGet yet. Build and pack the current preview
-from a repository checkout:
+Install the current .NET preview from NuGet.org, or use the Rust crate from a
+repository checkout:
 
 ```bash
-dotnet build packages/dotnet/Spanfold.slnx
-dotnet pack packages/dotnet/src/Spanfold/Spanfold.csproj -c Release -o artifacts/package
+dotnet add package Spanfold --version 0.1.0-preview.1
 cargo add spanfold --path packages/rust/crates/spanfold
 ```
 
@@ -199,13 +198,12 @@ Auditing a past decision means using only what was knowable at the time — not 
 ## .NET Package
 
 The .NET preview includes the C# API, CLI, testing helpers, samples, benchmarks,
-and package documentation. It is currently built from source; NuGet publication
-has not started.
+and package documentation. Install the packages and global tool from NuGet.org:
 
 ```bash
-dotnet pack packages/dotnet/src/Spanfold/Spanfold.csproj -c Release -o artifacts/package
-dotnet pack packages/dotnet/src/Spanfold.Testing/Spanfold.Testing.csproj -c Release -o artifacts/package
-dotnet pack packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj -c Release -o artifacts/package
+dotnet add package Spanfold --version 0.1.0-preview.1
+dotnet add package Spanfold.Testing --version 0.1.0-preview.1
+dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.1
 ```
 
 → [.NET package README](packages/dotnet/README.md)

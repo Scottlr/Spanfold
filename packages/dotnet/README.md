@@ -48,15 +48,14 @@ The core flow is:
 4. Compare windows across sources or stages.
 5. Export rows, summaries, diagnostics, and explanations.
 
-## Build the preview
+## Install the preview
 
-These packages are not published to NuGet yet. Build them from a repository
-checkout:
+Install the library, optional testing helpers, and CLI tool from NuGet.org:
 
 ```bash
-dotnet build Spanfold.slnx
-dotnet pack src/Spanfold/Spanfold.csproj -c Release -o artifacts/package
-dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj -c Release -o artifacts/package
+dotnet add package Spanfold --version 0.1.0-preview.1
+dotnet add package Spanfold.Testing --version 0.1.0-preview.1
+dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.1
 ```
 
 `Spanfold.Testing` is optional. It is useful in consumer test suites when you want
