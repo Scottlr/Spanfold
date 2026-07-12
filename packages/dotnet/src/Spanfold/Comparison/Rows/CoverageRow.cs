@@ -19,4 +19,13 @@ public sealed record CoverageRow(
     double TargetMagnitude,
     double CoveredMagnitude,
     IReadOnlyList<WindowRecordId> TargetRecordIds,
-    IReadOnlyList<WindowRecordId> AgainstRecordIds);
+    IReadOnlyList<WindowRecordId> AgainstRecordIds,
+    long? ExactTargetMagnitude = null,
+    long? ExactCoveredMagnitude = null)
+{
+    /// <summary>Gets the exact target magnitude when supplied by the runtime.</summary>
+    public long TargetMagnitudeExact => ExactTargetMagnitude ?? checked((long)TargetMagnitude);
+
+    /// <summary>Gets the exact covered magnitude when supplied by the runtime.</summary>
+    public long CoveredMagnitudeExact => ExactCoveredMagnitude ?? checked((long)CoveredMagnitude);
+}

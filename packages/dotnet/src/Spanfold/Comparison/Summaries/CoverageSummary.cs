@@ -15,4 +15,13 @@ public sealed record CoverageSummary(
     object? Partition,
     double TargetMagnitude,
     double CoveredMagnitude,
-    double CoverageRatio);
+    double CoverageRatio,
+    long? ExactTargetMagnitude = null,
+    long? ExactCoveredMagnitude = null)
+{
+    /// <summary>Gets the exact target magnitude when supplied by the runtime.</summary>
+    public long TargetMagnitudeExact => ExactTargetMagnitude ?? checked((long)TargetMagnitude);
+
+    /// <summary>Gets the exact covered magnitude when supplied by the runtime.</summary>
+    public long CoveredMagnitudeExact => ExactCoveredMagnitude ?? checked((long)CoveredMagnitude);
+}
