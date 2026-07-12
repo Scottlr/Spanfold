@@ -53,6 +53,8 @@ internal static class ComparisonAligner
         List<AlignedSegment> segments)
     {
         var boundaries = new List<TemporalPoint>(count * 2);
+        var starts = new List<int>(count);
+        var ends = new List<int>(count);
         for (var i = 0; i < count; i++)
         {
             var range = windows[startIndex + i].Window.Range;
@@ -63,7 +65,12 @@ internal static class ComparisonAligner
 
             boundaries.Add(range.Start);
             boundaries.Add(range.End!.Value);
+            starts.Add(i);
+            ends.Add(i);
         }
+
+        starts.Sort((left, right) => CompareStarts(windows, startIndex, left, right));
+        ends.Sort((left, right) => CompareEnds(windows, startIndex, left, right));
 
         boundaries.Sort(static (left, right) => left.CompareTo(right));
 
@@ -76,6 +83,11 @@ internal static class ComparisonAligner
             }
         }
 
+        var activeTarget = new SortedSet<int>();
+        var activeAgainst = new SortedSet<int>();
+        var startIndexCursor = 0;
+        var endIndexCursor = 0;
+
         for (var i = 0; i < unique.Count - 1; i++)
         {
             var start = unique[i];
@@ -85,31 +97,45 @@ internal static class ComparisonAligner
                 continue;
             }
 
-            var targetIds = new List<WindowRecordId>();
-            var againstIds = new List<WindowRecordId>();
-
-            for (var windowIndex = 0; windowIndex < count; windowIndex++)
+            while (endIndexCursor < ends.Count
+                && windows[startIndex + ends[endIndexCursor]].Window.Range.End!.Value.CompareTo(start) <= 0)
             {
-                var window = windows[startIndex + windowIndex].Window;
-                if (!Covers(window.Range, start, end))
+                var index = ends[endIndexCursor++];
+                activeTarget.Remove(index);
+                activeAgainst.Remove(index);
+            }
+
+            while (startIndexCursor < starts.Count
+                && windows[startIndex + starts[startIndexCursor]].Window.Range.Start.CompareTo(start) <= 0)
+            {
+                var index = starts[startIndexCursor++];
+                var window = windows[startIndex + index].Window;
+                if (window.Range.End!.Value.CompareTo(start) <= 0)
                 {
                     continue;
                 }
 
                 if (window.Side == ComparisonSide.Target)
                 {
-                    targetIds.Add(window.RecordId);
+                    activeTarget.Add(index);
                 }
                 else
                 {
-                    againstIds.Add(window.RecordId);
+                    activeAgainst.Add(index);
                 }
             }
 
-            if (targetIds.Count == 0 && againstIds.Count == 0)
+            if (activeTarget.Count == 0 && activeAgainst.Count == 0)
             {
                 continue;
             }
+
+            var targetIds = activeTarget
+                .Select(index => windows[startIndex + index].Window.RecordId)
+                .ToArray();
+            var againstIds = activeAgainst
+                .Select(index => windows[startIndex + index].Window.RecordId)
+                .ToArray();
 
             segments.Add(new AlignedSegment(
                 scope.WindowName,
@@ -120,6 +146,28 @@ internal static class ComparisonAligner
                 againstIds.ToArray(),
                 scope.Segments));
         }
+    }
+
+    private static int CompareStarts(
+        SortableNormalizedWindow[] windows,
+        int startIndex,
+        int left,
+        int right)
+    {
+        var result = windows[startIndex + left].Window.Range.Start.CompareTo(
+            windows[startIndex + right].Window.Range.Start);
+        return result != 0 ? result : left.CompareTo(right);
+    }
+
+    private static int CompareEnds(
+        SortableNormalizedWindow[] windows,
+        int startIndex,
+        int left,
+        int right)
+    {
+        var result = windows[startIndex + left].Window.Range.End!.Value.CompareTo(
+            windows[startIndex + right].Window.Range.End!.Value);
+        return result != 0 ? result : left.CompareTo(right);
     }
 
     private static bool Covers(TemporalRange range, TemporalPoint start, TemporalPoint end)
