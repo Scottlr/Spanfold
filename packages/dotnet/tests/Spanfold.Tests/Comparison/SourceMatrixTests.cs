@@ -87,6 +87,18 @@ public sealed class SourceMatrixTests
         Assert.False(matrix.TryGetCell("provider-a", "provider-c", out _));
     }
 
+    [Fact]
+    public void DuplicateSourceIdentitiesAreRejected()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            BuildHistory().CompareSources(
+                "Provider matrix",
+                "DeviceOffline",
+                ["provider-a", "provider-a"]));
+
+        Assert.Contains("must be unique", exception.Message);
+    }
+
     private static WindowHistory BuildHistory()
     {
         var pipeline = Spanfold
