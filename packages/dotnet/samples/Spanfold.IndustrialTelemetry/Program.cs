@@ -54,11 +54,15 @@ var riskComparison = processPipeline.History
 var silence = livenessPipeline.History.Query()
     .Window("SensorSilent")
     .ClosedWindows();
+var openSilence = livenessPipeline.History.Query()
+    .Window("SensorSilent")
+    .OpenWindows();
 
 Console.WriteLine("Industrial telemetry");
 Console.WriteLine("risk overlap rows: " + riskComparison.OverlapRows.Count);
 Console.WriteLine("risk lead/lag rows: " + riskComparison.LeadLagRows.Count);
 Console.WriteLine("closed silence windows: " + silence.Count);
+Console.WriteLine("open silence windows: " + openSilence.Count);
 
 void PrintScenario()
 {
@@ -71,7 +75,8 @@ void PrintScenario()
           sensor-b: cavitation risk 03..05
 
         liveness:
-          sensor-b goes silent after 00:45 and recovers at 03:00
+          both sensors go silent after 00:45; sensor-b recovers at 03:00
+          while sensor-a remains silent
 
         This separates "bad process state" from "no signal".
 
