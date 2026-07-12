@@ -131,12 +131,7 @@ internal static class ComparisonAligner
 
     private static string StableObjectValue(object? value)
     {
-        return value switch
-        {
-            null => "<null>",
-            IFormattable formattable => value.GetType().FullName + ":" + formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => value.GetType().FullName + ":" + value
-        };
+        return CanonicalValueFormatter.Format(value);
     }
 
     private static int Compare(SortableNormalizedWindow left, SortableNormalizedWindow right)

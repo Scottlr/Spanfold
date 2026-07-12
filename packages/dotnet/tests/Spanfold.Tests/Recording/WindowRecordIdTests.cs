@@ -67,6 +67,14 @@ public sealed class WindowRecordIdTests
         Assert.Matches("^[0-9a-f]+$", id);
     }
 
+    [Fact]
+    public void UnsupportedIdentityValuesAreRejected()
+    {
+        var window = new OpenWindow("DeviceOffline", new UnsupportedIdentity(), StartPosition: 10);
+
+        Assert.Throws<ArgumentException>(() => _ = window.Id);
+    }
+
     private static WindowHistory BuildOfflineHistory()
     {
         var pipeline = Spanfold
@@ -84,4 +92,9 @@ public sealed class WindowRecordIdTests
     }
 
     private sealed record DeviceSignal(string DeviceId, bool IsOnline);
+
+    private sealed class UnsupportedIdentity
+    {
+        public override string ToString() => "same text for every instance";
+    }
 }
