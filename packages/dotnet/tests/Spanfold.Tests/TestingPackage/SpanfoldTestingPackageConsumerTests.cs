@@ -32,7 +32,18 @@ public sealed class SpanfoldTestingPackageConsumerTests
 
         SpanfoldSnapshot.AssertEqual(
             "ids: <record-id:1> <record-id:2>\n",
-            "ids: " + firstId + " " + secondId);
+            "ids: " + firstId + " " + secondId,
+            normalizeUnlabeledHex: true);
+    }
+
+    [Fact]
+    public void SnapshotHelperPreservesUnrelatedHexTokensByDefault()
+    {
+        const string first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const string second = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        Assert.Throws<SpanfoldAssertionException>(() =>
+            SpanfoldSnapshot.AssertEqual("hash: " + first, "hash: " + second));
     }
 
     [Fact]
