@@ -6,6 +6,11 @@ namespace Spanfold;
 /// <summary>
 /// Processes events through configured windows and roll-ups.
 /// </summary>
+/// <remarks>
+/// A pipeline instance has single-writer, non-reentrant semantics. Callers must
+/// serialize ingestion and history queries. An attempt to ingest from another
+/// thread or from an emission callback while an ingestion is active fails fast.
+/// </remarks>
 /// <typeparam name="TEvent">The event type consumed by the pipeline.</typeparam>
 public sealed class EventPipeline<TEvent>
 {
@@ -14,6 +19,7 @@ public sealed class EventPipeline<TEvent>
     private readonly Dictionary<string, WindowCallbackSet<TEvent>> windowCallbacks;
     private readonly Func<TEvent, DateTimeOffset>? eventTimeSelector;
     private long processingPosition;
+    private int ingestionInProgress;
 
     internal EventPipeline(
         IReadOnlyList<WindowDefinition<TEvent>> windows,
@@ -84,56 +90,69 @@ public sealed class EventPipeline<TEvent>
     /// <returns>The emissions produced by the event.</returns>
     public IngestionResult<TEvent> Ingest(TEvent @event, object? source, object? partition)
     {
-        var eventTime = this.eventTimeSelector?.Invoke(@event);
-        this.processingPosition++;
-        List<WindowEmission<TEvent>>? emissions = null;
-
-        foreach (var runtime in this.runtimes)
+        if (Interlocked.Exchange(ref this.ingestionInProgress, 1) != 0)
         {
-            runtime.Ingest(@event, source, partition, ref emissions);
+            throw new InvalidOperationException(
+                "EventPipeline ingestion is single-writer and non-reentrant; complete the active ingestion before calling Ingest again.");
         }
 
-        var result = new IngestionResult<TEvent>(
-            emissions is null ? [] : emissions.ToArray());
-
-        History.Record(
-            result.Emissions,
-            this.processingPosition,
-            eventTime);
-
-        List<Exception>? callbackErrors = null;
-        foreach (var emission in result.Emissions)
+        try
         {
-            try
+            var eventTime = this.eventTimeSelector?.Invoke(@event);
+            this.processingPosition++;
+            List<WindowEmission<TEvent>>? emissions = null;
+
+            foreach (var runtime in this.runtimes)
             {
-                InvokeWindowCallbacks(emission);
-            }
-            catch (Exception exception)
-            {
-                callbackErrors ??= [];
-                callbackErrors.Add(exception);
+                runtime.Ingest(@event, source, partition, ref emissions);
             }
 
-            foreach (var callback in this.emissionCallbacks)
+            var result = new IngestionResult<TEvent>(
+                emissions is null ? [] : emissions.ToArray());
+
+            History.Record(
+                result.Emissions,
+                this.processingPosition,
+                eventTime);
+
+            List<Exception>? callbackErrors = null;
+            foreach (var emission in result.Emissions)
             {
                 try
                 {
-                    callback(emission);
+                    InvokeWindowCallbacks(emission);
                 }
                 catch (Exception exception)
                 {
                     callbackErrors ??= [];
                     callbackErrors.Add(exception);
                 }
+
+                foreach (var callback in this.emissionCallbacks)
+                {
+                    try
+                    {
+                        callback(emission);
+                    }
+                    catch (Exception exception)
+                    {
+                        callbackErrors ??= [];
+                        callbackErrors.Add(exception);
+                    }
+                }
             }
-        }
 
-        if (callbackErrors is not null)
+            if (callbackErrors is not null)
+            {
+                throw new IngestionCallbackException<TEvent>(result, callbackErrors);
+            }
+
+            return result;
+        }
+        finally
         {
-            throw new IngestionCallbackException<TEvent>(result, callbackErrors);
+            Volatile.Write(ref this.ingestionInProgress, 0);
         }
-
-        return result;
     }
 
     /// <summary>
