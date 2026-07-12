@@ -74,7 +74,13 @@ public static class SpanfoldCli
 
             return 2;
         }
-        catch (Exception exception) when (exception is IOException or JsonException or ArgumentException or InvalidOperationException)
+        catch (Exception exception) when (
+            exception is IOException
+                or JsonException
+                or ArgumentException
+                or InvalidOperationException
+                or FormatException
+                or OverflowException)
         {
             WriteError(stderr, exception.Message);
             return 2;
