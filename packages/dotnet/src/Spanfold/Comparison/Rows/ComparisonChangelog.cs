@@ -54,7 +54,8 @@ public static class ComparisonChangelog
                 previousRow.Version + 1,
                 ComparisonFinality.Revised,
                 previousRow.RowId,
-                "Row metadata changed from " + previousRow.Finality + " to " + currentRow.Finality + "."));
+                currentRow.Reason,
+                currentRow.Finality));
         }
 
         foreach (var previousRow in previousByKey.Values.OrderBy(static row => row.RowType, StringComparer.Ordinal).ThenBy(static row => row.RowId, StringComparer.Ordinal))
@@ -99,10 +100,14 @@ public static class ComparisonChangelog
                 continue;
             }
 
+            var resultingFinality = entry.ResultFinality
+                ?? (entry.Finality == ComparisonFinality.Revised
+                    ? ComparisonFinality.Final
+                    : entry.Finality);
             active[key] = new ComparisonRowFinality(
                 entry.RowType,
                 entry.RowId,
-                entry.Finality == ComparisonFinality.Revised ? ComparisonFinality.Final : entry.Finality,
+                resultingFinality,
                 entry.Reason,
                 entry.Version,
                 entry.SupersedesRowId);

@@ -9,10 +9,12 @@ namespace Spanfold;
 /// <param name="Finality">The finality state represented by the change.</param>
 /// <param name="SupersedesRowId">The prior row identifier superseded by this change, when any.</param>
 /// <param name="Reason">A short human-readable revision reason.</param>
+/// <param name="ResultFinality">The resulting row finality when this is a revision.</param>
 public sealed record ComparisonChangelogEntry(
     string RowType,
     string RowId,
     int Version,
     ComparisonFinality Finality,
     string? SupersedesRowId,
-    string Reason);
+    string Reason,
+    ComparisonFinality? ResultFinality = null);

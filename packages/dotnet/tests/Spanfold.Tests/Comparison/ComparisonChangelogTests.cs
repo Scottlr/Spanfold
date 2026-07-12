@@ -71,6 +71,25 @@ public sealed class ComparisonChangelogTests
     }
 
     [Fact]
+    public void ChangelogReplayPreservesFinalToProvisionalRevision()
+    {
+        var previous = new[]
+        {
+            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Final, "closed")
+        };
+        var current = new[]
+        {
+            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Provisional, "reopened")
+        };
+
+        var replayed = ComparisonChangelog.Replay(previous, ComparisonChangelog.Create(previous, current));
+
+        var row = Assert.Single(replayed);
+        Assert.Equal(ComparisonFinality.Provisional, row.Finality);
+        Assert.Equal("reopened", row.Reason);
+    }
+
+    [Fact]
     public void RowVersionsAreDeterministic()
     {
         var previous = new[]
