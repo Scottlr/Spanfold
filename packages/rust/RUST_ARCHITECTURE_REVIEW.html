@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — Spanfold Rust</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      :root { color-scheme: light; }
+      html { scroll-behavior: smooth; }
+      body { background: #f7f5f0; }
+      .seam-line { border-top: 2px dashed #64748b; }
+      .deep { background: linear-gradient(145deg, #0f172a, #1e293b); color: white; }
+      .module-box { border: 1px solid #cbd5e1; background: white; border-radius: .65rem; }
+      .leak { color: #b91c1c; border-color: #fca5a5; background: #fff7f7; }
+      .internal { border: 1px dashed rgba(255,255,255,.38); background: rgba(255,255,255,.08); }
+      .arrow { color: #64748b; font-weight: 800; }
+      code { overflow-wrap: anywhere; }
+      .mass-interface { background: #fee2e2; border: 1px solid #fca5a5; }
+      .mass-implementation { background: #e2e8f0; border: 1px solid #cbd5e1; }
+      .mass-deep { background: #1e293b; color: white; }
+      @media print {
+        .break-avoid { break-inside: avoid; }
+        body { background: white; }
+      }
+    </style>
+  </head>
+  <body class="text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-5 py-10 md:px-8 md:py-14 space-y-12">
+      <header class="space-y-7">
+        <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div class="text-xs uppercase tracking-[.22em] text-emerald-700 font-bold">Architecture review</div>
+            <h1 class="mt-2 text-4xl md:text-5xl font-serif tracking-tight">Spanfold Rust</h1>
+          </div>
+          <div class="text-sm text-slate-600 md:text-right">
+            <div>12 July 2026 · HEAD <code class="font-mono">7f39c18</code></div>
+            <div>Read-only code audit · report stored in repository</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="module-box p-4"><div class="text-3xl font-bold">50</div><div class="text-xs uppercase tracking-wider text-slate-500">Rust files</div></div>
+          <div class="module-box p-4"><div class="text-3xl font-bold">19,593</div><div class="text-xs uppercase tracking-wider text-slate-500">Lines incl. tests/example</div></div>
+          <div class="module-box p-4"><div class="text-3xl font-bold text-red-700">4</div><div class="text-xs uppercase tracking-wider text-slate-500">God-file risks</div></div>
+          <div class="module-box p-4"><div class="text-3xl font-bold text-emerald-700">Targeted</div><div class="text-xs uppercase tracking-wider text-slate-500">Trait verdict</div></div>
+        </div>
+
+        <div class="module-box p-4 md:p-5">
+          <div class="text-xs uppercase tracking-wider font-bold text-slate-500">Legend</div>
+          <div class="mt-3 flex flex-wrap gap-x-6 gap-y-3 text-sm">
+            <span class="inline-flex items-center gap-2"><span class="inline-block h-4 w-8 rounded border border-slate-300 bg-white"></span>module</span>
+            <span class="inline-flex items-center gap-2"><span class="inline-block w-8 border-t-2 border-dashed border-slate-500"></span>seam</span>
+            <span class="inline-flex items-center gap-2"><span class="text-red-700 font-black">→</span>leakage</span>
+            <span class="inline-flex items-center gap-2"><span class="inline-block h-4 w-8 rounded bg-slate-900"></span>deep module</span>
+          </div>
+        </div>
+      </header>
+
+      <section id="audit-reconciliation" class="module-box border-amber-300 bg-amber-50 p-5 md:p-6">
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <h2 class="text-2xl font-serif">Audit ledger reconciliation</h2>
+          <span class="rounded-full bg-amber-200 px-3 py-1 text-xs font-bold uppercase tracking-wider text-amber-950">claims need reopening</span>
+        </div>
+        <div class="mt-5 grid gap-3 md:grid-cols-2 text-sm">
+          <div class="rounded-lg border border-amber-200 bg-white p-4"><code>RUST-072</code> is partial: plan, preparation, alignment, pipeline runtime, and history queries remain concentrated.</div>
+          <div class="rounded-lg border border-amber-200 bg-white p-4"><code>RUST-076</code> relocated the CLI monolith: <code>main.rs</code> shrank, but <code>workflow.rs</code> became 1,045 lines.</div>
+          <div class="rounded-lg border border-red-200 bg-red-50 p-4"><code>RUST-087</code> conflicts with current code: CLI audit artifacts are still written directly and sequentially.</div>
+          <div class="rounded-lg border border-red-200 bg-red-50 p-4"><code>RUST-077/078</code> are partial: stringified input I/O still becomes exit class 2 instead of 3.</div>
+          <div class="rounded-lg border border-amber-200 bg-white p-4"><code>RUST-065/115</code> are partial: derived/manual result serializers coexist, and the normal/live export method matrix remains.</div>
+          <div class="rounded-lg border border-red-200 bg-red-50 p-4"><code>RUST-089</code> conflicts with <code>main.rs:29</code>, which still says “Production high-throughput”.</div>
+        </div>
+      </section>
+
+      <section id="candidates" class="space-y-10">
+        <article id="comparison-engine" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-700">in-process</span>
+            </div>
+            <h2 class="text-3xl font-serif">1. Deepen the comparison engine around canonical phases</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              packages/rust/crates/spanfold/src/comparison.rs:25–2725<br />
+              packages/rust/crates/spanfold/src/comparison/{rows,comparators,finality}.rs<br />
+              packages/rust/crates/spanfold/src/{builders,fixture,explain}.rs<br />
+              packages/rust/specs/017-idiomatic-rust-architecture-api-design.md:130–150
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="mb-2 text-xs font-bold uppercase tracking-wider text-red-700">Before</div>
+                <pre class="mermaid">
+flowchart TB
+  C[comparison.rs · 2,725 production lines]
+  C --> S[selectors]
+  C --> P[plan + validation]
+  C --> N[prepare + normalize]
+  C --> A[alignment]
+  C --> E[execution + materialization]
+  R[rows.rs] -. super::* .-> C
+  K[comparators.rs] -. super::* .-> C
+  F[finality.rs] -. super::* .-> C
+                </pre>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700">After</div>
+                <pre class="mermaid">
+flowchart TB
+  I[small comparison interface] --> X[execution]
+  X --> P[canonical plan]
+  X --> N[preparation]
+  N --> A[alignment]
+  X --> C[comparator families]
+  X --> R[canonical result]
+  D[typed diagnostics] --> P
+  D --> N
+  classDef deep fill:#1e293b,color:#fff,stroke:#0f172a,stroke-width:2px;
+  class X,P,N,A,C,R,D deep;
+                </pre>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">Six independent change axes share one implementation, while child modules depend on an implicit parent-wide interface.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">Keep the public comparison interface stable; move selector, canonical plan, diagnostics, preparation, alignment, execution, and phase tests behind explicit private seams.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">The checked-in Rust design already prescribes this layout; the ledger closed the finding before completing it.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>locality: invariants stay together</li><li>leverage: facade stays stable</li><li>tests follow each phase</li><li>explicit internal dependencies</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="canonical-result" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-700">in-process</span>
+            </div>
+            <h2 class="text-3xl font-serif">2. Make result and phase artifacts canonical and typed</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              comparison/rows.rs:462–608 · comparison.rs:1543–1666, 1803–1837<br />
+              export.rs:160–223, 674–778 · export/debug.rs:60–109 · testing.rs:219–233
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-red-700">Before · shallow result</div>
+                <div class="mt-4 space-y-2">
+                  <div class="mass-interface rounded-lg p-3 text-sm">Interface: <code>rows</code> + nine <code>*_rows</code> fields + <code>Value</code> artifacts</div>
+                  <div class="mass-implementation rounded-lg p-3 text-sm">Implementation: synchronize fields, serialize early, inspect string keys later</div>
+                  <div class="text-center text-red-700 font-bold">new comparator → 9 files</div>
+                </div>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">After · deep result</div>
+                <div class="mt-4 space-y-2">
+                  <div class="rounded-lg border border-emerald-300 bg-white p-2 text-sm">Small interface: canonical <code>ComparisonRows</code> + typed artifacts</div>
+                  <div class="mass-deep rounded-lg p-7 text-sm">
+                    <div class="font-bold">Deep implementation</div>
+                    <div class="mt-2 text-slate-300">compatibility accessors · row-family traversal · finality · export projection</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">The same rows have two public representations, while typed prepared/aligned artifacts become dynamic JSON inside the core result.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">Treat <code>ComparisonRows</code> as canonical, retain typed artifacts until the export seam, and expose compatibility views without parallel state.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">Adding <code>AsOf</code> is hard-coded across comparison, finality, export, debug, testing, CLI, and root re-exports.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>one row source of truth</li><li>typed artifacts stay typed</li><li>exports stop key probing</li><li>comparator fan-out shrinks</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="recording-kernel" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-700">in-process</span>
+            </div>
+            <h2 class="text-3xl font-serif">3. Share one event-to-window recording module</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              pipeline.rs:852–1377 · spanfold-cli/workflow.rs:213–387, 907–933
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="mb-2 text-xs font-bold uppercase tracking-wider text-red-700">Before</div>
+                <pre class="mermaid">
+flowchart LR
+  P[EventPipeline] --> R1[core lifecycle]
+  J[JSONL] --> R2[CLI lifecycle]
+  C[CSV] --> R2
+  R1 --> H1[WindowHistory]
+  R2 --> H2[ImportedWindow]
+  R1 -. tag update .-> T1[kept]
+  R2 -. tag update .-> T2[dropped]
+                </pre>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700">After</div>
+                <pre class="mermaid">
+flowchart LR
+  P[EventPipeline adapter] --> O[typed observation]
+  J[JSONL adapter] --> O
+  C[CSV adapter] --> O
+  O --> R[deep recording module]
+  R --> H[canonical windows]
+  classDef deep fill:#1e293b,color:#fff,stroke:#0f172a,stroke-width:2px;
+  class R deep;
+                </pre>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">Core and CLI implement the same lifecycle separately because the core path owns its processing position.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">Deepen one recording implementation around typed observations at explicit temporal points; pipeline and input formats become adapters.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">Core updates active tags; the CLI continues without updating them when segments are unchanged.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>locality: one state machine</li><li>fix once, both paths</li><li>explicit temporal ownership</li><li>no trait hierarchy needed</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="pipeline" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-700">in-process</span>
+            </div>
+            <h2 class="text-3xl font-serif">4. Separate pipeline definition from runtime state</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              pipeline.rs:15–1651 · specs/007-pipeline-runtime-and-definition-builders.md:24–118<br />
+              docs/design.md:7–20
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-red-700">Before · method matrix</div>
+                <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <div class="module-box p-2">track_window</div><div class="module-box p-2">+ options</div>
+                  <div class="module-box p-2">+ metadata</div><div class="module-box p-2">+ both</div>
+                  <div class="module-box p-2">window</div><div class="module-box p-2">four variants</div>
+                  <div class="module-box p-2">roll_up</div><div class="module-box p-2">four variants</div>
+                </div>
+                <div class="mt-3 rounded-lg border border-red-200 bg-white p-3 text-sm">Same file also owns validation, projections, callbacks, runtime keys, roll-up recursion, open/close state, and emissions.</div>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">After · one deep pipeline interface</div>
+                <div class="mt-4 rounded-xl deep p-5">
+                  <div class="rounded-lg bg-white p-2 text-center text-sm font-bold text-slate-900">narrow definition interface</div>
+                  <div class="seam-line my-4"></div>
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div class="internal rounded p-3">immutable definitions</div><div class="internal rounded p-3">definition validation</div>
+                    <div class="internal rounded p-3">runtime state</div><div class="internal rounded p-3">roll-up projection</div>
+                    <div class="internal rounded p-3">recording kernel</div><div class="internal rounded p-3">emission callbacks</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">A combinatorial public builder and the mutable runtime share one 1,651-line production file.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">Use one definition-building path, then isolate immutable definition, validation, runtime, state, roll-up, and recording modules behind the current facade.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">The Rust pipeline spec already targets a configuration closure, while the design notes call the builder intentionally narrow.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>new options add no matrix</li><li>runtime tests one seam</li><li>named state replaces tuples</li><li><code>Fn</code> adapters remain valid</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="history" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-amber-800">local-substitutable</span>
+            </div>
+            <h2 class="text-3xl font-serif">5. Deepen history queries behind one private seam</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              records.rs:13–1900 · records_tests.rs<br />
+              WindowHistoryRefQuery:1030–1167 · WindowHistoryQuery:1169–1351 · WindowSnapshotQuery:1361–1479
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-red-700">Before · repeated interface</div>
+                <div class="mt-4 space-y-2 text-sm">
+                  <div class="module-box p-3">borrowed query: where_window/key/source/partition/segment/tag</div>
+                  <div class="module-box p-3">owned query: where_window/key/source/partition/segment/tag</div>
+                  <div class="module-box p-3">snapshot query: where_window/key/source/partition/segment/tag</div>
+                  <div class="text-center text-red-700 font-bold">same rules, three implementations</div>
+                </div>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">After · shared query depth</div>
+                <div class="mt-4 rounded-xl deep p-5">
+                  <div class="rounded-lg bg-white p-2 text-center text-sm font-bold text-slate-900">one query vocabulary</div>
+                  <div class="seam-line my-4"></div>
+                  <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div class="internal rounded p-3">borrowed adapter</div><div class="internal rounded p-3">owned adapter</div><div class="internal rounded p-3">snapshot adapter</div>
+                  </div>
+                  <div class="mt-3 internal rounded p-3 text-center text-xs">shared filters · ordering · summaries</div>
+                </div>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">Record DTOs, serde invariants, storage, annotations, interval analysis, three query implementations, summaries, and fixtures share one module; foundational records also import comparison finality and forward into analytics.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">Separate model, history, query, snapshot, annotation, and summary implementation; move analytics and fixtures to their owners and share filter semantics across the three real adapters.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">The borrowed query fixed clone cost, but the owned and snapshot interfaces preserve duplicated behavior and public churn.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>one filter implementation</li><li>locality: history invariants</li><li>terminal materialization only</li><li>three adapters justify seam</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="cli-import" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-indigo-800">ports &amp; adapters</span>
+            </div>
+            <h2 class="text-3xl font-serif">6. Turn CLI workflow into adapters around compiled import plans</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              spanfold-cli/workflow.rs:1–1045 · spanfold-cli/main.rs:21–319<br />
+              specs/014-cli-ergonomics-imports-audit-workflows.md:73–127
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-red-700">Before</div>
+                <div class="mt-4 relative space-y-2 text-sm">
+                  <div class="module-box leak p-3">workflow.rs imports <code>super::*</code></div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div class="module-box p-3">JSONL loop</div><div class="module-box p-3">CSV loop</div>
+                    <div class="module-box p-3">raw map validation</div><div class="module-box p-3">field parser per event</div>
+                    <div class="module-box p-3">predicate option bag</div><div class="module-box p-3"><code>String</code> errors</div>
+                  </div>
+                </div>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-emerald-700">After</div>
+                <div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
+                  <div class="space-y-2"><div class="module-box p-3">JSONL adapter</div><div class="module-box p-3">CSV adapter</div></div>
+                  <div class="arrow">→</div>
+                  <div class="deep rounded-xl p-4"><div class="font-bold">compiled import module</div><div class="mt-2 text-slate-300">typed field paths · one predicate · typed errors · recording module</div></div>
+                </div>
+                <div class="mt-3 flex items-center justify-center gap-2 text-xs"><span class="arrow">→</span><div class="module-box p-3">Vec / JSONL sink adapters</div></div>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">Moving work out of <code>main.rs</code> created a second monolith whose interface still leaks strings and parent imports.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">Keep a small command workflow facade; isolate raw input adapters, compile maps once, use typed errors, and normalize all windows once.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">Field paths are reparsed for every event, and stringified filesystem errors are classified as input errors.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>two sources justify seam</li><li>two sinks already work</li><li>typed errors preserve class</li><li>maps compile once</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="audit-bundle" class="break-avoid module-box overflow-hidden shadow-sm">
+          <div class="p-5 md:p-7 space-y-5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800">Strong</span>
+              <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-indigo-800">ports &amp; adapters</span>
+            </div>
+            <h2 class="text-3xl font-serif">7. Give audit artifacts one transactional module</h2>
+            <div class="font-mono text-xs text-slate-600 leading-6">
+              export.rs:29–779 · export/debug.rs · builders.rs:303–371<br />
+              spanfold-cli/workflow.rs:10–60
+            </div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4">
+                <div class="mb-2 text-xs font-bold uppercase tracking-wider text-red-700">Before</div>
+                <pre class="mermaid">
+flowchart TB
+  B[comparison builder] --> C[core configured bundle]
+  C --> A[atomic helper]
+  CLI[CLI audit workflow] --> J[JSON write]
+  CLI --> M[Markdown write]
+  CLI --> L[LLM write]
+  CLI --> H[HTML write]
+  CLI --> X[manifest write]
+  CLI -. bypasses .-> A
+                </pre>
+              </div>
+              <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700">After</div>
+                <pre class="mermaid">
+flowchart TB
+  B[builder adapter] --> Q[audit bundle request]
+  CLI[CLI adapter] --> Q
+  Q --> D[deep audit artifact module]
+  D --> F[format adapters]
+  D --> M[canonical manifest]
+  D --> A[atomic artifact-set sink]
+  classDef deep fill:#1e293b,color:#fff,stroke:#0f172a,stroke-width:2px;
+  class D deep;
+                </pre>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+              <div><div class="font-bold">Problem</div><p class="mt-1 text-slate-600">Encoding, row counts, manifest schema, filesystem writes, builder execution, and stdout ownership are duplicated across seams.</p></div>
+              <div><div class="font-bold">Solution</div><p class="mt-1 text-slate-600">One module owns canonical projection, selected format adapters, manifest construction, and atomic artifact-set commit; callers own presentation.</p></div>
+              <div><div class="font-bold">Evidence</div><p class="mt-1 text-slate-600">The core has an atomic helper, while the CLI writes final files sequentially despite the ledger claiming shared atomicity.</p></div>
+            </div>
+            <ul class="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <li>locality: artifact contract</li><li>fix atomicity once</li><li>one row-count projection</li><li>new format adds adapter</li>
+            </ul>
+          </div>
+        </article>
+      </section>
+
+      <section id="trait-verdict" class="module-box p-5 md:p-7">
+        <h2 class="text-3xl font-serif">Trait verdict</h2>
+        <div class="mt-5 overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead><tr class="border-b border-slate-300 text-xs uppercase tracking-wider text-slate-500"><th class="py-3 pr-5">Area</th><th class="py-3 pr-5">Verdict</th><th class="py-3">Why</th></tr></thead>
+            <tbody class="divide-y divide-slate-200">
+              <tr><td class="py-3 pr-5 font-mono">Comparator</td><td class="py-3 pr-5 text-emerald-700 font-bold">Keep enum</td><td class="py-3">Closed, serializable set; a public trait is hypothetical until third-party execution exists.</td></tr>
+              <tr><td class="py-3 pr-5 font-mono">Selectors/callbacks</td><td class="py-3 pr-5 text-emerald-700 font-bold">Keep Fn traits</td><td class="py-3"><code>Arc&lt;dyn Fn&gt;</code> is already trait-based dynamic behavior where heterogeneous closures are real.</td></tr>
+              <tr><td class="py-3 pr-5 font-mono">ImportedWindowSink</td><td class="py-3 pr-5 text-emerald-700 font-bold">Keep trait</td><td class="py-3">Two adapters—collecting and JSONL—make the seam real.</td></tr>
+              <tr><td class="py-3 pr-5 font-mono">Event sources</td><td class="py-3 pr-5 text-amber-700 font-bold">Worth exploring</td><td class="py-3">JSONL and CSV are two real adapters feeding the same compiled import module.</td></tr>
+              <tr><td class="py-3 pr-5 font-mono">History views</td><td class="py-3 pr-5 text-amber-700 font-bold">Private seam</td><td class="py-3">Borrowed, owned, and snapshot views repeat one query vocabulary; keep any trait internal.</td></tr>
+              <tr><td class="py-3 pr-5 font-mono">Storage</td><td class="py-3 pr-5 text-slate-600 font-bold">Do not add</td><td class="py-3">One in-memory adapter means a storage trait would be hypothetical.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="keep" class="module-box p-5 md:p-7">
+        <h2 class="text-3xl font-serif">Large does not mean god file</h2>
+        <div class="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 text-sm">
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><code>comparison/rows.rs</code><br /><span class="text-slate-600">Cohesive schema module; passes deletion test.</span></div>
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><code>comparison/comparators.rs</code><br /><span class="text-slate-600">Cohesive algorithms; split only by interval/transition growth.</span></div>
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><code>comparison/finality.rs</code><br /><span class="text-slate-600">Deep identity/finality module; keep.</span></div>
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><code>temporal.rs</code> / <code>primitive.rs</code><br /><span class="text-slate-600">Strong value modules with focused invariants.</span></div>
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><code>liveness.rs</code> / <code>changelog.rs</code><br /><span class="text-slate-600">Focused state machines; no split pressure.</span></div>
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><code>fixture.rs</code> / <code>explain.rs</code><br /><span class="text-slate-600">Cohesive adapters; possible testing crate later.</span></div>
+          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4"><code>analytics.rs</code><br /><span class="text-slate-600">Two substantial analyses; split only if a third family arrives.</span></div>
+          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4"><code>npc_stress_test</code><br /><span class="text-slate-600">Standalone teaching artifact; do not drive production abstractions.</span></div>
+          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4"><code>lib.rs</code><br /><span class="text-slate-600">Useful compatibility facade; narrow root re-exports over time.</span></div>
+        </div>
+      </section>
+
+      <section id="top-recommendation" class="rounded-2xl deep p-7 md:p-9 shadow-xl">
+        <div class="text-xs uppercase tracking-[.22em] text-emerald-300 font-bold">Top recommendation</div>
+        <h2 class="mt-3 text-3xl md:text-4xl font-serif"><a class="underline decoration-emerald-400 underline-offset-4" href="#comparison-engine">Deepen the comparison engine first</a></h2>
+        <p class="mt-4 max-w-3xl text-slate-300">It is the largest remaining concentration, the intended seams are already documented, and the existing root interface lets the work proceed incrementally without a public rewrite.</p>
+      </section>
+    </main>
+  </body>
+</html>
