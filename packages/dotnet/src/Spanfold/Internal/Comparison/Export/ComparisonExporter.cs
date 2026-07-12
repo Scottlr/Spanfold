@@ -354,7 +354,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray("analysisInstructions");
         writer.WriteStringValue("Treat fullResult as the source of truth for exact fields, ranges, windows, segments, tags, diagnostics, summaries, and row evidence.");
         writer.WriteStringValue("Use resultMarkdown for a concise natural-language orientation before drilling into fullResult.");
-        writer.WriteStringValue("Use rowDocuments when chunking or streaming row-level analysis; rowDocuments[0] is the result summary and later entries are individual comparison rows.");
+        writer.WriteStringValue("Use the rows and rowFinalities inside fullResult for row-level analysis; they are the single canonical result representation.");
         writer.WriteStringValue("Preserve rowId, recordIds, window ids, temporal ranges, knownAt, evaluationHorizon, and finality metadata when citing evidence.");
         writer.WriteStringValue("Do not infer missing source data from absence alone; check diagnostics, normalization, excluded windows, and row finalities first.");
         writer.WriteEndArray();
@@ -365,14 +365,38 @@ internal static class ComparisonExporter
         writer.WritePropertyName("fullResult");
         WriteResultEnvelope(writer, result);
         writer.WriteStartArray("rowDocuments");
-        foreach (var line in ExportJsonLines(result))
-        {
-            using var document = JsonDocument.Parse(line);
-            document.RootElement.WriteTo(writer);
-        }
-
+        WriteResultLine(writer, result);
+        WriteLlmRowReferences(writer, result);
         writer.WriteEndArray();
         writer.WriteEndObject();
+    }
+
+    private static void WriteLlmRowReferences(Utf8JsonWriter writer, ComparisonResult result)
+    {
+        WriteLlmRowReferences(writer, "overlap", result.OverlapRows);
+        WriteLlmRowReferences(writer, "residual", result.ResidualRows);
+        WriteLlmRowReferences(writer, "missing", result.MissingRows);
+        WriteLlmRowReferences(writer, "coverage", result.CoverageRows);
+        WriteLlmRowReferences(writer, "gap", result.GapRows);
+        WriteLlmRowReferences(writer, "symmetricDifference", result.SymmetricDifferenceRows);
+        WriteLlmRowReferences(writer, "containment", result.ContainmentRows);
+        WriteLlmRowReferences(writer, "leadLag", result.LeadLagRows);
+        WriteLlmRowReferences(writer, "asOf", result.AsOfRows);
+    }
+
+    private static void WriteLlmRowReferences<T>(
+        Utf8JsonWriter writer,
+        string rowType,
+        IReadOnlyList<T> rows)
+    {
+        for (var i = 0; i < rows.Count; i++)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("artifact", "row-reference");
+            writer.WriteString("rowType", rowType);
+            writer.WriteString("rowId", ComparisonRowIdentity.Create(rowType, rows[i]!));
+            writer.WriteEndObject();
+        }
     }
 
     private static void WriteLlmSummaryFields(Utf8JsonWriter writer, ComparisonResult result)
