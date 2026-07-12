@@ -29,15 +29,15 @@ public sealed record OpenWindow : WindowRecord
         WindowName,
         Key,
         StartPosition,
-        EndPosition: null,
+        null,
         Source,
         Partition,
         StartTime,
-        EndTime: null,
+        null,
         Segments,
         Tags,
-        BoundaryReason: null,
-        BoundaryChanges: null)
+        null,
+        null)
     {
     }
 }
