@@ -381,6 +381,28 @@ public sealed class SpanfoldCliTests
     }
 
     [Fact]
+    public void NumericOverflowReturnsStructuredDiagnostic()
+    {
+        var fixturePath = TempFixturePath();
+        try
+        {
+            var fixture = File.ReadAllText(FixturePath("basic-overlap.json"))
+                .Replace("\"startPosition\": 1", "\"startPosition\": 999999999999999999999999", StringComparison.Ordinal);
+            File.WriteAllText(fixturePath, fixture);
+
+            var (exitCode, output, error) = Run("validate-plan", fixturePath);
+
+            Assert.Equal(2, exitCode);
+            Assert.Equal(string.Empty, output);
+            Assert.Contains("\"error\":", error);
+        }
+        finally
+        {
+            File.Delete(fixturePath);
+        }
+    }
+
+    [Fact]
     public void ForeignFixtureSchemaIsRejected()
     {
         var fixturePath = TempFixturePath();
