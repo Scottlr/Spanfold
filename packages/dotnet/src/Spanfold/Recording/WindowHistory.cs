@@ -411,6 +411,9 @@ public sealed class WindowHistory
         var cells = new List<SourceMatrixCell>(orderedSources.Length * orderedSources.Length);
         var sourceHasWindows = new Dictionary<object, bool>();
         var uniqueSources = new HashSet<object>();
+        var matrixWindows = this.Windows
+            .Where(window => string.Equals(window.WindowName, windowName, StringComparison.Ordinal))
+            .ToArray();
 
         for (var i = 0; i < orderedSources.Length; i++)
         {
@@ -421,7 +424,8 @@ public sealed class WindowHistory
                 throw new ArgumentException("Source matrix identities must be unique.", nameof(sources));
             }
 
-            sourceHasWindows[source] = HasWindowForSource(windowName, source);
+            sourceHasWindows[source] = matrixWindows.Any(window =>
+                EqualityComparer<object?>.Default.Equals(window.Source, source));
         }
 
         for (var targetIndex = 0; targetIndex < orderedSources.Length; targetIndex++)
