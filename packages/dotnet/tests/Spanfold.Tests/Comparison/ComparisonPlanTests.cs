@@ -89,6 +89,14 @@ public sealed class ComparisonPlanTests
         Assert.Equal("overlap", Assert.Single(plan.Comparators));
     }
 
+    [Fact]
+    public void DuplicateComparatorDeclarationsAreCollapsed()
+    {
+        var plan = CreatePlan(comparators: ["overlap", "coverage", "overlap"]);
+
+        Assert.Equal(["overlap", "coverage"], plan.Comparators);
+    }
+
     private static ComparisonPlan CreatePlan(
         ComparisonSelector? target = null,
         IEnumerable<ComparisonSelector>? against = null,
