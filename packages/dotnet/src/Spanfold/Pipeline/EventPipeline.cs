@@ -28,7 +28,12 @@ public sealed class EventPipeline<TEvent>
         this.emissionCallbacks = emissionCallbacks.ToArray();
         this.windowCallbacks = CreateWindowCallbackMap(windows);
         this.eventTimeSelector = eventTimeSelector;
-        History = new WindowHistory(recordWindows);
+        History = new WindowHistory(
+            recordWindows,
+            windows.ToDictionary(
+                static window => window.Name,
+                static window => window.KeyComparer,
+                StringComparer.Ordinal));
         this.runtimes = new WindowRuntime<TEvent>[windows.Count];
 
         for (var i = 0; i < this.runtimes.Length; i++)

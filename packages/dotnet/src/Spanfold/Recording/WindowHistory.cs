@@ -13,13 +13,22 @@ namespace Spanfold;
 public sealed class WindowHistory
 {
     private readonly bool enabled;
+    private readonly IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers;
     private readonly Dictionary<WindowRecordingKey, OpenWindow> openWindows;
     private readonly List<ClosedWindow> closedWindows;
     private readonly List<WindowAnnotation> annotations;
 
     internal WindowHistory(bool enabled)
+        : this(enabled, new Dictionary<string, IEqualityComparer<object>>(StringComparer.Ordinal))
+    {
+    }
+
+    internal WindowHistory(
+        bool enabled,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         this.enabled = enabled;
+        this.keyComparers = keyComparers;
         this.openWindows = [];
         this.closedWindows = [];
         this.annotations = [];
@@ -587,7 +596,7 @@ public sealed class WindowHistory
                 continue;
             }
 
-            if (!this.openWindows.Remove(key, out var open))
+            if (!this.TryRemoveOpenWindow(key, out var open))
             {
                 continue;
             }
@@ -606,6 +615,36 @@ public sealed class WindowHistory
                 emission.BoundaryReason,
                 emission.BoundaryChanges));
         }
+    }
+
+    private bool TryRemoveOpenWindow(WindowRecordingKey key, out OpenWindow open)
+    {
+        open = null!;
+        if (this.openWindows.Remove(key, out open!))
+        {
+            return true;
+        }
+
+        if (!this.keyComparers.TryGetValue(key.WindowName, out var comparer))
+        {
+            return false;
+        }
+
+        foreach (var candidate in this.openWindows.Keys)
+        {
+            if (!string.Equals(candidate.WindowName, key.WindowName, StringComparison.Ordinal)
+                || !comparer.Equals(candidate.Key, key.Key)
+                || !EqualityComparer<object?>.Default.Equals(candidate.Source, key.Source)
+                || !EqualityComparer<object?>.Default.Equals(candidate.Partition, key.Partition)
+                || !string.Equals(candidate.SegmentContext, key.SegmentContext, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return this.openWindows.Remove(candidate, out open!);
+        }
+
+        return false;
     }
 
     private bool HasWindowForSource(string windowName, object source)
