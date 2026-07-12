@@ -54,6 +54,20 @@ public sealed class LaneLivenessTrackerTests
     }
 
     [Fact]
+    public void ObservationBeforeEvaluatedHorizonIsRejected()
+    {
+        var startedAt = DateTimeOffset.Parse("2026-04-21T10:00:00Z");
+        var tracker = LaneLivenessTracker.ForLanes(startedAt, TimeSpan.FromSeconds(30), "lane-a");
+
+        tracker.Check(startedAt.AddSeconds(100));
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            tracker.Observe("lane-a", startedAt.AddSeconds(50)));
+
+        Assert.Contains("last evaluated horizon", exception.Message);
+    }
+
+    [Fact]
     public void CheckCanEmitSilenceForLaneThatNeverReported()
     {
         var startedAt = DateTimeOffset.Parse("2026-04-21T10:00:00Z");
