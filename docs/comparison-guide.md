@@ -490,3 +490,18 @@ orphan child duration. Current lineage is inferred from matching source and
 partition for the supplied parent and child window names. Parent and child keys
 may differ because rollups often aggregate several child keys into one parent
 key.
+
+## Redacted agent context
+
+When a result crosses a support, CI, or external-agent boundary, prefer the
+value-redacted context export. It includes row counts, stable row IDs, finality,
+and diagnostic codes, but excludes keys, sources, partitions, tags, segments,
+and diagnostic text:
+
+```csharp
+var safeContext = result.ExportRedactedAgentContext();
+```
+
+The regular JSON, Markdown, HTML, and LLM exports are evidence-bearing artifacts
+and must be treated as sensitive data unless the caller has already applied an
+appropriate data policy.
