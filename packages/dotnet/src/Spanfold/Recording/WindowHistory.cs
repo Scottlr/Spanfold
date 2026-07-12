@@ -559,43 +559,7 @@ public sealed class WindowHistory
     /// <returns>The overlapping window pairs.</returns>
     public IReadOnlyList<WindowOverlap> FindOverlaps()
     {
-        var overlaps = new List<WindowOverlap>();
-        var scopes = this.closedWindows
-            .GroupBy(static window => new OverlapScope(
-                window.WindowName,
-                window.Key,
-                window.Partition,
-                StableSegments(window.Segments)))
-            .ToArray();
-
-        for (var scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
-        {
-            var windows = scopes[scopeIndex]
-                .OrderBy(static window => window.StartPosition)
-                .ThenBy(static window => window.EndPosition)
-                .ToArray();
-
-            for (var i = 0; i < windows.Length; i++)
-            {
-                var first = windows[i];
-                var firstEnd = ClosedEndPosition(first);
-                for (var j = i + 1; j < windows.Length; j++)
-                {
-                    var second = windows[j];
-                    if (second.StartPosition >= firstEnd)
-                    {
-                        break;
-                    }
-
-                    if (Overlaps(first, second))
-                    {
-                        overlaps.Add(new WindowOverlap(first, second));
-                    }
-                }
-            }
-        }
-
-        return overlaps.ToArray();
+        return WindowHistoryAnalytics.FindOverlaps(this.closedWindows);
     }
 
     /// <summary>
@@ -606,52 +570,7 @@ public sealed class WindowHistory
     public IReadOnlyList<WindowResidualSegment> FindResiduals(object targetSource)
     {
         ArgumentNullException.ThrowIfNull(targetSource);
-
-        var residuals = new List<WindowResidualSegment>();
-
-        foreach (var target in this.closedWindows)
-        {
-            if (!EqualityComparer<object?>.Default.Equals(target.Source, targetSource))
-            {
-                continue;
-            }
-
-            var segments = new List<PositionSegment>
-            {
-                new(target.StartPosition, ClosedEndPosition(target))
-            };
-
-            foreach (var comparison in this.closedWindows)
-            {
-                if (ReferenceEquals(target, comparison)
-                    || EqualityComparer<object?>.Default.Equals(comparison.Source, targetSource)
-                    || !IsSameScope(target, comparison)
-                    || !Overlaps(target, comparison))
-                {
-                    continue;
-                }
-
-                Subtract(segments, comparison);
-            }
-
-            foreach (var segment in segments)
-            {
-                if (segment.Start >= segment.End)
-                {
-                    continue;
-                }
-
-                residuals.Add(new WindowResidualSegment(
-                    target.WindowName,
-                    target.Key,
-                    targetSource,
-                    segment.Start,
-                    segment.End,
-                    target.Partition));
-            }
-        }
-
-        return residuals.ToArray();
+        return WindowHistoryAnalytics.FindResiduals(this.closedWindows, targetSource);
     }
 
     internal void Record<TEvent>(
@@ -671,7 +590,7 @@ public sealed class WindowHistory
                 emission.Key,
                 emission.Source,
                 emission.Partition,
-                StableSegments(emission.Segments));
+                new SegmentContext(emission.Segments));
 
             if (emission.Kind == WindowTransitionKind.Opened)
             {
@@ -960,16 +879,6 @@ public sealed class WindowHistory
         return CanonicalValueFormatter.Format(value);
     }
 
-    private static SegmentContext StableSegments(IReadOnlyList<WindowSegment> segments) => new(segments);
-
-    private static bool IsSameScope(ClosedWindow first, ClosedWindow second)
-    {
-        return string.Equals(first.WindowName, second.WindowName, StringComparison.Ordinal)
-            && EqualityComparer<object>.Default.Equals(first.Key, second.Key)
-            && EqualityComparer<object?>.Default.Equals(first.Partition, second.Partition)
-            && Equals(StableSegments(first.Segments), StableSegments(second.Segments));
-    }
-
     private static bool HasSegment(WindowRecord window, string name, object? value)
     {
         for (var i = 0; i < window.Segments.Count; i++)
@@ -1000,53 +909,5 @@ public sealed class WindowHistory
         return false;
     }
 
-    private static bool Overlaps(ClosedWindow first, ClosedWindow second)
-    {
-        return first.StartPosition < ClosedEndPosition(second)
-            && second.StartPosition < ClosedEndPosition(first);
-    }
-
-    private static void Subtract(List<PositionSegment> segments, ClosedWindow comparison)
-    {
-        for (var i = segments.Count - 1; i >= 0; i--)
-        {
-            var segment = segments[i];
-            var overlapStart = Math.Max(segment.Start, comparison.StartPosition);
-            var overlapEnd = Math.Min(segment.End, ClosedEndPosition(comparison));
-
-            if (overlapStart >= overlapEnd)
-            {
-                continue;
-            }
-
-            segments.RemoveAt(i);
-
-            if (segment.Start < overlapStart)
-            {
-                segments.Insert(i, new PositionSegment(segment.Start, overlapStart));
-                i++;
-            }
-
-            if (overlapEnd < segment.End)
-            {
-                segments.Insert(i, new PositionSegment(overlapEnd, segment.End));
-            }
-        }
-    }
-
-    private static long ClosedEndPosition(ClosedWindow window)
-    {
-        return window.EndPosition
-            ?? throw new InvalidOperationException("Closed windows must have an end position.");
-    }
-
-    private readonly record struct PositionSegment(long Start, long End);
-
     private sealed record HierarchyScope(object? Source, object? Partition);
-
-    private sealed record OverlapScope(
-        string WindowName,
-        object Key,
-        object? Partition,
-        SegmentContext Segments);
 }
