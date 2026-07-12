@@ -63,60 +63,43 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            if (string.Equals(comparator, "overlap", StringComparison.Ordinal))
+            switch (ComparisonComparatorCatalog.GetBuiltInKind(comparator))
             {
-                var before = overlapRows.Count;
-                AddOverlapRows(cohortEvidence, aligned, overlapRows);
-                summaries.Add(new ComparatorSummary(comparator, overlapRows.Count - before));
-                continue;
-            }
-
-            if (string.Equals(comparator, "residual", StringComparison.Ordinal))
-            {
-                var before = residualRows.Count;
-                AddResidualRows(cohortEvidence, aligned, residualRows);
-                summaries.Add(new ComparatorSummary(comparator, residualRows.Count - before));
-                continue;
-            }
-
-            if (string.Equals(comparator, "missing", StringComparison.Ordinal))
-            {
-                var before = missingRows.Count;
-                AddMissingRows(cohortEvidence, aligned, missingRows);
-                summaries.Add(new ComparatorSummary(comparator, missingRows.Count - before));
-                continue;
-            }
-
-            if (string.Equals(comparator, "coverage", StringComparison.Ordinal))
-            {
-                var before = coverageRows.Count;
-                AddCoverageRows(cohortEvidence, aligned, coverageRows, coverageSummaries);
-                summaries.Add(new ComparatorSummary(comparator, coverageRows.Count - before));
-                continue;
-            }
-
-            if (string.Equals(comparator, "gap", StringComparison.Ordinal))
-            {
-                var before = gapRows.Count;
-                AddGapRows(aligned, gapRows);
-                summaries.Add(new ComparatorSummary(comparator, gapRows.Count - before));
-                continue;
-            }
-
-            if (string.Equals(comparator, "symmetric-difference", StringComparison.Ordinal))
-            {
-                var before = symmetricDifferenceRows.Count;
-                AddSymmetricDifferenceRows(cohortEvidence, aligned, symmetricDifferenceRows);
-                summaries.Add(new ComparatorSummary(comparator, symmetricDifferenceRows.Count - before));
-                continue;
-            }
-
-            if (string.Equals(comparator, "containment", StringComparison.Ordinal))
-            {
-                var before = containmentRows.Count;
-                AddContainmentRows(prepared, aligned, containmentRows);
-                summaries.Add(new ComparatorSummary(comparator, containmentRows.Count - before));
-                continue;
+                case ComparisonComparatorKind.Overlap:
+                    var overlapBefore = overlapRows.Count;
+                    AddOverlapRows(cohortEvidence, aligned, overlapRows);
+                    summaries.Add(new ComparatorSummary(comparator, overlapRows.Count - overlapBefore));
+                    continue;
+                case ComparisonComparatorKind.Residual:
+                    var residualBefore = residualRows.Count;
+                    AddResidualRows(cohortEvidence, aligned, residualRows);
+                    summaries.Add(new ComparatorSummary(comparator, residualRows.Count - residualBefore));
+                    continue;
+                case ComparisonComparatorKind.Missing:
+                    var missingBefore = missingRows.Count;
+                    AddMissingRows(cohortEvidence, aligned, missingRows);
+                    summaries.Add(new ComparatorSummary(comparator, missingRows.Count - missingBefore));
+                    continue;
+                case ComparisonComparatorKind.Coverage:
+                    var coverageBefore = coverageRows.Count;
+                    AddCoverageRows(cohortEvidence, aligned, coverageRows, coverageSummaries);
+                    summaries.Add(new ComparatorSummary(comparator, coverageRows.Count - coverageBefore));
+                    continue;
+                case ComparisonComparatorKind.Gap:
+                    var gapBefore = gapRows.Count;
+                    AddGapRows(aligned, gapRows);
+                    summaries.Add(new ComparatorSummary(comparator, gapRows.Count - gapBefore));
+                    continue;
+                case ComparisonComparatorKind.SymmetricDifference:
+                    var symmetricBefore = symmetricDifferenceRows.Count;
+                    AddSymmetricDifferenceRows(cohortEvidence, aligned, symmetricDifferenceRows);
+                    summaries.Add(new ComparatorSummary(comparator, symmetricDifferenceRows.Count - symmetricBefore));
+                    continue;
+                case ComparisonComparatorKind.Containment:
+                    var containmentBefore = containmentRows.Count;
+                    AddContainmentRows(prepared, aligned, containmentRows);
+                    summaries.Add(new ComparatorSummary(comparator, containmentRows.Count - containmentBefore));
+                    continue;
             }
 
             summaries.Add(new ComparatorSummary(comparator, RowCount: 0));

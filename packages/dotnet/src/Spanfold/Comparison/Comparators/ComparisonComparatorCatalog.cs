@@ -1,5 +1,26 @@
 namespace Spanfold;
 
+/// <summary>Identifies a built-in comparator implementation.</summary>
+public enum ComparisonComparatorKind
+{
+    /// <summary>No known comparator kind.</summary>
+    Unknown = 0,
+    /// <summary>Overlap comparator.</summary>
+    Overlap,
+    /// <summary>Residual comparator.</summary>
+    Residual,
+    /// <summary>Missing comparator.</summary>
+    Missing,
+    /// <summary>Coverage comparator.</summary>
+    Coverage,
+    /// <summary>Gap comparator.</summary>
+    Gap,
+    /// <summary>Symmetric-difference comparator.</summary>
+    SymmetricDifference,
+    /// <summary>Containment comparator.</summary>
+    Containment
+}
+
 /// <summary>
 /// Describes comparator declarations understood by core Spanfold.
 /// </summary>
@@ -45,6 +66,27 @@ public static class ComparisonComparatorCatalog
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Resolves an exact built-in declaration to its typed implementation kind.
+    /// </summary>
+    /// <param name="declaration">The comparator declaration.</param>
+    /// <returns>The built-in kind, or <see cref="ComparisonComparatorKind.Unknown" />.</returns>
+    public static ComparisonComparatorKind GetBuiltInKind(string declaration)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        return declaration switch
+        {
+            "overlap" => ComparisonComparatorKind.Overlap,
+            "residual" => ComparisonComparatorKind.Residual,
+            "missing" => ComparisonComparatorKind.Missing,
+            "coverage" => ComparisonComparatorKind.Coverage,
+            "gap" => ComparisonComparatorKind.Gap,
+            "symmetric-difference" => ComparisonComparatorKind.SymmetricDifference,
+            "containment" => ComparisonComparatorKind.Containment,
+            _ => ComparisonComparatorKind.Unknown
+        };
     }
 
     /// <summary>
