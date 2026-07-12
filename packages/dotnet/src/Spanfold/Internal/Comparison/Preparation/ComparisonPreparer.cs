@@ -12,6 +12,7 @@ internal static class ComparisonPreparer
         var selected = new List<WindowRecord>();
         var excluded = new List<ExcludedWindowRecord>();
         var normalized = new List<NormalizedWindowRecord>();
+        var memberships = new HashSet<(WindowRecordId RecordId, ComparisonSide Side)>();
 
         if (plan.Target is null || plan.Scope is null)
         {
@@ -79,7 +80,7 @@ internal static class ComparisonPreparer
             if (plan.Target.Value.Matches(window))
             {
                 matched = true;
-                AddNormalized(window, plan.Target.Value.Name, ComparisonSide.Target, plan, diagnostics, selected, excluded, normalized);
+                AddNormalized(window, plan.Target.Value.Name, ComparisonSide.Target, plan, diagnostics, selected, excluded, normalized, memberships);
             }
 
             for (var i = 0; i < plan.Against.Count; i++)
@@ -91,7 +92,7 @@ internal static class ComparisonPreparer
                 }
 
                 matched = true;
-                AddNormalized(window, selector.Name, ComparisonSide.Against, plan, diagnostics, selected, excluded, normalized);
+                AddNormalized(window, selector.Name, ComparisonSide.Against, plan, diagnostics, selected, excluded, normalized, memberships);
             }
 
             if (!matched)
@@ -111,8 +112,14 @@ internal static class ComparisonPreparer
         List<ComparisonPlanDiagnostic> diagnostics,
         List<WindowRecord> selected,
         List<ExcludedWindowRecord> excluded,
-        List<NormalizedWindowRecord> normalized)
+        List<NormalizedWindowRecord> normalized,
+        HashSet<(WindowRecordId RecordId, ComparisonSide Side)> memberships)
     {
+        if (!memberships.Add((window.Id, side)))
+        {
+            return;
+        }
+
         if (!TryCreateRange(window, plan.Normalization, diagnostics, excluded, out var range))
         {
             return;
