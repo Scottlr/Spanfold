@@ -631,8 +631,18 @@ public static class SpanfoldCli
     private static void ValidateFixture(JsonElement fixture)
     {
         RequireKind(fixture, "$", JsonValueKind.Object);
-        RequireProperty(fixture, "schema", "$", JsonValueKind.String);
-        RequireProperty(fixture, "schemaVersion", "$", JsonValueKind.Number);
+        var schema = RequireProperty(fixture, "schema", "$", JsonValueKind.String);
+        if (!string.Equals(schema.GetString(), "spanfold.contract-fixture", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Unsupported fixture schema. Expected spanfold.contract-fixture.");
+        }
+
+        var schemaVersion = RequireProperty(fixture, "schemaVersion", "$", JsonValueKind.Number);
+        if (!schemaVersion.TryGetInt32(out var version) || version != 1)
+        {
+            throw new ArgumentException("Unsupported fixture schemaVersion. Expected version 1.");
+        }
+
         var windows = RequireProperty(fixture, "windows", "$", JsonValueKind.Array);
         var plan = RequireProperty(fixture, "plan", "$", JsonValueKind.Object);
 
