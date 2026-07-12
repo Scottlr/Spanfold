@@ -2734,7 +2734,7 @@ mod tests {
     #[test]
     fn selectors_match_windows_and_compose_predicates() {
         let window = crate::WindowRecord::Closed(crate::ClosedWindow {
-            id: crate::WindowRecordId::new("record-1"),
+            id: crate::WindowRecordId::new("record-1").expect("record id"),
             window_name: "DeviceOffline".to_owned(),
             key: "device-1".to_owned(),
             range: crate::TemporalRange::positions(10, 20).expect("range"),
@@ -2767,7 +2767,7 @@ mod tests {
     #[test]
     fn runtime_selector_is_not_serializable_and_uses_predicate() {
         let window = crate::WindowRecord::Closed(crate::ClosedWindow {
-            id: crate::WindowRecordId::new("record-1"),
+            id: crate::WindowRecordId::new("record-1").expect("record id"),
             window_name: "DeviceOffline".to_owned(),
             key: "device-1".to_owned(),
             range: crate::TemporalRange::positions(0, 12).expect("range"),
@@ -2840,7 +2840,7 @@ mod tests {
     #[test]
     fn range_selectors_use_half_open_start_ranges() {
         let position_window = crate::WindowRecord::Closed(crate::ClosedWindow {
-            id: crate::WindowRecordId::new("record-1"),
+            id: crate::WindowRecordId::new("record-1").expect("record id"),
             window_name: "DeviceOffline".to_owned(),
             key: "device-1".to_owned(),
             range: crate::TemporalRange::positions(10, 20).expect("range"),
@@ -2853,7 +2853,7 @@ mod tests {
             boundary_changes: Vec::new(),
         });
         let time_window = crate::WindowRecord::Closed(crate::ClosedWindow {
-            id: crate::WindowRecordId::new("record-2"),
+            id: crate::WindowRecordId::new("record-2").expect("record id"),
             window_name: "DeviceOffline".to_owned(),
             key: "device-1".to_owned(),
             range: crate::TemporalRange::new(
@@ -3099,6 +3099,54 @@ mod tests {
         assert_eq!(as_of.as_of_rows.len(), 1);
         assert_eq!(as_of.as_of_rows[0].status, AsOfMatchStatus::Matched);
         assert_eq!(as_of.as_of_rows[0].distance_magnitude, Some(3));
+    }
+
+    #[test]
+    fn lead_lag_and_as_of_saturate_extreme_temporal_distances() {
+        let history = WindowHistoryFixture::new()
+            .closed_window(
+                "DeviceOffline",
+                "device-1",
+                i64::MAX - 1,
+                i64::MAX,
+                |window| window.source("target"),
+            )
+            .expect("target")
+            .closed_window(
+                "DeviceOffline",
+                "device-1",
+                i64::MIN,
+                i64::MIN + 1,
+                |window| window.source("comparison"),
+            )
+            .expect("comparison")
+            .build();
+        let plan = ComparisonPlan::new(
+            "Extreme temporal distance",
+            "target",
+            AgainstSelection::Sources(vec!["comparison".to_owned()]),
+            vec![
+                Comparator::LeadLag {
+                    transition: LeadLagTransition::Start,
+                    axis: TemporalAxis::ProcessingPosition,
+                    tolerance_magnitude: i64::MAX,
+                },
+                Comparator::AsOf {
+                    direction: AsOfDirection::Nearest,
+                    axis: TemporalAxis::ProcessingPosition,
+                    tolerance_magnitude: i64::MAX,
+                },
+            ],
+        )
+        .with_scope_window(Some("DeviceOffline".to_owned()));
+
+        let result = compare(&history, &plan);
+
+        assert!(result.is_valid);
+        assert_eq!(result.lead_lag_rows[0].delta_magnitude, Some(i64::MAX));
+        assert!(result.lead_lag_rows[0].is_within_tolerance);
+        assert_eq!(result.as_of_rows[0].distance_magnitude, Some(i64::MAX));
+        assert_eq!(result.as_of_rows[0].status, AsOfMatchStatus::Matched);
     }
 
     #[test]
@@ -3402,6 +3450,7 @@ mod tests {
     fn live_open_windows_emit_provisional_row_finality() {
         let history = WindowHistoryFixture::new()
             .open_window("DeviceOffline", "device-1", 1, |w| w.source("provider-a"))
+            .expect("provider-a")
             .closed_window("DeviceOffline", "device-1", 3, 5, |w| {
                 w.source("provider-b")
             })
@@ -3827,6 +3876,7 @@ mod tests {
     fn runtime_critic_reports_unbounded_open_duration() {
         let history = WindowHistoryFixture::new()
             .open_window("DeviceOffline", "device-1", 1, |w| w.source("provider-a"))
+            .expect("provider-a")
             .build();
         let plan = ComparisonPlan {
             name: "Open QA".to_owned(),

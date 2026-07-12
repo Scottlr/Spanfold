@@ -128,6 +128,197 @@ fn nested_rollups_record_parent_windows() {
 }
 
 #[test]
+fn active_rollup_child_migrates_between_parent_keys() {
+    let mut pipeline = for_events::<PriceTick>()
+        .record_windows()
+        .window(
+            "SelectionPriced",
+            |tick| tick.selection_id,
+            |tick| tick.price > 0.0,
+        )
+        .roll_up(
+            "MarketPriced",
+            |tick| tick.market_id,
+            |children| children.any_active(),
+        )
+        .build_or_panic();
+
+    pipeline
+        .ingest(
+            PriceTick {
+                selection_id: "selection-1",
+                market_id: "market-1",
+                fixture_id: "fixture-1",
+                price: 1.01,
+                observed_at: 100,
+            },
+            None,
+            None,
+        )
+        .expect("initial parent");
+    pipeline
+        .ingest(
+            PriceTick {
+                selection_id: "selection-1",
+                market_id: "market-2",
+                fixture_id: "fixture-1",
+                price: 1.02,
+                observed_at: 101,
+            },
+            None,
+            None,
+        )
+        .expect("migrated parent");
+
+    let closed_parent = pipeline
+        .history()
+        .closed_windows()
+        .iter()
+        .find(|window| window.window_name == "MarketPriced")
+        .expect("old parent closed");
+    let open_parents = pipeline
+        .history()
+        .open_windows()
+        .iter()
+        .filter(|window| window.window_name == "MarketPriced")
+        .collect::<Vec<_>>();
+
+    assert_eq!(closed_parent.key, "market-1");
+    assert_eq!(open_parents.len(), 1);
+    assert_eq!(open_parents[0].key, "market-2");
+}
+
+#[test]
+fn active_rollup_child_migrates_parent_and_segment_lane_together() {
+    let mut pipeline = for_events::<PriceTick>()
+        .record_windows()
+        .window_with_metadata(
+            "SelectionPriced",
+            |tick| tick.selection_id,
+            |tick| tick.price > 0.0,
+            |tick| vec![WindowSegment::new("fixture", tick.fixture_id).expect("segment name")],
+            |_| Vec::new(),
+        )
+        .roll_up(
+            "MarketPriced",
+            |tick| tick.market_id,
+            |children| children.any_active(),
+        )
+        .build_or_panic();
+
+    for tick in [
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.01,
+            observed_at: 100,
+        },
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-2",
+            fixture_id: "fixture-2",
+            price: 1.02,
+            observed_at: 101,
+        },
+    ] {
+        pipeline.ingest(tick, None, None).expect("ingest");
+    }
+
+    let closed_parent = pipeline
+        .history()
+        .closed_windows()
+        .iter()
+        .find(|window| window.window_name == "MarketPriced")
+        .expect("old parent closed");
+    let open_parent = pipeline
+        .history()
+        .open_windows()
+        .iter()
+        .find(|window| window.window_name == "MarketPriced")
+        .expect("new parent open");
+
+    assert_eq!(closed_parent.key, "market-1");
+    assert_eq!(
+        closed_parent.segments[0].value(),
+        &crate::PrimitiveValue::from("fixture-1")
+    );
+    assert_eq!(open_parent.key, "market-2");
+    assert_eq!(
+        open_parent.segments[0].value(),
+        &crate::PrimitiveValue::from("fixture-2")
+    );
+}
+
+#[test]
+fn nested_rollup_counts_same_key_children_from_distinct_segment_lanes() {
+    let mut pipeline = for_events::<PriceTick>()
+        .record_windows()
+        .window_with_metadata(
+            "SelectionPriced",
+            |tick| tick.selection_id,
+            |tick| tick.price > 0.0,
+            |tick| vec![WindowSegment::new("fixture", tick.fixture_id).expect("segment name")],
+            |_| Vec::new(),
+        )
+        .roll_up(
+            "MarketPriced",
+            |tick| tick.market_id,
+            |children| children.any_active(),
+        )
+        .roll_up_with_segment_projection(
+            "PortfolioPriced",
+            |_| "portfolio-1",
+            |children| children.any_active(),
+            |projection| projection.drop("fixture"),
+        )
+        .build_or_panic();
+
+    for tick in [
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.01,
+            observed_at: 100,
+        },
+        PriceTick {
+            selection_id: "selection-2",
+            market_id: "market-1",
+            fixture_id: "fixture-2",
+            price: 1.02,
+            observed_at: 101,
+        },
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 0.0,
+            observed_at: 102,
+        },
+    ] {
+        pipeline.ingest(tick, None, None).expect("ingest");
+    }
+
+    assert!(
+        pipeline
+            .history()
+            .closed_windows()
+            .iter()
+            .all(|window| window.window_name != "PortfolioPriced")
+    );
+    assert_eq!(
+        pipeline
+            .history()
+            .open_windows()
+            .iter()
+            .filter(|window| window.window_name == "PortfolioPriced")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn event_time_selector_records_timestamp_axis_windows() {
     let mut pipeline = for_events::<PriceTick>()
         .record_windows()
@@ -252,8 +443,8 @@ fn segment_change_closes_and_reopens_active_window() {
             "SelectionSuspension",
             |tick| tick.selection_id,
             |tick| tick.price == 0.0,
-            |tick| vec![WindowSegment::new("market", tick.market_id)],
-            |tick| vec![WindowTag::new("fixture", tick.fixture_id)],
+            |tick| vec![WindowSegment::new("market", tick.market_id).expect("segment name")],
+            |tick| vec![WindowTag::new("fixture", tick.fixture_id).expect("tag name")],
         )
         .build_or_panic();
 
@@ -335,7 +526,7 @@ fn rollups_preserve_child_segment_context_and_reopen_on_segment_change() {
             "SelectionPriced",
             |tick| tick.selection_id,
             |tick| tick.price > 0.0,
-            |tick| vec![WindowSegment::new("phase", tick.market_id)],
+            |tick| vec![WindowSegment::new("phase", tick.market_id).expect("segment name")],
             |_| Vec::new(),
         )
         .roll_up(
@@ -401,8 +592,10 @@ fn rollup_segment_projection_can_drop_rename_and_transform() {
             |tick| tick.price > 0.0,
             |tick| {
                 vec![
-                    WindowSegment::new("phase", tick.market_id),
-                    WindowSegment::new("state", tick.fixture_id).with_parent("phase"),
+                    WindowSegment::new("phase", tick.market_id).expect("segment name"),
+                    WindowSegment::new("state", tick.fixture_id)
+                        .and_then(|segment| segment.with_parent("phase"))
+                        .expect("segment names"),
                 ]
             },
             |_| Vec::new(),
@@ -463,8 +656,8 @@ fn rollup_rejects_duplicate_projected_segment_names() {
             |tick| tick.price > 0.0,
             |tick| {
                 vec![
-                    WindowSegment::new("phase", tick.market_id),
-                    WindowSegment::new("state", tick.fixture_id),
+                    WindowSegment::new("phase", tick.market_id).expect("segment name"),
+                    WindowSegment::new("state", tick.fixture_id).expect("segment name"),
                 ]
             },
             |_| Vec::new(),
@@ -504,8 +697,8 @@ fn projection_preflight_keeps_multi_definition_ingestion_atomic() {
             |tick| tick.price > 0.0,
             |tick| {
                 vec![
-                    WindowSegment::new("phase", tick.market_id),
-                    WindowSegment::new("state", tick.fixture_id),
+                    WindowSegment::new("phase", tick.market_id).expect("segment name"),
+                    WindowSegment::new("state", tick.fixture_id).expect("segment name"),
                 ]
             },
             |_| Vec::new(),

@@ -496,7 +496,7 @@ mod tests {
         let selector = ComparisonSelector::for_window_name("DeviceOffline")
             .and(ComparisonSelector::for_source("provider-a"));
         let window = crate::WindowRecord::Closed(crate::ClosedWindow {
-            id: crate::WindowRecordId::new("record-1"),
+            id: crate::WindowRecordId::new("record-1").expect("record id"),
             window_name: "DeviceOffline".to_owned(),
             key: "device-1".to_owned(),
             range: crate::TemporalRange::positions(1, 5).expect("range"),

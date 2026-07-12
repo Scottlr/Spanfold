@@ -112,9 +112,11 @@ pub(super) fn compare_windows_jsonl(
                 )
                 .map_err(|error| error.to_string())?;
         } else {
-            builder = builder.open_window(resolved_window_name, key, row.start_position, |w| {
-                apply_jsonl_metadata(w, &row)
-            });
+            builder = builder
+                .open_window(resolved_window_name, key, row.start_position, |w| {
+                    apply_jsonl_metadata(w, &row)
+                })
+                .map_err(|error| error.to_string())?;
         }
     }
     let history = builder.build();
@@ -410,12 +412,14 @@ pub(super) fn compare_imported_windows(
                 )
                 .map_err(|error| error.to_string())?;
         } else {
-            builder = builder.open_window(
-                window.window_name.clone(),
-                window.key.clone(),
-                window.start_position,
-                |metadata| apply_imported_metadata(metadata, window),
-            );
+            builder = builder
+                .open_window(
+                    window.window_name.clone(),
+                    window.key.clone(),
+                    window.start_position,
+                    |metadata| apply_imported_metadata(metadata, window),
+                )
+                .map_err(|error| error.to_string())?;
         }
     }
 

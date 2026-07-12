@@ -22,6 +22,7 @@ type EmissionCallback = Arc<dyn Fn(&WindowEmission) + Send + Sync + 'static>;
 type SegmentTransform =
     Arc<dyn Fn(&crate::PrimitiveValue) -> crate::PrimitiveValue + Send + Sync + 'static>;
 type RuntimeStateKey = (String, String, Option<String>, Option<String>, String);
+type RollupMembershipKey = (String, String, Option<String>, Option<String>, String);
 
 #[derive(Clone, Default)]
 struct WindowCallbackSet {
@@ -87,23 +88,32 @@ struct OpenState {
 
 #[derive(Clone, Debug, Default)]
 struct ParentState {
-    active_children: HashSet<String>,
+    active_children: HashSet<RollupChildId>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RollupChildId {
+    key: String,
+    membership_context: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RollupMembership {
+    parent_key: String,
+    segment_context: String,
+    segments: Vec<WindowSegment>,
+    tags: Vec<WindowTag>,
 }
 
 #[derive(Clone)]
 struct ChildContext<'a> {
     lineage: &'a str,
     key: &'a str,
+    membership_context: &'a str,
     event_point: TemporalPoint,
     is_active: bool,
     segments: &'a [WindowSegment],
     tags: &'a [WindowTag],
-}
-
-struct RollupSegmentTransition<'a> {
-    previous_child: ChildContext<'a>,
-    current_segments: &'a [WindowSegment],
-    current_tags: &'a [WindowTag],
 }
 
 struct WindowObservation {
@@ -379,6 +389,7 @@ pub struct EventPipeline<T> {
     history: WindowHistory,
     active: HashMap<RuntimeStateKey, OpenState>,
     parents: HashMap<RuntimeStateKey, ParentState>,
+    rollup_memberships: HashMap<RollupMembershipKey, RollupMembership>,
     position: i64,
     next_record_id: u64,
     marker: PhantomData<T>,
@@ -681,6 +692,7 @@ impl<T> EventPipelineBuilder<T> {
             history: WindowHistory::new(),
             active: HashMap::new(),
             parents: HashMap::new(),
+            rollup_memberships: HashMap::new(),
             position: 0,
             next_record_id: 0,
             marker: PhantomData,
@@ -989,30 +1001,6 @@ impl<T> EventPipeline<T> {
         })?);
 
         if is_active {
-            if let Some(previous) = previous
-                && previous.segments != segments
-            {
-                self.sync_rollup_segment_transition(
-                    &definition.rollups,
-                    event,
-                    source,
-                    partition,
-                    RollupSegmentTransition {
-                        previous_child: ChildContext {
-                            lineage: &definition.name,
-                            key: &key,
-                            event_point: event_point.clone(),
-                            is_active: true,
-                            segments: &previous.segments,
-                            tags: &previous.tags,
-                        },
-                        current_segments: &segments,
-                        current_tags: &tags,
-                    },
-                    emissions,
-                )?;
-                return Ok(());
-            }
             self.sync_rollups(
                 &definition.rollups,
                 event,
@@ -1021,6 +1009,7 @@ impl<T> EventPipeline<T> {
                 ChildContext {
                     lineage: &definition.name,
                     key: &key,
+                    membership_context: "",
                     event_point: event_point.clone(),
                     is_active: true,
                     segments: &segments,
@@ -1037,6 +1026,7 @@ impl<T> EventPipeline<T> {
                 ChildContext {
                     lineage: &definition.name,
                     key: &key,
+                    membership_context: "",
                     event_point: event_point.clone(),
                     is_active: false,
                     segments: &previous.segments,
@@ -1053,6 +1043,7 @@ impl<T> EventPipeline<T> {
                 ChildContext {
                     lineage: &definition.name,
                     key: &key,
+                    membership_context: "",
                     event_point: event_point.clone(),
                     is_active: false,
                     segments: &[],
@@ -1097,37 +1088,134 @@ impl<T> EventPipeline<T> {
     ) -> Result<(), IngestionError> {
         let projected_segments = project_segments(&definition.segment_projection, child.segments)?;
         let segment_context = stable_segments(&projected_segments);
-        let key = (definition.key)(event);
-        let state_key = (
-            format!("{}>{}", child.lineage, definition.name),
-            key.clone(),
+        let parent_key = (definition.key)(event);
+        let rollup_lineage = format!("{}>{}", child.lineage, definition.name);
+        let membership_key = (
+            rollup_lineage.clone(),
+            child.key.to_owned(),
             source.map(str::to_owned),
             partition.map(str::to_owned),
-            segment_context.clone(),
+            child.membership_context.to_owned(),
         );
-        let parent_state = self.parents.entry(state_key).or_default();
+        let current_membership = RollupMembership {
+            parent_key,
+            segment_context,
+            segments: projected_segments,
+            tags: child.tags.to_vec(),
+        };
+        let previous_membership = self.rollup_memberships.get(&membership_key).cloned();
+
         if child.is_active {
-            parent_state.active_children.insert(child.key.to_owned());
-        } else {
-            parent_state.active_children.remove(child.key);
+            if let Some(previous) = previous_membership.as_ref().filter(|previous| {
+                previous.parent_key != current_membership.parent_key
+                    || previous.segment_context != current_membership.segment_context
+            }) {
+                self.update_rollup_parent(
+                    definition,
+                    event,
+                    source,
+                    partition,
+                    &rollup_lineage,
+                    child.key,
+                    child.membership_context,
+                    child.event_point.clone(),
+                    previous,
+                    false,
+                    emissions,
+                )?;
+            }
+            self.rollup_memberships
+                .insert(membership_key, current_membership.clone());
+            self.update_rollup_parent(
+                definition,
+                event,
+                source,
+                partition,
+                &rollup_lineage,
+                child.key,
+                child.membership_context,
+                child.event_point,
+                &current_membership,
+                true,
+                emissions,
+            )?;
+        } else if let Some(previous) = previous_membership {
+            self.rollup_memberships.remove(&membership_key);
+            self.update_rollup_parent(
+                definition,
+                event,
+                source,
+                partition,
+                &rollup_lineage,
+                child.key,
+                child.membership_context,
+                child.event_point,
+                &previous,
+                false,
+                emissions,
+            )?;
         }
-        let is_active = (definition.is_active)(parent_state.view());
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_rollup_parent(
+        &mut self,
+        definition: &RollUpDefinition<T>,
+        event: &T,
+        source: Option<&str>,
+        partition: Option<&str>,
+        rollup_lineage: &str,
+        child_key: &str,
+        child_membership_context: &str,
+        event_point: TemporalPoint,
+        membership: &RollupMembership,
+        child_is_active: bool,
+        emissions: &mut Vec<WindowEmission>,
+    ) -> Result<(), IngestionError> {
+        let parent_state_key = (
+            rollup_lineage.to_owned(),
+            membership.parent_key.clone(),
+            source.map(str::to_owned),
+            partition.map(str::to_owned),
+            membership.segment_context.clone(),
+        );
+        let (is_active, is_empty) = {
+            let parent_state = self.parents.entry(parent_state_key.clone()).or_default();
+            let child_id = RollupChildId {
+                key: child_key.to_owned(),
+                membership_context: child_membership_context.to_owned(),
+            };
+            if child_is_active {
+                parent_state.active_children.insert(child_id);
+            } else {
+                parent_state.active_children.remove(&child_id);
+            }
+            (
+                (definition.is_active)(parent_state.view()),
+                parent_state.active_children.is_empty(),
+            )
+        };
+        if is_empty && !is_active {
+            self.parents.remove(&parent_state_key);
+        }
+
         emissions.extend(self.sync_window_state(WindowObservation {
             state_key: (
                 definition.name.clone(),
-                key.clone(),
+                membership.parent_key.clone(),
                 source.map(str::to_owned),
                 partition.map(str::to_owned),
-                segment_context,
+                membership.segment_context.clone(),
             ),
             window_name: definition.name.clone(),
-            key: key.clone(),
-            event_point: child.event_point.clone(),
+            key: membership.parent_key.clone(),
+            event_point: event_point.clone(),
             source: source.map(str::to_owned),
             partition: partition.map(str::to_owned),
             is_active,
-            segments: projected_segments.clone(),
-            tags: child.tags.to_vec(),
+            segments: membership.segments.clone(),
+            tags: membership.tags.clone(),
         })?);
 
         self.sync_rollups(
@@ -1137,78 +1225,15 @@ impl<T> EventPipeline<T> {
             partition,
             ChildContext {
                 lineage: &definition.name,
-                key: &key,
-                event_point: child.event_point.clone(),
+                key: &membership.parent_key,
+                membership_context: &membership.segment_context,
+                event_point,
                 is_active,
-                segments: &projected_segments,
-                tags: child.tags,
+                segments: &membership.segments,
+                tags: &membership.tags,
             },
             emissions,
         )?;
-        Ok(())
-    }
-
-    fn sync_rollup_segment_transition(
-        &mut self,
-        definitions: &[RollUpDefinition<T>],
-        event: &T,
-        source: Option<&str>,
-        partition: Option<&str>,
-        transition: RollupSegmentTransition<'_>,
-        emissions: &mut Vec<WindowEmission>,
-    ) -> Result<(), IngestionError> {
-        for definition in definitions {
-            let previous_projected = project_segments(
-                &definition.segment_projection,
-                transition.previous_child.segments,
-            )?;
-            let current_projected =
-                project_segments(&definition.segment_projection, transition.current_segments)?;
-            if previous_projected != current_projected {
-                self.sync_rollup(
-                    definition,
-                    event,
-                    source,
-                    partition,
-                    ChildContext {
-                        is_active: false,
-                        ..transition.previous_child.clone()
-                    },
-                    emissions,
-                )?;
-                self.sync_rollup(
-                    definition,
-                    event,
-                    source,
-                    partition,
-                    ChildContext {
-                        lineage: transition.previous_child.lineage,
-                        key: transition.previous_child.key,
-                        event_point: transition.previous_child.event_point.clone(),
-                        is_active: true,
-                        segments: transition.current_segments,
-                        tags: transition.current_tags,
-                    },
-                    emissions,
-                )?;
-            } else {
-                self.sync_rollup(
-                    definition,
-                    event,
-                    source,
-                    partition,
-                    ChildContext {
-                        lineage: transition.previous_child.lineage,
-                        key: transition.previous_child.key,
-                        event_point: transition.previous_child.event_point.clone(),
-                        is_active: true,
-                        segments: transition.current_segments,
-                        tags: transition.current_tags,
-                    },
-                    emissions,
-                )?;
-            }
-        }
         Ok(())
     }
 
@@ -1367,7 +1392,7 @@ impl<T> EventPipeline<T> {
     }
 
     fn next_id(&mut self) -> Result<WindowRecordId, IngestionError> {
-        let id = WindowRecordId::new(format!("pipeline-{:04}", self.next_record_id));
+        let id = WindowRecordId::generated(format!("pipeline-{:04}", self.next_record_id));
         self.next_record_id = self
             .next_record_id
             .checked_add(1)

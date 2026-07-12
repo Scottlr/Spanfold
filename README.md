@@ -19,7 +19,7 @@ repository checkout:
 
 ```bash
 dotnet add package Spanfold --version 0.1.0-preview.2
-cargo add spanfold --path packages/rust/crates/spanfold
+cargo add spanfold@0.1.0
 ```
 
 ## Quick Start
@@ -212,8 +212,13 @@ dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.2
 
 A Rust 2024 package and CLI that support the core comparison contract with
 idiomatic builder methods, typed temporal records, selector-backed comparison
-plans, deterministic exports, audit bundles, testing helpers, and high-throughput
+plans, deterministic exports, audit bundles, testing helpers, and event-driven
 window recording.
+
+```bash
+cargo add spanfold@0.1.0
+cargo install spanfold-cli --version 0.1.0
+```
 
 → [Rust package README](packages/rust/README.md)
 

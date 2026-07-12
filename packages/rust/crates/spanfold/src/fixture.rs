@@ -20,6 +20,9 @@ pub enum FixtureError {
     /// Temporal range construction failure.
     #[error("{0}")]
     Temporal(#[from] crate::TemporalRangeError),
+    /// Window fixture construction failure.
+    #[error("{0}")]
+    WindowFixture(#[from] crate::WindowHistoryFixtureError),
 }
 
 /// Parsed contract fixture.
@@ -52,7 +55,7 @@ impl ContractFixture {
                     window.key.clone(),
                     window.start_position,
                     metadata,
-                );
+                )?;
             }
         }
 

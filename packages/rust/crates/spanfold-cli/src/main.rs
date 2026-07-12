@@ -26,7 +26,7 @@ use workflow::{
     import_events_to_file, load_fixture, write_audit_bundle,
 };
 
-/// Production high-throughput CLI for Spanfold temporal evidence workflows.
+/// Preview CLI for Spanfold temporal evidence workflows.
 #[derive(Debug, Parser)]
 #[command(name = "spanfold")]
 #[command(version, about)]
