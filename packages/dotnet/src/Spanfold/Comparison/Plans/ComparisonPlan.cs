@@ -201,6 +201,7 @@ public sealed class ComparisonPlan
 
         return comparators
             .Where(static comparator => !string.IsNullOrWhiteSpace(comparator))
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
     }
 }
