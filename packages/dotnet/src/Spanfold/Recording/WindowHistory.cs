@@ -887,12 +887,7 @@ public sealed class WindowHistory
 
     private static string StableObjectValue(object? value)
     {
-        return value switch
-        {
-            null => "<null>",
-            IFormattable formattable => value.GetType().FullName + ":" + formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
-            _ => value.GetType().FullName + ":" + value
-        };
+        return CanonicalValueFormatter.Format(value);
     }
 
     private static SegmentContext StableSegments(IReadOnlyList<WindowSegment> segments) => new(segments);
