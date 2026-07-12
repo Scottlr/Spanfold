@@ -134,6 +134,14 @@ internal sealed class WindowRuntime<TEvent>
         }
     }
 
+    public void TrimInactiveState()
+    {
+        foreach (var rollUp in this.rollUps)
+        {
+            rollUp.TrimInactiveState();
+        }
+    }
+
     private void ObserveRollUps(
         TEvent @event,
         object? source,

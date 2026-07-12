@@ -138,6 +138,35 @@ internal sealed class RollUpRuntime<TEvent>
             ref emissions);
     }
 
+    public void TrimInactiveState()
+    {
+        var inactiveKeys = this.parents
+            .Where(static pair => !pair.Value.IsActive && pair.Value.Children.Values.All(static active => !active))
+            .Select(static pair => pair.Key)
+            .ToHashSet();
+
+        foreach (var key in inactiveKeys)
+        {
+            this.parents.Remove(key);
+        }
+
+        if (inactiveKeys.Count > 0)
+        {
+            foreach (var child in this.childMemberships
+                .Where(pair => inactiveKeys.Contains(pair.Value.StateKey))
+                .Select(static pair => pair.Key)
+                .ToArray())
+            {
+                this.childMemberships.Remove(child);
+            }
+        }
+
+        foreach (var rollUp in this.rollUps)
+        {
+            rollUp.TrimInactiveState();
+        }
+    }
+
     public void ObserveChildSegmentTransition(
         TEvent @event,
         object? source,

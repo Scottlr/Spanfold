@@ -156,6 +156,29 @@ public sealed class EventPipeline<TEvent>
     }
 
     /// <summary>
+    /// Evicts roll-up state whose parent and child memberships are all inactive.
+    /// </summary>
+    /// <remarks>
+    /// This is an explicit retention boundary. It does not alter recorded
+    /// history, but future roll-up activity will rebuild membership knowledge
+    /// from subsequent events. Call it between ingestion batches, never from a
+    /// callback or while another ingestion is active.
+    /// </remarks>
+    public void TrimInactiveState()
+    {
+        if (Volatile.Read(ref this.ingestionInProgress) != 0)
+        {
+            throw new InvalidOperationException(
+                "Roll-up state can only be trimmed between ingestion operations.");
+        }
+
+        foreach (var runtime in this.runtimes)
+        {
+            runtime.TrimInactiveState();
+        }
+    }
+
+    /// <summary>
     /// Ingests events sequentially and returns all emissions in processing order.
     /// </summary>
     /// <param name="events">The events to process.</param>
