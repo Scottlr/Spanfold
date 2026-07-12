@@ -7,7 +7,7 @@ namespace Spanfold.Tests.Comparison;
 public sealed class KnownAtComparisonTests
 {
     [Fact]
-    public void ClosedWindowIsExcludedBeforeKnownAtPosition()
+    public void ClosedWindowIsMaterializedProvisionalBeforeKnownAtPosition()
     {
         var history = BuildHistory();
 
@@ -19,8 +19,10 @@ public sealed class KnownAtComparisonTests
             .Using(comparators => comparators.Overlap())
             .Prepare();
 
-        Assert.Empty(prepared.NormalizedWindows);
-        Assert.Contains(prepared.Diagnostics, diagnostic =>
+        Assert.Equal(2, prepared.NormalizedWindows.Count);
+        Assert.All(prepared.NormalizedWindows, static window =>
+            Assert.Equal(TemporalRangeEndStatus.OpenAtHorizon, window.Range.EndStatus));
+        Assert.DoesNotContain(prepared.Diagnostics, diagnostic =>
             diagnostic.Code == ComparisonPlanValidationCode.FutureWindowExcluded);
     }
 
