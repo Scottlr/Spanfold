@@ -18,7 +18,9 @@ internal sealed class WindowRuntime<TEvent>
 
         for (var i = 0; i < this.rollUps.Length; i++)
         {
-            this.rollUps[i] = new RollUpRuntime<TEvent>(definition.RollUps[i]);
+            this.rollUps[i] = new RollUpRuntime<TEvent>(
+                definition.RollUps[i],
+                definition.KeyComparer);
         }
     }
 

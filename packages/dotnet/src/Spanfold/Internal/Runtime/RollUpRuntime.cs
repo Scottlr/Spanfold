@@ -6,19 +6,25 @@ namespace Spanfold.Internal.Runtime;
 internal sealed class RollUpRuntime<TEvent>
 {
     private readonly RollUpDefinition<TEvent> definition;
+    private readonly IEqualityComparer<object> childKeyComparer;
     private readonly Dictionary<RollUpStateKey, ParentState> parents;
     private readonly RollUpRuntime<TEvent>[] rollUps;
 
-    public RollUpRuntime(RollUpDefinition<TEvent> definition)
+    public RollUpRuntime(
+        RollUpDefinition<TEvent> definition,
+        IEqualityComparer<object> childKeyComparer)
     {
         this.definition = definition;
+        this.childKeyComparer = childKeyComparer;
         this.parents = new Dictionary<RollUpStateKey, ParentState>(
             new RollUpStateKeyComparer(definition.KeyComparer));
         this.rollUps = new RollUpRuntime<TEvent>[definition.RollUps.Count];
 
         for (var i = 0; i < this.rollUps.Length; i++)
         {
-            this.rollUps[i] = new RollUpRuntime<TEvent>(definition.RollUps[i]);
+            this.rollUps[i] = new RollUpRuntime<TEvent>(
+                definition.RollUps[i],
+                definition.KeyComparer);
         }
     }
 
@@ -43,7 +49,7 @@ internal sealed class RollUpRuntime<TEvent>
 
         if (!this.parents.TryGetValue(parentStateKey, out var parent))
         {
-            parent = new ParentState();
+            parent = new ParentState(this.childKeyComparer);
             this.parents.Add(parentStateKey, parent);
         }
 
@@ -159,7 +165,7 @@ internal sealed class RollUpRuntime<TEvent>
 
         if (!this.parents.TryGetValue(parentStateKey, out var parent))
         {
-            parent = new ParentState();
+            parent = new ParentState(this.childKeyComparer);
             this.parents.Add(parentStateKey, parent);
         }
 
@@ -270,7 +276,12 @@ internal sealed class RollUpRuntime<TEvent>
 
     private sealed class ParentState
     {
-        public Dictionary<object, bool> Children { get; } = [];
+        public ParentState(IEqualityComparer<object> childKeyComparer)
+        {
+            Children = new Dictionary<object, bool>(childKeyComparer);
+        }
+
+        public Dictionary<object, bool> Children { get; }
 
         public bool IsActive { get; set; }
 
