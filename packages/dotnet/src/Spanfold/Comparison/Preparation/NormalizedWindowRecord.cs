@@ -27,7 +27,7 @@ public sealed record NormalizedWindowRecord(
         return values switch
         {
             null => [],
-            T[] array => array,
+            T[] array => array.ToArray(),
             _ => values.ToArray()
         };
     }

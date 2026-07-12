@@ -68,7 +68,7 @@ public abstract record WindowRecord(
         return values switch
         {
             null => [],
-            T[] array => array,
+            T[] array => array.ToArray(),
             _ => values.ToArray()
         };
     }
