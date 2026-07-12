@@ -241,7 +241,7 @@ internal static class ComparisonRuntime
         List<CoverageRow> rows,
         List<CoverageSummary> summaries)
     {
-        var summary = new Dictionary<CoverageScope, (double Target, double Covered)>();
+        var summary = new Dictionary<CoverageScope, (long Target, long Covered)>();
 
         for (var i = 0; i < aligned.Segments.Count; i++)
         {
@@ -251,8 +251,10 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            var targetMagnitude = Measure(segment.Range);
-            var coveredMagnitude = evidence.IsAgainstActive(segment) ? targetMagnitude : 0d;
+            var targetMagnitudeExact = Measure(segment.Range);
+            var targetMagnitude = (double)targetMagnitudeExact;
+            var coveredMagnitudeExact = evidence.IsAgainstActive(segment) ? targetMagnitudeExact : 0L;
+            var coveredMagnitude = (double)coveredMagnitudeExact;
 
             rows.Add(new CoverageRow(
                 segment.WindowName,
@@ -262,11 +264,13 @@ internal static class ComparisonRuntime
                 targetMagnitude,
                 coveredMagnitude,
                 segment.TargetRecordIds,
-                segment.AgainstRecordIds));
+                segment.AgainstRecordIds,
+                targetMagnitudeExact,
+                coveredMagnitudeExact));
 
             var key = new CoverageScope(segment.WindowName, segment.Key, segment.Partition);
             summary.TryGetValue(key, out var totals);
-            summary[key] = (totals.Target + targetMagnitude, totals.Covered + coveredMagnitude);
+            summary[key] = (totals.Target + targetMagnitudeExact, totals.Covered + coveredMagnitudeExact);
         }
 
         foreach (var item in summary.OrderBy(static pair => pair.Key.WindowName, StringComparer.Ordinal))
@@ -277,7 +281,9 @@ internal static class ComparisonRuntime
                 item.Key.Partition,
                 item.Value.Target,
                 item.Value.Covered,
-                item.Value.Target == 0d ? 0d : item.Value.Covered / item.Value.Target));
+                item.Value.Target == 0L ? 0d : (double)item.Value.Covered / item.Value.Target,
+                item.Value.Target,
+                item.Value.Covered));
         }
     }
 
@@ -1085,7 +1091,7 @@ internal static class ComparisonRuntime
         return false;
     }
 
-    private static double Measure(TemporalRange range)
+    private static long Measure(TemporalRange range)
     {
         return range.Axis == TemporalAxis.Timestamp
             ? range.GetTimeDuration().Ticks
