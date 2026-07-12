@@ -57,6 +57,19 @@ public sealed class OneLevelRollUpRuntimeTests
     }
 
     [Fact]
+    public void RollUpReevaluatesWhenAnInactiveChildBecomesKnown()
+    {
+        var pipeline = CreatePipeline();
+
+        pipeline.Ingest(new PriceTick("selection-1", "market-1", 0m));
+        var result = pipeline.Ingest(new PriceTick("selection-2", "market-1", 1.01m));
+
+        var parent = Assert.Single(result.Emissions);
+        Assert.Equal("MarketSuspension", parent.WindowName);
+        Assert.Equal(WindowTransitionKind.Closed, parent.Kind);
+    }
+
+    [Fact]
     public void RollUpStateIsPartitionedByParentKey()
     {
         var pipeline = CreatePipeline();
