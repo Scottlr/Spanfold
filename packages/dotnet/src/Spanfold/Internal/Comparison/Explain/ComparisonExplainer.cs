@@ -40,7 +40,12 @@ internal static class ComparisonExplainer
         writer.Title("Comparison Explain: " + result.Plan.Name);
         AppendPlan(writer, result.Plan, result.Diagnostics);
 
-        if (result.Prepared is null)
+        if (!result.Plan.Output.IncludeExplainData)
+        {
+            writer.Section("Preparation");
+            writer.Item("status", "omitted by output options");
+        }
+        else if (result.Prepared is null)
         {
             writer.Section("Preparation");
             writer.Item("status", "not produced");
@@ -50,7 +55,12 @@ internal static class ComparisonExplainer
             AppendPreparation(writer, result.Prepared);
         }
 
-        if (result.Aligned is null)
+        if (!result.Plan.Output.IncludeAlignedSegments)
+        {
+            writer.Section("Alignment");
+            writer.Item("status", "omitted by output options");
+        }
+        else if (result.Aligned is null)
         {
             writer.Section("Alignment");
             writer.Item("status", "not produced");

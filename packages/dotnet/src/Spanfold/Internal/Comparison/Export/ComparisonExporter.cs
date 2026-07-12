@@ -244,8 +244,23 @@ internal static class ComparisonExporter
         WritePlanFields(writer, result.Plan, result.Diagnostics);
         writer.WriteEndObject();
         WriteDiagnostics(writer, "diagnostics", result.Diagnostics);
-        WritePrepared(writer, result.Prepared);
-        WriteAligned(writer, result.Aligned);
+        if (result.Plan.Output.IncludeExplainData)
+        {
+            WritePrepared(writer, result.Prepared);
+        }
+        else
+        {
+            writer.WriteNull("prepared");
+        }
+
+        if (result.Plan.Output.IncludeAlignedSegments)
+        {
+            WriteAligned(writer, result.Aligned);
+        }
+        else
+        {
+            writer.WriteNull("aligned");
+        }
         WriteComparatorSummaries(writer, result.ComparatorSummaries);
         WriteRows(writer, result);
         WriteRowFinalities(writer, result.RowFinalities);
