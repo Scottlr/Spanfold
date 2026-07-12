@@ -82,6 +82,31 @@ public sealed class WindowAnnotationTests
     }
 
     [Fact]
+    public void AnnotationsKnownAtExcludesAnnotationsFromAnotherClock()
+    {
+        var pipeline = CreatePipeline();
+
+        pipeline.Ingest(new DeviceSignal("device-1", IsOnline: false), "lane-a");
+
+        var open = Assert.Single(pipeline.History.Query()
+            .Window("DeviceOffline")
+            .Lane("lane-a")
+            .OpenWindows());
+
+        var differentClock = pipeline.History.Annotate(
+            open,
+            "reason",
+            "other-clock",
+            TemporalPoint.ForTimestamp(DateTimeOffset.Parse("2026-04-21T10:00:00Z"), "clock-b"));
+
+        var annotations = pipeline.History.AnnotationsKnownAt(
+            open,
+            TemporalPoint.ForTimestamp(DateTimeOffset.Parse("2026-04-21T11:00:00Z"), "clock-a"));
+
+        Assert.DoesNotContain(differentClock, annotations);
+    }
+
+    [Fact]
     public void AnnotationRejectsUnknownKnownAtAxis()
     {
         var pipeline = CreatePipeline();
