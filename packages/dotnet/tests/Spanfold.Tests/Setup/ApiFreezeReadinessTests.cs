@@ -18,7 +18,7 @@ public sealed class ApiFreezeReadinessTests
     [Theory]
     [InlineData("src/Spanfold/Spanfold.csproj", "true")]
     [InlineData("src/Spanfold.Testing/Spanfold.Testing.csproj", "true")]
-    [InlineData("src/Spanfold.Cli/Spanfold.Cli.csproj", "false")]
+    [InlineData("src/Spanfold.Cli/Spanfold.Cli.csproj", "true")]
     [InlineData("benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj", "false")]
     public void PackageBoundariesAreExplicit(string projectPath, string expectedPackable)
     {

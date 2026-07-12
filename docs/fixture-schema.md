@@ -82,11 +82,11 @@ Historical runs keep Spanfold's normal safety behavior. Live fixture runs should
 ## Commands
 
 ```bash
-dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- validate-plan fixture.json # Validate the fixture plan.
-dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- compare fixture.json --format json # Execute and export JSON.
-dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- compare fixture.json --format llm-context # Execute and export agent-readable context.
-dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- explain fixture.json # Execute and export Markdown.
-dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- audit fixture.json --out artifacts/spanfold-audit # Write JSON, Markdown, debug HTML, LLM context, and a manifest.
+spanfold validate-plan fixture.json # Validate the fixture plan.
+spanfold compare fixture.json --format json # Execute and export JSON.
+spanfold compare fixture.json --format llm-context # Execute and export agent-readable context.
+spanfold explain fixture.json # Execute and export Markdown.
+spanfold audit fixture.json --out artifacts/spanfold-audit # Write JSON, Markdown, debug HTML, LLM context, and a manifest.
 ```
 
 For lower-setup audits, use flat JSON Lines where each line is one recorded
@@ -98,7 +98,7 @@ window. This avoids writing the full fixture envelope and plan by hand.
 ```
 
 ```bash
-dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- audit-windows windows.jsonl --window DeviceOffline --target provider-a --against provider-b --out artifacts/spanfold-audit
+spanfold audit-windows windows.jsonl --window DeviceOffline --target provider-a --against provider-b --out artifacts/spanfold-audit
 ```
 
 `audit-windows` accepts optional `windowName`, `partition`, `segments`, and
