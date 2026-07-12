@@ -66,6 +66,18 @@ public sealed class HierarchyComparisonTests
     }
 
     [Fact]
+    public void OpenWindowsProduceBoundednessDiagnostic()
+    {
+        var history = BuildHistoryWithOpenWindow();
+
+        var result = history.CompareHierarchy("Hierarchy QA", "Parent", "Child");
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(ComparisonPlanValidationCode.HierarchyOpenWindowsWithoutHorizon, diagnostic.Code);
+        Assert.Empty(result.Rows);
+    }
+
+    [Fact]
     public void MultiLevelRollupPathRemainsDeterministic()
     {
         var pipeline = Spanfold
@@ -123,6 +135,13 @@ public sealed class HierarchyComparisonTests
         }
 
         return history;
+    }
+
+    private static WindowHistory BuildHistoryWithOpenWindow()
+    {
+        var parent = new OpenWindow("Parent", "parent-1", 1, Source: "source-a");
+        var child = new OpenWindow("Child", "child-1", 1, Source: "source-a");
+        return WindowHistory.CreateFixture([], [parent, child]);
     }
 
     private sealed record WindowInput(string WindowName, string Key, long Start, long End);

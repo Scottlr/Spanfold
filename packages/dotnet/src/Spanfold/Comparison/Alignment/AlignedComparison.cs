@@ -7,8 +7,6 @@ namespace Spanfold;
 /// Aligned comparisons split normalized windows at every relevant boundary so
 /// comparators can reason over one deterministic segment at a time.
 /// </remarks>
-/// <param name="Prepared">The prepared comparison input.</param>
-/// <param name="Segments">The deterministic aligned segments.</param>
 public sealed record AlignedComparison
 {
     internal AlignedComparison(PreparedComparison prepared, IReadOnlyList<AlignedSegment> segments)
