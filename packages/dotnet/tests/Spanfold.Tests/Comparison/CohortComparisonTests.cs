@@ -214,6 +214,23 @@ public sealed class CohortComparisonTests
     }
 
     [Fact]
+    public void DuplicateCohortSourcesAreRejected()
+    {
+        var pipeline = CreatePipeline();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            pipeline.History
+                .Compare("Invalid cohort")
+                .Target("source-a", selector => selector.Source("source-a"))
+                .AgainstCohort("cohort", cohort => cohort.Sources("source-b", "source-b"))
+                .Within(scope => scope.Window("SelectionPriced"))
+                .Using(comparators => comparators.Residual())
+                .Build());
+
+        Assert.Contains("must be unique", exception.Message);
+    }
+
+    [Fact]
     public void NegativeCohortActivityCountsAreRejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => CohortActivity.AtMost(-1));
