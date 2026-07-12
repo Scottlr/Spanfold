@@ -380,6 +380,46 @@ public sealed class SpanfoldCliTests
         }
     }
 
+    [Fact]
+    public void ForeignFixtureSchemaIsRejected()
+    {
+        var fixturePath = TempFixturePath();
+        try
+        {
+            File.WriteAllText(fixturePath, "{\"schema\":\"foreign.schema\",\"schemaVersion\":1,\"windows\":[],\"plan\":{}}");
+
+            var (exitCode, output, error) = Run("validate-plan", fixturePath);
+
+            Assert.Equal(2, exitCode);
+            Assert.Equal(string.Empty, output);
+            Assert.Contains("Unsupported fixture schema", error);
+        }
+        finally
+        {
+            File.Delete(fixturePath);
+        }
+    }
+
+    [Fact]
+    public void UnsupportedFixtureSchemaVersionIsRejected()
+    {
+        var fixturePath = TempFixturePath();
+        try
+        {
+            File.WriteAllText(fixturePath, "{\"schema\":\"spanfold.contract-fixture\",\"schemaVersion\":2,\"windows\":[],\"plan\":{}}");
+
+            var (exitCode, output, error) = Run("validate-plan", fixturePath);
+
+            Assert.Equal(2, exitCode);
+            Assert.Equal(string.Empty, output);
+            Assert.Contains("Unsupported fixture schemaVersion", error);
+        }
+        finally
+        {
+            File.Delete(fixturePath);
+        }
+    }
+
     private static (int ExitCode, string Output, string Error) Run(params string[] args)
     {
         using var output = new StringWriter();
