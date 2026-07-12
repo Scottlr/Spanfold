@@ -1,10 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Scottlr/Spanfold/main/docs/assets/brand/spanfold-logo-readme-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Scottlr/Spanfold/main/docs/assets/brand/spanfold-logo-readme-light.svg">
-    <img src="https://raw.githubusercontent.com/Scottlr/Spanfold/main/docs/assets/brand/spanfold-logo-readme-light.svg" alt="Spanfold" width="280">
-  </picture>
-</p>
+[![Spanfold](https://raw.githubusercontent.com/Scottlr/Spanfold/main/docs/assets/brand/spanfold-logo-readme-light.svg)](https://github.com/Scottlr/Spanfold)
 
 # Spanfold
 
@@ -53,9 +47,9 @@ The core flow is:
 Install the library, optional testing helpers, and CLI tool from NuGet.org:
 
 ```bash
-dotnet add package Spanfold --version 0.1.0-preview.1
-dotnet add package Spanfold.Testing --version 0.1.0-preview.1
-dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.1
+dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold.Testing --version 0.1.0-preview.2
+dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.2
 ```
 
 `Spanfold.Testing` is optional. It is useful in consumer test suites when you want

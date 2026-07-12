@@ -13,7 +13,7 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageTags>events;windows;analytics;testing</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Initial preview testing helpers for Spanfold comparison fixtures, assertions, snapshots, and virtual live horizons.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fix NuGet package README logo rendering.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <WarningsAsErrors>$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <IsPackable>true</IsPackable>
