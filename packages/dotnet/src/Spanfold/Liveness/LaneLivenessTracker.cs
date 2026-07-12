@@ -88,6 +88,11 @@ public sealed class LaneLivenessTracker
             throw new ArgumentOutOfRangeException(nameof(observedAt), "Observation cannot be earlier than tracker start.");
         }
 
+        if (observedAt < this.lastCheckAt)
+        {
+            throw new ArgumentOutOfRangeException(nameof(observedAt), "Observation cannot be earlier than the last evaluated horizon.");
+        }
+
         if (state.LastObservedAt.HasValue && observedAt < state.LastObservedAt.Value)
         {
             throw new ArgumentOutOfRangeException(nameof(observedAt), "Observation cannot be earlier than the lane's previous observation.");
