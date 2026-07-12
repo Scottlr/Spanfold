@@ -344,6 +344,16 @@ public sealed class SpanfoldCliTests
     }
 
     [Fact]
+    public void UnknownOptionReturnsDiagnosticBeforeReadingFixture()
+    {
+        var (exitCode, output, error) = Run("compare", "missing-fixture.json", "--formta", "json");
+
+        Assert.Equal(2, exitCode);
+        Assert.Equal(string.Empty, output);
+        Assert.Contains("Unknown option: --formta", error);
+    }
+
+    [Fact]
     public void InvalidFixtureShapeReturnsReadableDiagnostic()
     {
         var fixturePath = TempFixturePath();

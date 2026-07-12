@@ -28,6 +28,8 @@ public static class SpanfoldCli
                 return 2;
             }
 
+            ValidateOptions(args, command);
+
             if (string.Equals(command, "audit-windows", StringComparison.Ordinal))
             {
                 var windowResult = ExecuteWindowJsonLines(args);
@@ -86,6 +88,42 @@ public static class SpanfoldCli
             || string.Equals(command, "explain", StringComparison.Ordinal)
             || string.Equals(command, "audit", StringComparison.Ordinal)
             || string.Equals(command, "audit-windows", StringComparison.Ordinal);
+    }
+
+    private static void ValidateOptions(string[] args, string command)
+    {
+        var valueOptions = string.Equals(command, "audit-windows", StringComparison.Ordinal)
+            ? new HashSet<string>(StringComparer.Ordinal)
+            {
+                "--target", "--against", "--out", "--window", "--comparators",
+                "--name", "--live-horizon-position"
+            }
+            : new HashSet<string>(StringComparer.Ordinal) { "--format", "--out" };
+
+        var flags = new HashSet<string>(StringComparer.Ordinal) { "--strict" };
+        for (var index = 2; index < args.Length; index++)
+        {
+            var option = args[index];
+            if (!option.StartsWith("--", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Unexpected positional argument: " + option);
+            }
+
+            if (!valueOptions.Contains(option) && !flags.Contains(option))
+            {
+                throw new ArgumentException("Unknown option: " + option);
+            }
+
+            if (valueOptions.Contains(option))
+            {
+                if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("Option " + option + " requires a value.");
+                }
+
+                index++;
+            }
+        }
     }
 
     private static string ReadFormat(string[] args)
