@@ -1,5 +1,10 @@
 # Rust Quality Audit
 
+> **Historical audit snapshot.** The findings below describe revision
+> `a1e9c08`; they are not the current status of `main`. Keep this catalog as
+> review evidence and use subsequent repository history and release gates for
+> current disposition.
+
 **Audit date:** 2026-07-11  
 **Audited revision:** `a1e9c08` (`main`)  
 **Scope:** `packages/rust`, its public Rust API, CLI, benchmarks, specifications, package metadata, and Rust CI gates  

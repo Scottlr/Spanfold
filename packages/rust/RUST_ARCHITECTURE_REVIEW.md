@@ -1,5 +1,9 @@
 # Rust Architecture Review Catalog
 
+> **Historical review snapshot.** Findings below describe revision `7f39c18`
+> and must not be read as the current status of `main`. The catalog is retained
+> as review evidence rather than rewritten after each remediation.
+
 **Review date:** 2026-07-12  
 **Reviewed revision:** `7f39c18` (`main`)  
 **Scope:** `packages/rust`, the Rust CLI, and `examples/npc_stress_test/rust`  

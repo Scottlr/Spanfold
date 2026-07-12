@@ -273,7 +273,8 @@ pub(super) fn build_lead_lag_rows(
                 comparison_point: Some(row_point_from_temporal_point(&nearest.point)),
                 delta_magnitude: Some(delta),
                 tolerance_magnitude,
-                is_within_tolerance: delta.abs() <= tolerance_magnitude,
+                is_within_tolerance: absolute_delta_magnitude(&target_point, &nearest.point)
+                    <= tolerance_magnitude,
                 direction: direction_for_delta(delta),
                 target_record_id: target.record_id.to_owned(),
                 comparison_record_id: Some(nearest.record_id.to_owned()),
@@ -341,9 +342,8 @@ pub(super) fn find_nearest_transition<'a>(
     options
         .into_iter()
         .min_by(|left, right| {
-            delta_magnitude(target_point, &left.point)
-                .abs()
-                .cmp(&delta_magnitude(target_point, &right.point).abs())
+            absolute_delta_magnitude(target_point, &left.point)
+                .cmp(&absolute_delta_magnitude(target_point, &right.point))
                 .then_with(|| left.record_id.cmp(right.record_id))
         })
         .expect("nearest transition requires a non-empty candidate list")
@@ -355,10 +355,17 @@ pub(super) fn delta_magnitude(
     comparison_point: &crate::TemporalPoint,
 ) -> i64 {
     debug_assert!(target_point.is_compatible_with(comparison_point));
-    target_point
-        .magnitude()
-        .checked_sub(comparison_point.magnitude())
-        .expect("compatible temporal delta fits i64")
+    let delta = i128::from(target_point.magnitude()) - i128::from(comparison_point.magnitude());
+    delta.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+}
+
+pub(super) fn absolute_delta_magnitude(
+    target_point: &crate::TemporalPoint,
+    comparison_point: &crate::TemporalPoint,
+) -> i64 {
+    debug_assert!(target_point.is_compatible_with(comparison_point));
+    let delta = i128::from(target_point.magnitude()) - i128::from(comparison_point.magnitude());
+    delta.abs().min(i128::from(i64::MAX)) as i64
 }
 
 pub(super) fn direction_for_delta(delta: i64) -> LeadLagDirection {
@@ -433,7 +440,7 @@ pub(super) fn build_as_of_rows(
                     matched_point: None,
                     distance_magnitude: future_rejected
                         .as_ref()
-                        .map(|item| delta_magnitude(&target_point, &item.point).abs()),
+                        .map(|item| absolute_delta_magnitude(&target_point, &item.point)),
                     tolerance_magnitude,
                     status: if future_rejected.is_some() {
                         AsOfMatchStatus::FutureRejected
@@ -446,7 +453,7 @@ pub(super) fn build_as_of_rows(
                 continue;
             };
 
-            let distance = delta_magnitude(&target_point, &best.point).abs();
+            let distance = absolute_delta_magnitude(&target_point, &best.point);
             if distance > tolerance_magnitude {
                 rows.push(AsOfRow {
                     window_name: window_name.clone(),
@@ -544,7 +551,7 @@ pub(super) fn find_as_of_candidate<'a>(
     let mut ambiguous = false;
     for index in indexes {
         let candidate = &candidates[index];
-        let distance = delta_magnitude(target_point, &candidate.point).abs();
+        let distance = absolute_delta_magnitude(target_point, &candidate.point);
         if best_distance.is_none_or(|current| distance < current) {
             best = Some(candidate.clone());
             best_distance = Some(distance);

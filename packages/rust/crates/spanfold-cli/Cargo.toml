@@ -1,15 +1,16 @@
 [package]
 name = "spanfold-cli"
 version = "0.1.0"
-description = "Preview CLI for Spanfold temporal evidence workflows."
+description = "Command-line fixture, import, comparison, and audit workflows for Spanfold."
 readme = "../../README.md"
-documentation = "https://docs.rs/spanfold-cli"
+publish = ["crates-io"]
 keywords = ["temporal", "interval", "comparison", "cli"]
 categories = ["command-line-utilities", "data-structures"]
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 
 [[bin]]

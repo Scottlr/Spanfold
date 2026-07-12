@@ -69,13 +69,15 @@ fn create_segment_cohort_data() -> WindowHistory {
             |signal| !signal.is_online,
             |signal| {
                 vec![
-                    WindowSegment::new("market", signal.market_id.clone()),
-                    WindowSegment::new("fixture", signal.fixture_id.clone()),
-                    WindowSegment::new("phase", signal.phase.clone()),
-                    WindowSegment::new("period", signal.period.clone()).with_parent("phase"),
+                    WindowSegment::new("market", signal.market_id.clone()).expect("segment name"),
+                    WindowSegment::new("fixture", signal.fixture_id.clone()).expect("segment name"),
+                    WindowSegment::new("phase", signal.phase.clone()).expect("segment name"),
+                    WindowSegment::new("period", signal.period.clone())
+                        .and_then(|segment| segment.with_parent("phase"))
+                        .expect("segment names"),
                 ]
             },
-            |signal| vec![WindowTag::new("state", signal.state.clone())],
+            |signal| vec![WindowTag::new("state", signal.state.clone()).expect("tag name")],
         )
         .roll_up(
             "MarketPriced",

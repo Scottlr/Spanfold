@@ -1,7 +1,7 @@
 # Spanfold Rust
 
-Rust 1.95.0 / Rust 2024 experimental implementation of Spanfold's library and
-CLI surface. It is not yet a production or high-throughput release.
+Rust 1.95.0 / Rust 2024 preview of Spanfold's library and CLI surface. The API
+is intentionally pre-1.0 and may change between minor releases.
 
 The Rust package now covers the main comparison contract: typed temporal
 primitives, window histories, fixture parsing, staged preparation/alignment,
@@ -9,6 +9,17 @@ core and advanced comparators, cohort/source-matrix/hierarchy analytics,
 deterministic exports, audit bundles, liveness helpers, and testing utilities.
 
 Implementation planning specs live under `packages/rust/specs/`.
+
+## Install
+
+```bash
+cargo add spanfold@0.1.0
+cargo install spanfold-cli --version 0.1.0
+```
+
+The library crate is `spanfold`. The installed CLI command is also `spanfold`.
+See the [Rust changelog](https://github.com/Scottlr/Spanfold/blob/main/packages/rust/CHANGELOG.md)
+for release details.
 
 ## Rust API
 
@@ -71,7 +82,7 @@ let result = history
     .run();
 ```
 
-## Commands
+## Repository development commands
 
 ```bash
 cargo test --all

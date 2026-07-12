@@ -2,10 +2,10 @@
 #![deny(missing_docs)]
 //! Core Rust primitives for Spanfold.
 //!
-//! This crate is the start of Spanfold's Rust 1.95.0 / Rust 2024
-//! implementation. It intentionally begins with strongly typed data structures
-//! and builders that future comparison, export, and CLI work can use without a
-//! mechanical translation from the .NET implementation.
+//! Spanfold records typed temporal state windows, compares evidence across
+//! sources and stages, and exports deterministic audit artifacts. The crate
+//! provides strongly typed builders, histories, selectors, comparison plans,
+//! liveness helpers, and testing utilities without requiring a hosted runtime.
 //!
 //! ```rust
 //! use spanfold::for_events;
@@ -84,10 +84,10 @@ pub use primitive::{PrimitiveValue, PrimitiveValueError};
 pub use records::{
     ClosedWindow, OpenWindow, SummaryError, WindowAnnotation, WindowAnnotationTarget,
     WindowBoundaryChange, WindowBoundaryReason, WindowGroupKind, WindowGroupSummary, WindowHistory,
-    WindowHistoryFixture, WindowHistoryFixtureWindow, WindowHistoryQuery, WindowHistoryRefQuery,
-    WindowHistorySnapshot, WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment,
-    WindowSegment, WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment,
-    summarize_by_tag,
+    WindowHistoryFixture, WindowHistoryFixtureError, WindowHistoryFixtureWindow,
+    WindowHistoryQuery, WindowHistoryRefQuery, WindowHistorySnapshot, WindowMetadataError,
+    WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment, WindowSegment,
+    WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment, summarize_by_tag,
 };
 pub use temporal::{
     TemporalAxis, TemporalPoint, TemporalPointError, TemporalRange, TemporalRangeError,

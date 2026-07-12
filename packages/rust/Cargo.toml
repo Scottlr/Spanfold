@@ -10,6 +10,7 @@ edition = "2024"
 rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/Scottlr/Spanfold"
+homepage = "https://github.com/Scottlr/Spanfold"
 authors = ["Spanfold contributors"]
 
 [workspace.dependencies]

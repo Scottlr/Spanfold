@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use std::{
     cmp::Ordering,
@@ -16,9 +17,17 @@ pub struct WindowRecordId(String);
 
 impl WindowRecordId {
     /// Creates a new record identifier.
-    #[must_use]
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+    pub fn new(value: impl Into<String>) -> Result<Self, WindowMetadataError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(WindowMetadataError::EmptyRecordId);
+        }
+        Ok(Self(value))
+    }
+
+    pub(crate) fn generated(value: String) -> Self {
+        debug_assert!(!value.trim().is_empty());
+        Self(value)
     }
 
     /// Returns the identifier as a string slice.
@@ -46,29 +55,59 @@ impl<'de> Deserialize<'de> for WindowRecordId {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WindowSegment {
     /// Segment name.
-    pub name: String,
+    pub(crate) name: String,
     /// Segment value.
-    pub value: PrimitiveValue,
+    pub(crate) value: PrimitiveValue,
     /// Optional parent segment name.
-    pub parent_name: Option<String>,
+    pub(crate) parent_name: Option<String>,
 }
 
 impl WindowSegment {
     /// Creates a segment.
-    #[must_use]
-    pub fn new(name: impl Into<String>, value: impl Into<PrimitiveValue>) -> Self {
-        Self {
-            name: name.into(),
+    pub fn new(
+        name: impl Into<String>,
+        value: impl Into<PrimitiveValue>,
+    ) -> Result<Self, WindowMetadataError> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(WindowMetadataError::EmptySegmentName);
+        }
+        Ok(Self {
+            name,
             value: value.into(),
             parent_name: None,
-        }
+        })
     }
 
     /// Sets the parent segment name.
+    pub fn with_parent(
+        mut self,
+        parent_name: impl Into<String>,
+    ) -> Result<Self, WindowMetadataError> {
+        let parent_name = parent_name.into();
+        if parent_name.trim().is_empty() {
+            return Err(WindowMetadataError::EmptyParentSegmentName);
+        }
+        self.parent_name = Some(parent_name);
+        Ok(self)
+    }
+
+    /// Returns the segment name.
     #[must_use]
-    pub fn with_parent(mut self, parent_name: impl Into<String>) -> Self {
-        self.parent_name = Some(parent_name.into());
-        self
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the segment value.
+    #[must_use]
+    pub const fn value(&self) -> &PrimitiveValue {
+        &self.value
+    }
+
+    /// Returns the optional parent segment name.
+    #[must_use]
+    pub fn parent_name(&self) -> Option<&str> {
+        self.parent_name.as_deref()
     }
 }
 
@@ -106,20 +145,66 @@ impl<'de> Deserialize<'de> for WindowSegment {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WindowTag {
     /// Tag name.
-    pub name: String,
+    pub(crate) name: String,
     /// Tag value.
-    pub value: PrimitiveValue,
+    pub(crate) value: PrimitiveValue,
 }
 
 impl WindowTag {
     /// Creates a tag.
-    #[must_use]
-    pub fn new(name: impl Into<String>, value: impl Into<PrimitiveValue>) -> Self {
-        Self {
-            name: name.into(),
-            value: value.into(),
+    pub fn new(
+        name: impl Into<String>,
+        value: impl Into<PrimitiveValue>,
+    ) -> Result<Self, WindowMetadataError> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(WindowMetadataError::EmptyTagName);
         }
+        Ok(Self {
+            name,
+            value: value.into(),
+        })
     }
+
+    /// Returns the tag name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the tag value.
+    #[must_use]
+    pub const fn value(&self) -> &PrimitiveValue {
+        &self.value
+    }
+}
+
+/// Public window metadata construction error.
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum WindowMetadataError {
+    /// Record identifiers cannot be blank.
+    #[error("window record id cannot be empty")]
+    EmptyRecordId,
+    /// Segment names cannot be blank.
+    #[error("segment name cannot be empty")]
+    EmptySegmentName,
+    /// Parent segment names cannot be blank.
+    #[error("parent segment name cannot be empty")]
+    EmptyParentSegmentName,
+    /// Tag names cannot be blank.
+    #[error("tag name cannot be empty")]
+    EmptyTagName,
+}
+
+/// Fixture-history construction error.
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum WindowHistoryFixtureError {
+    /// A fixture range was invalid.
+    #[error(transparent)]
+    Temporal(#[from] TemporalRangeError),
+    /// Fixture metadata was invalid.
+    #[error(transparent)]
+    Metadata(#[from] WindowMetadataError),
 }
 
 impl<'de> Deserialize<'de> for WindowTag {
@@ -1781,8 +1866,11 @@ impl WindowHistoryFixture {
         start_position: i64,
         end_position: i64,
         configure: impl FnOnce(WindowHistoryFixtureWindow) -> WindowHistoryFixtureWindow,
-    ) -> Result<Self, TemporalRangeError> {
+    ) -> Result<Self, WindowHistoryFixtureError> {
         let metadata = configure(WindowHistoryFixtureWindow::default());
+        if let Some(error) = metadata.error {
+            return Err(error.into());
+        }
         let id = self.next_id();
         let range = TemporalRange::positions(start_position, end_position)?;
         self.history.push_closed(ClosedWindow {
@@ -1802,15 +1890,17 @@ impl WindowHistoryFixture {
     }
 
     /// Adds an open processing-position window.
-    #[must_use]
     pub fn open_window(
         mut self,
         window_name: impl Into<String>,
         key: impl Into<String>,
         start_position: i64,
         configure: impl FnOnce(WindowHistoryFixtureWindow) -> WindowHistoryFixtureWindow,
-    ) -> Self {
+    ) -> Result<Self, WindowHistoryFixtureError> {
         let metadata = configure(WindowHistoryFixtureWindow::default());
+        if let Some(error) = metadata.error {
+            return Err(error.into());
+        }
         let id = self.next_id();
         self.history.push_open(OpenWindow {
             id,
@@ -1823,7 +1913,7 @@ impl WindowHistoryFixture {
             segments: metadata.segments,
             tags: metadata.tags,
         });
-        self
+        Ok(self)
     }
 
     /// Builds the history.
@@ -1833,7 +1923,7 @@ impl WindowHistoryFixture {
     }
 
     fn next_id(&mut self) -> WindowRecordId {
-        let id = WindowRecordId::new(format!("window-{:04}", self.next_record_id));
+        let id = WindowRecordId::generated(format!("window-{:04}", self.next_record_id));
         self.next_record_id += 1;
         id
     }
@@ -1847,6 +1937,7 @@ pub struct WindowHistoryFixtureWindow {
     partition: Option<String>,
     segments: Vec<WindowSegment>,
     tags: Vec<WindowTag>,
+    error: Option<WindowMetadataError>,
 }
 
 impl WindowHistoryFixtureWindow {
@@ -1874,7 +1965,11 @@ impl WindowHistoryFixtureWindow {
     /// Adds a segment.
     #[must_use]
     pub fn segment(mut self, name: impl Into<String>, value: impl Into<PrimitiveValue>) -> Self {
-        self.segments.push(WindowSegment::new(name, value));
+        match WindowSegment::new(name, value) {
+            Ok(segment) => self.segments.push(segment),
+            Err(error) if self.error.is_none() => self.error = Some(error),
+            Err(_) => {}
+        }
         self
     }
 
@@ -1886,15 +1981,22 @@ impl WindowHistoryFixtureWindow {
         value: impl Into<PrimitiveValue>,
         parent_name: impl Into<String>,
     ) -> Self {
-        self.segments
-            .push(WindowSegment::new(name, value).with_parent(parent_name));
+        match WindowSegment::new(name, value).and_then(|segment| segment.with_parent(parent_name)) {
+            Ok(segment) => self.segments.push(segment),
+            Err(error) if self.error.is_none() => self.error = Some(error),
+            Err(_) => {}
+        }
         self
     }
 
     /// Adds a tag.
     #[must_use]
     pub fn tag(mut self, name: impl Into<String>, value: impl Into<PrimitiveValue>) -> Self {
-        self.tags.push(WindowTag::new(name, value));
+        match WindowTag::new(name, value) {
+            Ok(tag) => self.tags.push(tag),
+            Err(error) if self.error.is_none() => self.error = Some(error),
+            Err(_) => {}
+        }
         self
     }
 }

@@ -4,6 +4,38 @@ use super::*;
 use proptest::prelude::*;
 
 #[test]
+fn public_metadata_constructors_reject_blank_names() {
+    assert_eq!(
+        WindowRecordId::new(" "),
+        Err(WindowMetadataError::EmptyRecordId)
+    );
+    assert_eq!(
+        WindowSegment::new("", "value"),
+        Err(WindowMetadataError::EmptySegmentName)
+    );
+    assert_eq!(
+        WindowTag::new("\t", "value"),
+        Err(WindowMetadataError::EmptyTagName)
+    );
+    assert_eq!(
+        WindowSegment::new("child", "value")
+            .expect("segment")
+            .with_parent(" "),
+        Err(WindowMetadataError::EmptyParentSegmentName)
+    );
+
+    let fixture_error = WindowHistoryFixture::new()
+        .open_window("DeviceOffline", "device-1", 1, |window| {
+            window.segment("", "invalid")
+        })
+        .expect_err("blank fixture metadata");
+    assert_eq!(
+        fixture_error,
+        WindowHistoryFixtureError::Metadata(WindowMetadataError::EmptySegmentName)
+    );
+}
+
+#[test]
 fn fixture_builder_creates_closed_windows_with_metadata() {
     let history = WindowHistoryFixture::new()
         .closed_window("DeviceOffline", "device-1", 1, 5, |w| {
@@ -29,6 +61,7 @@ fn fixture_builder_creates_closed_windows_with_metadata() {
 fn fixture_builder_creates_open_windows() {
     let history = WindowHistoryFixture::new()
         .open_window("DeviceOffline", "device-1", 10, |w| w.source("provider-a"))
+        .expect("open provider-a")
         .build();
 
     assert_eq!(history.open_windows().len(), 1);
@@ -147,6 +180,7 @@ fn direct_overlap_and_residual_helpers_match_query_surface() {
 fn annotations_append_revisions_and_filter_by_known_at() {
     let mut history = WindowHistoryFixture::new()
         .open_window("DeviceOffline", "device-1", 1, |w| w.source("lane-a"))
+        .expect("open lane-a")
         .build();
     let open = history.query().open_windows()[0].clone();
     let target = WindowAnnotationTarget::from_open(&open);
@@ -229,6 +263,7 @@ fn segmented_history() -> WindowHistory {
                 .segment("lifecycle", "Incident")
                 .tag("fleet", "warehouse")
         })
+        .expect("open provider-a")
         .closed_window("DeviceOffline", "device-3", 4, 5, |w| {
             w.source("provider-b")
                 .partition("p1")
