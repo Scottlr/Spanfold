@@ -1,4 +1,5 @@
 using Spanfold;
+using Spanfold.Internal.Keys;
 
 namespace Spanfold.Internal.Comparison;
 
@@ -427,7 +428,7 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            var scope = new TransitionScope(window.Window.WindowName, window.Window.Key, window.Window.Partition);
+            var scope = new TransitionScope(window.Window.WindowName, window.Window.Key, window.Window.Partition, new SegmentContext(window.Segments));
             if (!comparisonTransitions.TryGetValue(scope, out var transitions))
             {
                 transitions = [];
@@ -458,7 +459,7 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            var scope = new TransitionScope(target.Window.WindowName, target.Window.Key, target.Window.Partition);
+            var scope = new TransitionScope(target.Window.WindowName, target.Window.Key, target.Window.Partition, new SegmentContext(target.Segments));
             if (!comparisonTransitions.TryGetValue(scope, out var candidates) || candidates.Count == 0)
             {
                 rows.Add(new LeadLagRow(
@@ -517,7 +518,7 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            var scope = new TransitionScope(window.Window.WindowName, window.Window.Key, window.Window.Partition);
+            var scope = new TransitionScope(window.Window.WindowName, window.Window.Key, window.Window.Partition, new SegmentContext(window.Segments));
             if (!comparisonTransitions.TryGetValue(scope, out var transitions))
             {
                 transitions = [];
@@ -546,7 +547,7 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            var scope = new TransitionScope(target.Window.WindowName, target.Window.Key, target.Window.Partition);
+            var scope = new TransitionScope(target.Window.WindowName, target.Window.Key, target.Window.Partition, new SegmentContext(target.Segments));
             if (!comparisonTransitions.TryGetValue(scope, out var candidates) || candidates.Count == 0)
             {
                 rows.Add(CreateAsOfRow(target, options, target.Range.Start, null, null, AsOfMatchStatus.NoMatch));
@@ -1088,7 +1089,8 @@ internal static class ComparisonRuntime
     {
         return string.Equals(first.WindowName, second.WindowName, StringComparison.Ordinal)
             && EqualityComparer<object>.Default.Equals(first.Key, second.Key)
-            && EqualityComparer<object?>.Default.Equals(first.Partition, second.Partition);
+            && EqualityComparer<object?>.Default.Equals(first.Partition, second.Partition)
+            && new SegmentContext(first.Segments).Equals(new SegmentContext(second.Segments));
     }
 
     private static IReadOnlyList<ComparisonExtensionMetadata> BuildCohortMetadata(
@@ -1240,7 +1242,11 @@ internal static class ComparisonRuntime
         TemporalAxis Axis,
         long ToleranceMagnitude);
 
-    private sealed record TransitionScope(string WindowName, object Key, object? Partition);
+    private sealed record TransitionScope(
+        string WindowName,
+        object Key,
+        object? Partition,
+        SegmentContext Segments);
 
     private readonly record struct TransitionPoint(WindowRecordId RecordId, TemporalPoint Point);
 }
