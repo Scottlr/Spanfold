@@ -15,14 +15,12 @@ var pipeline = Spanfold.Spanfold
 
 PrintScenario();
 
-// The audit uses known-at filtering so the comparison cannot see future
-// windows or annotations that were not available at the decision point.
+// Ingest only the observations available at the decision point. The later
+// closures are deliberately ingested after the audit has been materialized.
 Ingest("risk-engine-a", 0, 10, "console");
 Ingest("risk-engine-b", 0, 12, "console");
 Ingest("risk-engine-a", 4, 85, "console");
 Ingest("risk-engine-b", 6, 78, "console");
-Ingest("risk-engine-a", 12, 40, "console");
-Ingest("risk-engine-b", 16, 35, "console");
 
 var elevated = pipeline.History.Query()
     .Window("AccountRiskElevated")
@@ -33,22 +31,26 @@ var annotation = pipeline.History.Annotate(
     elevated!,
     "rootCause",
     "impossible-travel",
-    TemporalPoint.ForPosition(7));
+    TemporalPoint.ForPosition(4));
 
-var safeAnnotations = pipeline.History.AnnotationsKnownAt(elevated!, TemporalPoint.ForPosition(8));
+var safeAnnotations = pipeline.History.AnnotationsKnownAt(elevated!, TemporalPoint.ForPosition(4));
 
 var comparison = pipeline.History
     .Compare("Risk detector audit")
     .Target("risk-engine-a", selector => selector.Source("risk-engine-a"))
     .Against("risk-engine-b", selector => selector.Source("risk-engine-b"))
     .Within(scope => scope.Window("AccountRiskElevated"))
-    .Normalize(normalization => normalization.KnownAtPosition(8))
+    .Normalize(normalization => normalization.KnownAtPosition(4))
     .Using(comparators => comparators.Overlap().Residual().AsOf(AsOfDirection.Previous, TemporalAxis.ProcessingPosition, toleranceMagnitude: 5))
     .Run();
 
+// These closures arrived after the decision and are not part of the audit.
+Ingest("risk-engine-a", 12, 40, "console");
+Ingest("risk-engine-b", 16, 35, "console");
+
 Console.WriteLine("Security access audit");
 Console.WriteLine("annotation revision: " + annotation.Revision);
-Console.WriteLine("known annotations at position 8: " + safeAnnotations.Count);
+Console.WriteLine("known annotations at position 4: " + safeAnnotations.Count);
 Console.WriteLine("overlap rows: " + comparison.OverlapRows.Count);
 Console.WriteLine("engine-a residual rows: " + comparison.ResidualRows.Count);
 Console.WriteLine("as-of rows: " + comparison.AsOfRows.Count);
@@ -59,13 +61,14 @@ void PrintScenario()
         """
         Scenario
         --------
-        decision horizon: position 8
+        decision horizon: position 4
 
-        engine-a risk: elevated 04..12
-        engine-b risk: elevated 06..16
-        annotation:    rootCause known at position 7
+        engine-a risk: elevated from processing position 3 (event minute 04)
+        engine-b risk: elevated from processing position 4 (event minute 06)
+        annotation:    rootCause known at processing position 4
 
-        The audit can use the annotation at position 8, but cannot leak later data.
+        The audit uses only data ingested through position 4. Later closures are
+        ingested after the audit and cannot leak into its result.
 
         """);
 }
