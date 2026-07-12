@@ -3,7 +3,6 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>Spanfold</PackageId>
-    <Version>0.1.0</Version>
     <Authors>Spanfold contributors</Authors>
     <Description>Composable stateful event windows and hierarchical rollups.</Description>
     <PackageProjectUrl>https://github.com/Scottlr/spanfold</PackageProjectUrl>

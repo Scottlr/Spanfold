@@ -3,7 +3,6 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>Spanfold.Testing</PackageId>
-    <Version>0.1.0</Version>
     <Authors>Spanfold contributors</Authors>
     <Description>Testing helpers for Spanfold comparison results, snapshots, fixtures, and virtual horizons.</Description>
     <PackageProjectUrl>https://github.com/Scottlr/spanfold</PackageProjectUrl>
