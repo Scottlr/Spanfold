@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using Spanfold;
+using Spanfold.Testing;
 
 namespace Spanfold.Tests.Comparison;
 
@@ -20,6 +21,21 @@ public sealed class ComparisonExportTests
         Assert.Equal(0, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("Provider QA", document.RootElement.GetProperty("name").GetString());
         Assert.Equal(JsonValueKind.Array, document.RootElement.GetProperty("diagnostics").ValueKind);
+    }
+
+    [Fact]
+    public void FluentBuilderConfiguresOutputOptions()
+    {
+        var history = new WindowHistoryFixtureBuilder()
+            .AddClosedWindow("DeviceOffline", "device-1", 1, 2)
+            .Build();
+
+        var plan = history.Compare("Output options QA")
+            .Output(new ComparisonOutputOptions(false, false))
+            .Build();
+
+        Assert.False(plan.Output.IncludeAlignedSegments);
+        Assert.False(plan.Output.IncludeExplainData);
     }
 
     [Fact]

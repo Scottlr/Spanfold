@@ -124,6 +124,19 @@ public sealed class WindowComparisonBuilder
     }
 
     /// <summary>
+    /// Configures which prepared and aligned artifacts are retained in exported output.
+    /// </summary>
+    /// <param name="options">The output preferences.</param>
+    /// <returns>This builder.</returns>
+    public WindowComparisonBuilder Output(ComparisonOutputOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        this.output = options;
+        return this;
+    }
+
+    /// <summary>
     /// Adds comparator declarations.
     /// </summary>
     /// <param name="configure">The comparator configuration.</param>
