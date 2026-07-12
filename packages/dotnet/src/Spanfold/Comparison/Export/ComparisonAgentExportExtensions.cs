@@ -25,7 +25,6 @@ public static class ComparisonAgentExportExtensions
             writer.WriteNumber("schemaVersion", 1);
             writer.WriteString("artifact", "redacted-agent-context");
             writer.WriteBoolean("isValid", result.IsValid);
-            writer.WriteString("planName", result.Plan.Name);
             writer.WriteStartArray("diagnosticCodes");
             foreach (var diagnostic in result.Diagnostics)
             {

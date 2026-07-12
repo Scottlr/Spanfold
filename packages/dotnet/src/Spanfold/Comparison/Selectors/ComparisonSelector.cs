@@ -1,3 +1,5 @@
+using Spanfold.Internal.Keys;
+
 namespace Spanfold;
 
 /// <summary>
@@ -26,7 +28,9 @@ public readonly record struct ComparisonSelector
         IsSerializable = isSerializable;
         this.predicate = predicate;
         CohortActivity = cohortActivity;
-        CohortSources = cohortSources ?? [];
+        CohortSources = cohortSources is null
+            ? []
+            : Array.AsReadOnly(cohortSources.ToArray());
         Descriptor = descriptor;
     }
 
@@ -58,20 +62,9 @@ public readonly record struct ComparisonSelector
     /// <summary>Gets the structured executable descriptor, when available.</summary>
     public ComparisonSelectorDescriptor? Descriptor { get; }
 
-    /// <summary>
-    /// Creates a serializable selector descriptor.
-    /// </summary>
-    /// <param name="name">The selector name.</param>
-    /// <param name="description">A readable selector description.</param>
-    /// <returns>A serializable comparison selector.</returns>
-    public static ComparisonSelector Serializable(string name, string description)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(description);
-
-        return new ComparisonSelector(name, description, isSerializable: true, predicate: null,
-            descriptor: new ComparisonSelectorDescriptor("named"));
-    }
+    internal bool IsDefined => !string.IsNullOrWhiteSpace(Name)
+        && !string.IsNullOrWhiteSpace(Description)
+        && this.predicate is not null;
 
     /// <summary>
     /// Creates a selector for a configured window name.
@@ -98,6 +91,7 @@ public readonly record struct ComparisonSelector
     public static ComparisonSelector ForKey(object key)
     {
         ArgumentNullException.ThrowIfNull(key);
+        EnsurePortableValue(key);
 
         return new ComparisonSelector(
             $"key:{key}",
@@ -115,6 +109,7 @@ public readonly record struct ComparisonSelector
     public static ComparisonSelector ForSource(object source)
     {
         ArgumentNullException.ThrowIfNull(source);
+        EnsurePortableValue(source);
 
         return new ComparisonSelector(
             $"source:{source}",
@@ -155,7 +150,7 @@ public readonly record struct ComparisonSelector
     {
         ArgumentNullException.ThrowIfNull(sources);
 
-        var orderedSources = sources as object[] ?? sources.ToArray();
+        var orderedSources = sources.ToArray();
         if (orderedSources.Length == 0)
         {
             throw new ArgumentException("At least one source is required.", nameof(sources));
@@ -164,6 +159,22 @@ public readonly record struct ComparisonSelector
         for (var i = 0; i < orderedSources.Length; i++)
         {
             ArgumentNullException.ThrowIfNull(orderedSources[i]);
+            EnsurePortableValue(orderedSources[i]);
+            for (var j = 0; j < i; j++)
+            {
+                if (EqualityComparer<object>.Default.Equals(orderedSources[i], orderedSources[j]))
+                {
+                    throw new ArgumentException("Cohort and multi-source selectors require unique source identities.", nameof(sources));
+                }
+            }
+        }
+
+        if (cohortActivity?.Count is { } count && count > orderedSources.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(cohortActivity),
+                count,
+                "Cohort activity count cannot exceed the number of unique sources.");
         }
 
         return new ComparisonSelector(
@@ -199,6 +210,7 @@ public readonly record struct ComparisonSelector
     public static ComparisonSelector ForPartition(object partition)
     {
         ArgumentNullException.ThrowIfNull(partition);
+        EnsurePortableValue(partition);
 
         return new ComparisonSelector(
             $"partition:{partition}",
@@ -235,12 +247,21 @@ public readonly record struct ComparisonSelector
     /// </summary>
     /// <param name="startInclusive">The inclusive start timestamp.</param>
     /// <param name="endExclusive">The optional exclusive end timestamp.</param>
+    /// <param name="clock">Optional identity of the timestamp clock.</param>
     /// <returns>A serializable timestamp range selector.</returns>
-    public static ComparisonSelector ForTimeRange(DateTimeOffset startInclusive, DateTimeOffset? endExclusive = null)
+    public static ComparisonSelector ForTimeRange(
+        DateTimeOffset startInclusive,
+        DateTimeOffset? endExclusive = null,
+        string? clock = null)
     {
         if (endExclusive.HasValue && endExclusive.Value < startInclusive)
         {
             throw new ArgumentException("Time range end cannot be earlier than the start.", nameof(endExclusive));
+        }
+
+        if (clock is not null && string.IsNullOrWhiteSpace(clock))
+        {
+            throw new ArgumentException("Timestamp clock identity cannot be blank.", nameof(clock));
         }
 
         return new ComparisonSelector(
@@ -248,9 +269,14 @@ public readonly record struct ComparisonSelector
             $"start time in [{startInclusive:O}, {endExclusive?.ToString("O") ?? "*"})",
             isSerializable: true,
             window => window.StartTime.HasValue
+                && (clock is null || string.Equals(window.TimestampClock, clock, StringComparison.Ordinal))
                 && window.StartTime.Value >= startInclusive
                 && (!endExclusive.HasValue || window.StartTime.Value < endExclusive.Value),
-            descriptor: new ComparisonSelectorDescriptor("timeRange", startTime: startInclusive, endTime: endExclusive));
+            descriptor: new ComparisonSelectorDescriptor(
+                "timeRange",
+                startTime: startInclusive,
+                endTime: endExclusive,
+                clock: clock));
     }
 
     /// <summary>
@@ -349,6 +375,12 @@ public readonly record struct ComparisonSelector
     {
         ArgumentNullException.ThrowIfNull(window);
 
-        return this.predicate?.Invoke(window) ?? true;
+        return this.predicate?.Invoke(window)
+            ?? throw new InvalidOperationException("The comparison selector is uninitialized.");
+    }
+
+    private static void EnsurePortableValue(object value)
+    {
+        _ = CanonicalValueFormatter.Format(value);
     }
 }

@@ -6,6 +6,6 @@
   preview version.
 - Document compatibility rules for comparison exports and CLI fixtures.
 
-## 0.1.0-preview
+## 0.1.0-preview.1
 
 - Initial preview release.

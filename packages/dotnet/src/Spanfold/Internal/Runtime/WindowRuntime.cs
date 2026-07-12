@@ -28,6 +28,7 @@ internal sealed class WindowRuntime<TEvent>
         TEvent @event,
         object? source,
         object? partition,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         var key = this.definition.GetKey(@event);
@@ -45,7 +46,7 @@ internal sealed class WindowRuntime<TEvent>
 
         if (changed && isActive)
         {
-            this.activeKeys[stateKey] = new ActiveWindowState(currentSegments, currentTags);
+            journal.Set(this.activeKeys, stateKey, new ActiveWindowState(currentSegments, currentTags));
             AddEmission(
                 ref emissions,
                 new WindowEmission<TEvent>(
@@ -60,7 +61,7 @@ internal sealed class WindowRuntime<TEvent>
         }
         else if (changed && previousState is not null)
         {
-            this.activeKeys.Remove(stateKey);
+            journal.Remove(this.activeKeys, stateKey);
             AddEmission(
                 ref emissions,
                 new WindowEmission<TEvent>(
@@ -90,7 +91,7 @@ internal sealed class WindowRuntime<TEvent>
                     previousState.Tags,
                     WindowBoundaryReason.SegmentChanged,
                     boundaryChanges));
-            this.activeKeys[stateKey] = new ActiveWindowState(currentSegments, currentTags);
+            journal.Set(this.activeKeys, stateKey, new ActiveWindowState(currentSegments, currentTags));
             AddEmission(
                 ref emissions,
                 new WindowEmission<TEvent>(
@@ -112,6 +113,7 @@ internal sealed class WindowRuntime<TEvent>
                 previousState.Tags,
                 currentSegments,
                 currentTags,
+                journal,
                 ref emissions);
             observedRollUps = true;
         }
@@ -130,6 +132,7 @@ internal sealed class WindowRuntime<TEvent>
                 changed,
                 observedState.Segments,
                 observedState.Tags,
+                journal,
                 ref emissions);
         }
     }
@@ -151,6 +154,7 @@ internal sealed class WindowRuntime<TEvent>
         bool childChanged,
         IReadOnlyList<WindowSegment> segments,
         IReadOnlyList<WindowTag> tags,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         foreach (var rollUp in this.rollUps)
@@ -164,6 +168,7 @@ internal sealed class WindowRuntime<TEvent>
                 childChanged,
                 segments,
                 tags,
+                journal,
                 ref emissions);
         }
     }
@@ -177,6 +182,7 @@ internal sealed class WindowRuntime<TEvent>
         IReadOnlyList<WindowTag> previousTags,
         IReadOnlyList<WindowSegment> currentSegments,
         IReadOnlyList<WindowTag> currentTags,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         foreach (var rollUp in this.rollUps)
@@ -190,6 +196,7 @@ internal sealed class WindowRuntime<TEvent>
                 previousTags,
                 currentSegments,
                 currentTags,
+                journal,
                 ref emissions);
         }
     }

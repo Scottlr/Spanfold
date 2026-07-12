@@ -15,6 +15,12 @@ public sealed record CoverageRow(
     long? ExactTargetMagnitude = null,
     long? ExactCoveredMagnitude = null)
 {
+    /// <summary>Gets the target record IDs active for the segment.</summary>
+    public IReadOnlyList<WindowRecordId> TargetRecordIds { get; } = Array.AsReadOnly(TargetRecordIds.ToArray());
+
+    /// <summary>Gets the comparison record IDs active for the segment.</summary>
+    public IReadOnlyList<WindowRecordId> AgainstRecordIds { get; } = Array.AsReadOnly(AgainstRecordIds.ToArray());
+
     /// <summary>Gets the exact target magnitude when supplied by the runtime.</summary>
     public long TargetMagnitudeExact => ExactTargetMagnitude ?? checked((long)TargetMagnitude);
 

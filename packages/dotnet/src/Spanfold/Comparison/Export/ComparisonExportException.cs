@@ -26,6 +26,6 @@ public sealed class ComparisonExportException(
     {
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        return diagnostics as ComparisonPlanDiagnostic[] ?? diagnostics.ToArray();
+        return diagnostics.ToArray();
     }
 }

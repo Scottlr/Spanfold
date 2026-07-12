@@ -18,6 +18,7 @@ public sealed class EventPipeline<TEvent>
     private readonly Action<WindowEmission<TEvent>>[] emissionCallbacks;
     private readonly Dictionary<string, WindowCallbackSet<TEvent>> windowCallbacks;
     private readonly Func<TEvent, DateTimeOffset>? eventTimeSelector;
+    private readonly string? eventTimeClock;
     private long processingPosition;
     private int ingestionInProgress;
 
@@ -25,7 +26,8 @@ public sealed class EventPipeline<TEvent>
         IReadOnlyList<WindowDefinition<TEvent>> windows,
         IReadOnlyList<Action<WindowEmission<TEvent>>> emissionCallbacks,
         bool recordWindows,
-        Func<TEvent, DateTimeOffset>? eventTimeSelector)
+        Func<TEvent, DateTimeOffset>? eventTimeSelector,
+        string? eventTimeClock)
     {
         Windows = windows;
         Metadata = new EventPipelineMetadata(
@@ -34,6 +36,7 @@ public sealed class EventPipeline<TEvent>
         this.emissionCallbacks = emissionCallbacks.ToArray();
         this.windowCallbacks = CreateWindowCallbackMap(windows);
         this.eventTimeSelector = eventTimeSelector;
+        this.eventTimeClock = eventTimeClock;
         History = new WindowHistory(
             recordWindows,
             windows.ToDictionary(
@@ -99,21 +102,33 @@ public sealed class EventPipeline<TEvent>
         try
         {
             var eventTime = this.eventTimeSelector?.Invoke(@event);
-            this.processingPosition++;
-            List<WindowEmission<TEvent>>? emissions = null;
-
-            foreach (var runtime in this.runtimes)
+            var nextPosition = checked(this.processingPosition + 1);
+            var journal = new RuntimeMutationJournal();
+            IngestionResult<TEvent> result;
+            try
             {
-                runtime.Ingest(@event, source, partition, ref emissions);
+                List<WindowEmission<TEvent>>? emissions = null;
+                foreach (var runtime in this.runtimes)
+                {
+                    runtime.Ingest(@event, source, partition, journal, ref emissions);
+                }
+
+                result = new IngestionResult<TEvent>(
+                    emissions is null ? [] : emissions.ToArray());
+
+                History.Record(
+                    result.Emissions,
+                    nextPosition,
+                    eventTime,
+                    this.eventTimeClock);
+                this.processingPosition = nextPosition;
+                journal.Commit();
             }
-
-            var result = new IngestionResult<TEvent>(
-                emissions is null ? [] : emissions.ToArray());
-
-            History.Record(
-                result.Emissions,
-                this.processingPosition,
-                eventTime);
+            catch
+            {
+                journal.Rollback();
+                throw;
+            }
 
             List<Exception>? callbackErrors = null;
             foreach (var emission in result.Emissions)
@@ -166,15 +181,22 @@ public sealed class EventPipeline<TEvent>
     /// </remarks>
     public void TrimInactiveState()
     {
-        if (Volatile.Read(ref this.ingestionInProgress) != 0)
+        if (Interlocked.Exchange(ref this.ingestionInProgress, 1) != 0)
         {
             throw new InvalidOperationException(
                 "Roll-up state can only be trimmed between ingestion operations.");
         }
 
-        foreach (var runtime in this.runtimes)
+        try
         {
-            runtime.TrimInactiveState();
+            foreach (var runtime in this.runtimes)
+            {
+                runtime.TrimInactiveState();
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref this.ingestionInProgress, 0);
         }
     }
 

@@ -13,6 +13,12 @@ public sealed record SourceMatrixResult(
     IReadOnlyList<object> Sources,
     IReadOnlyList<SourceMatrixCell> Cells)
 {
+    /// <summary>Gets sources in requested row and column order.</summary>
+    public IReadOnlyList<object> Sources { get; } = Array.AsReadOnly(Sources.ToArray());
+
+    /// <summary>Gets directional cells in row-major order.</summary>
+    public IReadOnlyList<SourceMatrixCell> Cells { get; } = Array.AsReadOnly(Cells.ToArray());
+
     /// <summary>
     /// Gets one directional matrix cell.
     /// </summary>

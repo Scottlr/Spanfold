@@ -7,11 +7,15 @@ namespace Spanfold.Internal.Recording;
 /// </summary>
 internal static class WindowHistoryAnalytics
 {
-    internal static IReadOnlyList<WindowOverlap> FindOverlaps(IReadOnlyList<ClosedWindow> windows)
+    internal static IReadOnlyList<WindowOverlap> FindOverlaps(
+        IReadOnlyList<ClosedWindow> windows,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         var overlaps = new List<WindowOverlap>();
         var scopes = windows
-            .GroupBy(static window => new Scope(window.WindowName, window.Key, window.Partition, new SegmentContext(window.Segments)))
+            .GroupBy(
+                static window => new Scope(window.WindowName, window.Key, window.Partition, new SegmentContext(window.Segments)),
+                new ScopeComparer(keyComparers))
             .ToArray();
 
         for (var scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
@@ -45,7 +49,8 @@ internal static class WindowHistoryAnalytics
 
     internal static IReadOnlyList<WindowResidualSegment> FindResiduals(
         IReadOnlyList<ClosedWindow> windows,
-        object targetSource)
+        object targetSource,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         var residuals = new List<WindowResidualSegment>();
         foreach (var target in windows)
@@ -60,7 +65,7 @@ internal static class WindowHistoryAnalytics
             {
                 if (ReferenceEquals(target, comparison)
                     || EqualityComparer<object?>.Default.Equals(comparison.Source, targetSource)
-                    || !SameScope(target, comparison)
+                    || !SameScope(target, comparison, keyComparers)
                     || !Overlaps(target, comparison))
                 {
                     continue;
@@ -87,10 +92,16 @@ internal static class WindowHistoryAnalytics
         return residuals.ToArray();
     }
 
-    private static bool SameScope(ClosedWindow first, ClosedWindow second)
+    private static bool SameScope(
+        ClosedWindow first,
+        ClosedWindow second,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
+        var keyComparer = keyComparers.TryGetValue(first.WindowName, out var configured)
+            ? configured
+            : EqualityComparer<object>.Default;
         return string.Equals(first.WindowName, second.WindowName, StringComparison.Ordinal)
-            && EqualityComparer<object>.Default.Equals(first.Key, second.Key)
+            && keyComparer.Equals(first.Key, second.Key)
             && EqualityComparer<object?>.Default.Equals(first.Partition, second.Partition)
             && new SegmentContext(first.Segments).Equals(new SegmentContext(second.Segments));
     }
@@ -129,5 +140,36 @@ internal static class WindowHistoryAnalytics
     private static long End(ClosedWindow window) => window.EndPosition!.Value;
 
     private sealed record Scope(string WindowName, object Key, object? Partition, SegmentContext Segments);
+
+    private sealed class ScopeComparer(
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers) : IEqualityComparer<Scope>
+    {
+        public bool Equals(Scope? x, Scope? y)
+        {
+            if (x is null || y is null || !string.Equals(x.WindowName, y.WindowName, StringComparison.Ordinal))
+            {
+                return ReferenceEquals(x, y);
+            }
+
+            var comparer = keyComparers.TryGetValue(x.WindowName, out var configured)
+                ? configured
+                : EqualityComparer<object>.Default;
+            return comparer.Equals(x.Key, y.Key)
+                && EqualityComparer<object?>.Default.Equals(x.Partition, y.Partition)
+                && Equals(x.Segments, y.Segments);
+        }
+
+        public int GetHashCode(Scope obj)
+        {
+            var comparer = keyComparers.TryGetValue(obj.WindowName, out var configured)
+                ? configured
+                : EqualityComparer<object>.Default;
+            return HashCode.Combine(
+                StringComparer.Ordinal.GetHashCode(obj.WindowName),
+                comparer.GetHashCode(obj.Key),
+                obj.Partition,
+                obj.Segments);
+        }
+    }
     private readonly record struct PositionSegment(long Start, long End);
 }

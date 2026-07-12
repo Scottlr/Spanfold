@@ -12,10 +12,12 @@ public sealed class WindowHistorySnapshot
 {
     internal WindowHistorySnapshot(
         TemporalPoint horizon,
-        IReadOnlyList<WindowSnapshotRecord> records)
+        IReadOnlyList<WindowSnapshotRecord> records,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         Horizon = horizon;
-        Records = records;
+        Records = Array.AsReadOnly(records.ToArray());
+        KeyComparers = new Dictionary<string, IEqualityComparer<object>>(keyComparers, StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -27,6 +29,8 @@ public sealed class WindowHistorySnapshot
     /// Gets the snapshot records in deterministic order.
     /// </summary>
     public IReadOnlyList<WindowSnapshotRecord> Records { get; }
+
+    internal IReadOnlyDictionary<string, IEqualityComparer<object>> KeyComparers { get; }
 
     /// <summary>
     /// Starts a read-only query over the snapshot records.
@@ -58,7 +62,7 @@ public sealed class WindowHistorySnapshot
         }
 
         records.Sort(static (left, right) => WindowHistoryQuery.CompareWindows(left.Window, right.Window));
-        return new WindowHistorySnapshot(horizon, records.ToArray());
+        return new WindowHistorySnapshot(horizon, records.ToArray(), history.KeyComparers);
     }
 
     private static bool TryCreateRecord(
@@ -108,7 +112,7 @@ public sealed class WindowHistorySnapshot
 
         if (axis == TemporalAxis.Timestamp && window.StartTime.HasValue)
         {
-            start = TemporalPoint.ForTimestamp(window.StartTime.Value);
+            start = TemporalPoint.ForTimestamp(window.StartTime.Value, window.TimestampClock);
             return true;
         }
 
@@ -129,7 +133,7 @@ public sealed class WindowHistorySnapshot
 
         if (axis == TemporalAxis.Timestamp && window.EndTime.HasValue)
         {
-            end = TemporalPoint.ForTimestamp(window.EndTime.Value);
+            end = TemporalPoint.ForTimestamp(window.EndTime.Value, window.TimestampClock);
             return true;
         }
 

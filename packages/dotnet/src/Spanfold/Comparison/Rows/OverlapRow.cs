@@ -15,4 +15,11 @@ public sealed record OverlapRow(
     object? Partition,
     TemporalRange Range,
     IReadOnlyList<WindowRecordId> TargetRecordIds,
-    IReadOnlyList<WindowRecordId> AgainstRecordIds);
+    IReadOnlyList<WindowRecordId> AgainstRecordIds)
+{
+    /// <summary>Gets the target record IDs active for the overlap.</summary>
+    public IReadOnlyList<WindowRecordId> TargetRecordIds { get; } = Array.AsReadOnly(TargetRecordIds.ToArray());
+
+    /// <summary>Gets the comparison record IDs active for the overlap.</summary>
+    public IReadOnlyList<WindowRecordId> AgainstRecordIds { get; } = Array.AsReadOnly(AgainstRecordIds.ToArray());
+}

@@ -119,7 +119,7 @@ public sealed class ComparisonPlan
                 ComparisonPlanDiagnosticSeverity.Error));
         }
 
-        if (!Target.HasValue)
+        if (!Target.HasValue || !Target.Value.IsDefined)
         {
             diagnostics.Add(new ComparisonPlanDiagnostic(
                 ComparisonPlanValidationCode.MissingTarget,
@@ -148,16 +148,20 @@ public sealed class ComparisonPlan
         {
             for (var i = 0; i < Against.Count; i++)
             {
-                if (Against[i].IsSerializable)
+                if (Against[i].IsDefined && Against[i].IsSerializable)
                 {
                     continue;
                 }
 
                 diagnostics.Add(new ComparisonPlanDiagnostic(
                     ComparisonPlanValidationCode.NonSerializableSelector,
-                    "Comparison selector is runtime-only and cannot be exported as plan data.",
+                    Against[i].IsDefined
+                        ? "Comparison selector is runtime-only and cannot be exported as plan data."
+                        : "Comparison selector is uninitialized.",
                     $"against[{i}]",
-                    exportabilitySeverity));
+                    Against[i].IsDefined
+                        ? exportabilitySeverity
+                        : ComparisonPlanDiagnosticSeverity.Error));
             }
         }
 
@@ -198,26 +202,26 @@ public sealed class ComparisonPlan
         return diagnostics.ToArray();
     }
 
-    private static ComparisonSelector[] Materialize(IEnumerable<ComparisonSelector>? selectors)
+    private static IReadOnlyList<ComparisonSelector> Materialize(IEnumerable<ComparisonSelector>? selectors)
     {
         if (selectors is null)
         {
             return [];
         }
 
-        return selectors as ComparisonSelector[] ?? selectors.ToArray();
+        return Array.AsReadOnly(selectors.ToArray());
     }
 
-    private static string[] MaterializeComparators(IEnumerable<string>? comparators)
+    private static IReadOnlyList<string> MaterializeComparators(IEnumerable<string>? comparators)
     {
         if (comparators is null)
         {
             return [];
         }
 
-        return comparators
+        return Array.AsReadOnly(comparators
             .Where(static comparator => !string.IsNullOrWhiteSpace(comparator))
             .Distinct(StringComparer.Ordinal)
-            .ToArray();
+            .ToArray());
     }
 }

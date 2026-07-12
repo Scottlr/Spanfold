@@ -12,7 +12,9 @@ public sealed class WindowSnapshotQuery
     internal WindowSnapshotQuery(WindowHistorySnapshot snapshot)
     {
         this.snapshot = snapshot;
-        this.query = new WindowHistoryQuery(snapshot.Records.Select(static record => record.Window));
+        this.query = new WindowHistoryQuery(
+            snapshot.Records.Select(static record => record.Window),
+            snapshot.KeyComparers);
         this.recordsById = new Dictionary<WindowRecordId, WindowSnapshotRecord>(snapshot.Records.Count);
 
         for (var i = 0; i < snapshot.Records.Count; i++)

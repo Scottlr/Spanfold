@@ -21,7 +21,7 @@ public sealed class ComparisonPlanTests
         var plan = new ComparisonPlan(
             "Provider QA",
             target: null,
-            [ComparisonSelector.Serializable("provider-b", "source = provider-b")],
+            [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
             ["overlap"],
@@ -67,7 +67,7 @@ public sealed class ComparisonPlanTests
             target: ComparisonSelector.RuntimeOnly("provider-a", "runtime provider selector"),
             against:
             [
-                ComparisonSelector.Serializable("provider-b", "source = provider-b"),
+                ComparisonSelector.ForSource("provider-b"),
                 ComparisonSelector.RuntimeOnly("provider-c", "runtime provider selector")
             ]);
 
@@ -87,17 +87,35 @@ public sealed class ComparisonPlanTests
     {
         var against = new List<ComparisonSelector>
         {
-            ComparisonSelector.Serializable("provider-b", "source = provider-b")
+            ComparisonSelector.ForSource("provider-b")
         };
         var comparators = new List<string> { "overlap" };
 
         var plan = CreatePlan(against: against, comparators: comparators);
 
-        against.Add(ComparisonSelector.Serializable("provider-c", "source = provider-c"));
+        against.Add(ComparisonSelector.ForSource("provider-c"));
         comparators.Add("coverage");
 
         Assert.Single(plan.Against);
         Assert.Equal("overlap", Assert.Single(plan.Comparators));
+    }
+
+    [Fact]
+    public void CallerOwnedSelectorArraysCannotMutatePlanExecution()
+    {
+        var against = new[] { ComparisonSelector.ForSource("provider-b") };
+        var plan = CreatePlan(against: against);
+
+        against[0] = ComparisonSelector.ForSource("provider-c");
+
+        var window = new ClosedWindow(
+            "DeviceOffline",
+            "device-1",
+            StartPosition: 1,
+            EndPosition: 2,
+            Source: "provider-b");
+        Assert.True(plan.Against[0].Matches(window));
+        Assert.False(plan.Against is ComparisonSelector[]);
     }
 
     [Fact]
@@ -115,8 +133,8 @@ public sealed class ComparisonPlanTests
     {
         return new ComparisonPlan(
             "Provider QA",
-            target ?? ComparisonSelector.Serializable("provider-a", "source = provider-a"),
-            against ?? [ComparisonSelector.Serializable("provider-b", "source = provider-b")],
+            target ?? ComparisonSelector.ForSource("provider-a"),
+            against ?? [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
             comparators ?? ["overlap"],

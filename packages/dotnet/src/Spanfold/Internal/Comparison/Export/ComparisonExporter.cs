@@ -563,6 +563,7 @@ internal static class ComparisonExporter
         WriteNullableNumber(writer, "endPosition", descriptor.EndPosition);
         WriteNullableTimestamp(writer, "startTime", descriptor.StartTime);
         WriteNullableTimestamp(writer, "endTime", descriptor.EndTime);
+        WriteNullableString(writer, "clock", descriptor.Clock);
         WriteNullableString(writer, "activity", descriptor.Activity);
         if (descriptor.Count.HasValue)
         {
@@ -1251,6 +1252,11 @@ internal static class ComparisonExporter
     {
         return value switch
         {
+            byte[] bytes => Convert.ToHexString(bytes),
+            DateTime dateTime => dateTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            DateTimeOffset dateTimeOffset => dateTimeOffset.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            TimeSpan timeSpan => timeSpan.ToString("c", CultureInfo.InvariantCulture),
+            Guid guid => guid.ToString("D"),
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
             _ => value.ToString() ?? string.Empty
         };

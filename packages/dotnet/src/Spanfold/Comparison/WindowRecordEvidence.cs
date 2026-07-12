@@ -9,10 +9,10 @@ public sealed class WindowRecordEvidence
     {
         Id = window.Id;
         WindowName = window.WindowName;
-        Segments = window.Segments.ToArray();
-        Tags = window.Tags.ToArray();
+        Segments = Array.AsReadOnly(window.Segments.ToArray());
+        Tags = Array.AsReadOnly(window.Tags.ToArray());
         BoundaryReason = window.BoundaryReason;
-        BoundaryChanges = window.BoundaryChanges.ToArray();
+        BoundaryChanges = Array.AsReadOnly(window.BoundaryChanges.ToArray());
     }
 
     /// <summary>Gets the recorded window identity.</summary>

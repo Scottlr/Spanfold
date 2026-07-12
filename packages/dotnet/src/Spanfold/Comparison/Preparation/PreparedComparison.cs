@@ -19,13 +19,17 @@ public sealed record PreparedComparison
         IReadOnlyList<ComparisonPlanDiagnostic> diagnostics,
         IReadOnlyList<WindowRecord> selectedWindows,
         IReadOnlyList<ExcludedWindowRecord> excludedWindows,
-        IReadOnlyList<NormalizedWindowRecord> normalizedWindows)
+        IReadOnlyList<NormalizedWindowRecord> normalizedWindows,
+        IReadOnlyDictionary<string, IEqualityComparer<object>>? keyComparers = null)
     {
         Plan = plan;
-        Diagnostics = diagnostics;
-        SelectedWindows = selectedWindows;
-        ExcludedWindows = excludedWindows;
-        NormalizedWindows = normalizedWindows;
+        Diagnostics = Array.AsReadOnly(diagnostics.ToArray());
+        SelectedWindows = Array.AsReadOnly(selectedWindows.ToArray());
+        ExcludedWindows = Array.AsReadOnly(excludedWindows.ToArray());
+        NormalizedWindows = Array.AsReadOnly(normalizedWindows.ToArray());
+        KeyComparers = keyComparers is null
+            ? new Dictionary<string, IEqualityComparer<object>>(StringComparer.Ordinal)
+            : new Dictionary<string, IEqualityComparer<object>>(keyComparers, StringComparer.Ordinal);
     }
 
     /// <summary>Gets the comparison plan.</summary>
@@ -38,6 +42,8 @@ public sealed record PreparedComparison
     public IReadOnlyList<ExcludedWindowRecord> ExcludedWindows { get; }
     /// <summary>Gets normalized windows ready for alignment.</summary>
     public IReadOnlyList<NormalizedWindowRecord> NormalizedWindows { get; }
+
+    internal IReadOnlyDictionary<string, IEqualityComparer<object>> KeyComparers { get; }
 
     /// <summary>
     /// Aligns normalized windows into reusable temporal segments.

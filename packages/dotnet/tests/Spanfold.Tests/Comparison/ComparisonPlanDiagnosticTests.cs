@@ -69,7 +69,7 @@ public sealed class ComparisonPlanDiagnosticTests
         return new ComparisonPlan(
             "Provider QA",
             ComparisonSelector.RuntimeOnly("provider-a", "runtime provider selector"),
-            [ComparisonSelector.Serializable("provider-b", "source = provider-b")],
+            [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
             ["overlap"],

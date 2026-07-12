@@ -17,7 +17,7 @@ internal static class ComparisonPreparer
 
         if (plan.Target is null || plan.Scope is null)
         {
-            return Create(plan, diagnostics, selected, excluded, normalized);
+            return Create(history, plan, diagnostics, selected, excluded, normalized);
         }
 
         if (plan.Scope.TimeAxis != plan.Normalization.TimeAxis)
@@ -102,7 +102,7 @@ internal static class ComparisonPreparer
             }
         }
 
-        return Create(plan, diagnostics, selected, excluded, normalized);
+        return Create(history, plan, diagnostics, selected, excluded, normalized);
     }
 
     private static void AddNormalized(
@@ -204,10 +204,12 @@ internal static class ComparisonPreparer
             return false;
         }
 
-        var start = TemporalPoint.ForTimestamp(window.StartTime.Value);
+        var start = TemporalPoint.ForTimestamp(window.StartTime.Value, window.TimestampClock);
         if (window.EndTime.HasValue)
         {
-            range = TemporalRange.Closed(start, TemporalPoint.ForTimestamp(window.EndTime.Value));
+            range = TemporalRange.Closed(
+                start,
+                TemporalPoint.ForTimestamp(window.EndTime.Value, window.TimestampClock));
             return true;
         }
 
@@ -340,6 +342,7 @@ internal static class ComparisonPreparer
     }
 
     private static PreparedComparison Create(
+        WindowHistory history,
         ComparisonPlan plan,
         List<ComparisonPlanDiagnostic> diagnostics,
         List<WindowRecord> selected,
@@ -351,7 +354,8 @@ internal static class ComparisonPreparer
             diagnostics.ToArray(),
             selected.ToArray(),
             excluded.ToArray(),
-            normalized.ToArray());
+            normalized.ToArray(),
+            history.KeyComparers);
     }
 
     private static string StableObjectValue(object? value)

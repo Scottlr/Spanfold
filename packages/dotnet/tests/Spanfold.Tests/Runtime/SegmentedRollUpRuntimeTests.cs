@@ -94,6 +94,34 @@ public sealed class SegmentedRollUpRuntimeTests
     }
 
     [Fact]
+    public void DroppedSegmentChangeStillMigratesActiveChildToNewParent()
+    {
+        var pipeline = Spanfold
+            .For<PriceUpdate>()
+            .RecordWindows()
+            .Window("SelectionPriced", window => window
+                .Key(update => update.SelectionId)
+                .ActiveWhen(update => update.HasPrice)
+                .Segment("phase", phase => phase
+                    .Value(update => update.Phase)
+                    .Child("state", state => state.Value(update => update.State))))
+            .RollUp(
+                "MarketPriced",
+                update => update.MarketId,
+                children => children.AnyActive(),
+                segments => segments.Drop("state"))
+            .Build();
+
+        pipeline.Ingest(new PriceUpdate("selection-1", "market-1", "fixture-1", true, "InPlay", State: "Suspended"));
+        pipeline.Ingest(new PriceUpdate("selection-1", "market-2", "fixture-1", true, "InPlay", State: "Open"));
+
+        var closed = Assert.Single(pipeline.History.ClosedWindows, window => window.WindowName == "MarketPriced");
+        Assert.Equal("market-1", closed.Key);
+        var open = Assert.Single(pipeline.History.OpenWindows, window => window.WindowName == "MarketPriced");
+        Assert.Equal("market-2", open.Key);
+    }
+
+    [Fact]
     public void RollUpCanPreserveSelectedChildSegments()
     {
         var pipeline = Spanfold

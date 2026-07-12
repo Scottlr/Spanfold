@@ -48,11 +48,15 @@ The core flow is:
 4. Compare windows across sources or stages.
 5. Export rows, summaries, diagnostics, and explanations.
 
-## Install
+## Build the preview
+
+These packages are not published to NuGet yet. Build them from a repository
+checkout:
 
 ```bash
-dotnet add package Spanfold # Add the core state-window recording and comparison package.
-dotnet add package Spanfold.Testing # Add optional helpers for fixtures, snapshots, and assertions.
+dotnet build Spanfold.slnx
+dotnet pack src/Spanfold/Spanfold.csproj -c Release -o artifacts/package
+dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj -c Release -o artifacts/package
 ```
 
 `Spanfold.Testing` is optional. It is useful in consumer test suites when you want
@@ -469,7 +473,8 @@ coverage, lead/lag, live open windows, and Markdown export.
 dotnet run --project samples/Spanfold.OperationsExample/Spanfold.OperationsExample.csproj # Run the operations monitoring sample.
 ```
 
-More samples are available in [samples/README.md](samples/README.md), ranging
+More samples are available in the
+[repository samples guide](https://github.com/Scottlr/Spanfold/blob/main/packages/dotnet/samples/README.md), ranging
 from simple device monitoring to logistics, security audit, industrial
 telemetry, distributed quorum analysis, and advanced spacecraft thermal
 analysis.

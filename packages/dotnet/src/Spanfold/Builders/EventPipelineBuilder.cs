@@ -228,6 +228,25 @@ public sealed class EventPipelineBuilder<TEvent>
         ArgumentNullException.ThrowIfNull(eventTime);
 
         this.options.EventTimeSelector = eventTime;
+        this.options.EventTimeClock = null;
+        return this;
+    }
+
+    /// <summary>
+    /// Configures event timestamps and the clock identity used to compare them.
+    /// </summary>
+    /// <param name="eventTime">Selects the event timestamp.</param>
+    /// <param name="clock">Identifies the clock that produced the timestamps.</param>
+    /// <returns>The current builder.</returns>
+    public EventPipelineBuilder<TEvent> WithEventTime(
+        Func<TEvent, DateTimeOffset> eventTime,
+        string clock)
+    {
+        ArgumentNullException.ThrowIfNull(eventTime);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clock);
+
+        this.options.EventTimeSelector = eventTime;
+        this.options.EventTimeClock = clock;
         return this;
     }
 
@@ -241,7 +260,8 @@ public sealed class EventPipelineBuilder<TEvent>
             this.windows.ToArray(),
             this.emissionCallbacks.ToArray(),
             this.options.RecordWindows,
-            this.options.EventTimeSelector);
+            this.options.EventTimeSelector,
+            this.options.EventTimeClock);
     }
 
     internal static void ThrowIfNameExists(string name, HashSet<string> windowNames)

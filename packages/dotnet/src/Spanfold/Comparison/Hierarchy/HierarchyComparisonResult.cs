@@ -18,4 +18,11 @@ public sealed record HierarchyComparisonResult(
     string ParentWindowName,
     string ChildWindowName,
     IReadOnlyList<HierarchyComparisonRow> Rows,
-    IReadOnlyList<ComparisonPlanDiagnostic> Diagnostics);
+    IReadOnlyList<ComparisonPlanDiagnostic> Diagnostics)
+{
+    /// <summary>Gets deterministic hierarchy rows.</summary>
+    public IReadOnlyList<HierarchyComparisonRow> Rows { get; } = Array.AsReadOnly(Rows.ToArray());
+
+    /// <summary>Gets diagnostics produced while building the comparison.</summary>
+    public IReadOnlyList<ComparisonPlanDiagnostic> Diagnostics { get; } = Array.AsReadOnly(Diagnostics.ToArray());
+}

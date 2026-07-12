@@ -13,4 +13,8 @@ public sealed record ResidualRow(
     object Key,
     object? Partition,
     TemporalRange Range,
-    IReadOnlyList<WindowRecordId> TargetRecordIds);
+    IReadOnlyList<WindowRecordId> TargetRecordIds)
+{
+    /// <summary>Gets the target record IDs active for the residual segment.</summary>
+    public IReadOnlyList<WindowRecordId> TargetRecordIds { get; } = Array.AsReadOnly(TargetRecordIds.ToArray());
+}

@@ -71,10 +71,14 @@ public sealed class ComparisonSelectorBuilder
     /// </summary>
     /// <param name="startInclusive">The inclusive start timestamp.</param>
     /// <param name="endExclusive">The optional exclusive end timestamp.</param>
+    /// <param name="clock">Optional identity of the timestamp clock.</param>
     /// <returns>A timestamp range selector.</returns>
-    public ComparisonSelector TimeRange(DateTimeOffset startInclusive, DateTimeOffset? endExclusive = null)
+    public ComparisonSelector TimeRange(
+        DateTimeOffset startInclusive,
+        DateTimeOffset? endExclusive = null,
+        string? clock = null)
     {
-        return ComparisonSelector.ForTimeRange(startInclusive, endExclusive);
+        return ComparisonSelector.ForTimeRange(startInclusive, endExclusive, clock);
     }
 
     /// <summary>

@@ -12,7 +12,7 @@ public sealed record AlignedComparison
     internal AlignedComparison(PreparedComparison prepared, IReadOnlyList<AlignedSegment> segments)
     {
         Prepared = prepared;
-        Segments = segments;
+        Segments = Array.AsReadOnly(segments.ToArray());
     }
 
     /// <summary>Gets the prepared comparison input.</summary>

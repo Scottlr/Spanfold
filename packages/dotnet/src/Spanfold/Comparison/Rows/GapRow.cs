@@ -23,5 +23,7 @@ public sealed record GapRow(
     /// <summary>
     /// Gets the records bounding this gap and determining its live finality.
     /// </summary>
-    public IReadOnlyList<WindowRecordId> BoundaryRecordIds { get; } = BoundaryRecordIds?.ToArray() ?? [];
+    public IReadOnlyList<WindowRecordId> BoundaryRecordIds { get; } = BoundaryRecordIds is null
+        ? []
+        : Array.AsReadOnly(BoundaryRecordIds.ToArray());
 }
