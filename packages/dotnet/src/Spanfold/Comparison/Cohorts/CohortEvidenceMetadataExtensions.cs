@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 
 namespace Spanfold;
 
@@ -47,6 +48,11 @@ public static class CohortEvidenceMetadataExtensions
             return false;
         }
 
+        if (TryParseJson(metadata.Value, segmentIndex, metadata.Value, out evidence))
+        {
+            return true;
+        }
+
         var values = ParseFields(metadata.Value);
         if (!values.TryGetValue("rule", out var rule)
             || !values.TryGetValue("required", out var required)
@@ -68,6 +74,58 @@ public static class CohortEvidenceMetadataExtensions
             ParseActiveSources(values.TryGetValue("activeSources", out var sources) ? sources : string.Empty),
             metadata.Value);
         return true;
+    }
+
+    private static bool TryParseJson(
+        string value,
+        int segmentIndex,
+        string rawValue,
+        out CohortEvidenceMetadata evidence)
+    {
+        evidence = default!;
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("rule", out var rule)
+                || !root.TryGetProperty("required", out var required)
+                || !root.TryGetProperty("activeCount", out var activeCount)
+                || !root.TryGetProperty("isActive", out var isActive)
+                || !root.TryGetProperty("activeSources", out var sources))
+            {
+                return false;
+            }
+
+            if (rule.ValueKind != JsonValueKind.String
+                || !required.TryGetInt32(out var requiredValue)
+                || !activeCount.TryGetInt32(out var activeCountValue)
+                || (isActive.ValueKind != JsonValueKind.True && isActive.ValueKind != JsonValueKind.False)
+                || sources.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var activeValue = isActive.GetBoolean();
+
+            var activeSources = sources.EnumerateArray()
+                .Where(static item => item.ValueKind == JsonValueKind.String)
+                .Select(static item => item.GetString()!)
+                .ToArray();
+            evidence = new CohortEvidenceMetadata(
+                segmentIndex,
+                rule.GetString()!,
+                requiredValue,
+                activeCountValue,
+                activeValue,
+                activeSources,
+                rawValue);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static bool TryParseSegmentIndex(string key, out int index)

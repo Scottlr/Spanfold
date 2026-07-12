@@ -1,5 +1,6 @@
 using Spanfold;
 using Spanfold.Internal.Keys;
+using System.Text.Json;
 
 namespace Spanfold.Internal.Comparison;
 
@@ -1191,16 +1192,14 @@ internal static class ComparisonRuntime
                 activeSources.Count,
                 this.cohort.Value.CohortSources.Count);
 
-            return "rule="
-                + this.cohort.Value.CohortActivity!.Name
-                + "; required="
-                + RequiredCount().ToString(System.Globalization.CultureInfo.InvariantCulture)
-                + "; activeCount="
-                + activeSources.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                + "; isActive="
-                + (active ? "true" : "false")
-                + "; activeSources="
-                + string.Join(",", activeSources.Select(static source => source?.ToString() ?? "<null>"));
+            return JsonSerializer.Serialize(new
+            {
+                rule = this.cohort.Value.CohortActivity!.Name,
+                required = RequiredCount(),
+                activeCount = activeSources.Count,
+                isActive = active,
+                activeSources = activeSources.Select(static source => source?.ToString() ?? "<null>").ToArray()
+            });
         }
 
         private int RequiredCount()
