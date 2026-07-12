@@ -75,6 +75,22 @@ public sealed class WindowRecordIdTests
         Assert.Throws<ArgumentException>(() => _ = window.Id);
     }
 
+    [Fact]
+    public void InvalidWindowRangesAreRejectedAtConstruction()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new ClosedWindow("DeviceOffline", "device-1", StartPosition: 5, EndPosition: 4));
+
+        Assert.Throws<ArgumentException>(() =>
+            new ClosedWindow(
+                "DeviceOffline",
+                "device-1",
+                StartPosition: 1,
+                EndPosition: 5,
+                StartTime: DateTimeOffset.UnixEpoch,
+                EndTime: DateTimeOffset.UnixEpoch.AddSeconds(-1)));
+    }
+
     private static WindowHistory BuildOfflineHistory()
     {
         var pipeline = Spanfold
