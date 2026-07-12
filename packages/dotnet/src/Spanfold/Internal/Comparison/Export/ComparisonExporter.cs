@@ -1002,6 +1002,10 @@ internal static class ComparisonExporter
         WriteObjectValue(writer, "key", window.Key);
         WriteObjectValue(writer, "source", window.Source);
         WriteObjectValue(writer, "partition", window.Partition);
+        if (window.TimestampClock is not null)
+        {
+            writer.WriteString("timestampClock", window.TimestampClock);
+        }
         writer.WriteNumber("startPosition", window.StartPosition);
         WriteNullableNumber(writer, "endPosition", window.EndPosition);
         WriteNullableTimestamp(writer, "startTime", window.StartTime);

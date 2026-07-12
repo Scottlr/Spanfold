@@ -20,6 +20,7 @@ public sealed record ClosedWindow : WindowRecord
     /// <param name="Tags">Descriptive non-boundary metadata attached to this window.</param>
     /// <param name="BoundaryReason">The reason this window closed, when known.</param>
     /// <param name="BoundaryChanges">The segment changes that caused this window to close.</param>
+    /// <param name="TimestampClock">Optional identity of the clock that produced the timestamps.</param>
     public ClosedWindow(
         string WindowName,
         object Key,
@@ -32,7 +33,8 @@ public sealed record ClosedWindow : WindowRecord
         IReadOnlyList<WindowSegment>? Segments = null,
         IReadOnlyList<WindowTag>? Tags = null,
         WindowBoundaryReason? BoundaryReason = null,
-        IReadOnlyList<WindowBoundaryChange>? BoundaryChanges = null)
+        IReadOnlyList<WindowBoundaryChange>? BoundaryChanges = null,
+        string? TimestampClock = null)
         : base(
         WindowName,
         Key,
@@ -45,7 +47,8 @@ public sealed record ClosedWindow : WindowRecord
         Segments,
         Tags,
         BoundaryReason,
-        BoundaryChanges)
+        BoundaryChanges,
+        TimestampClock)
     {
     }
 }
