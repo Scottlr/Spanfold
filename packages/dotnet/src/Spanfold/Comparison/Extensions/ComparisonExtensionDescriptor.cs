@@ -14,7 +14,7 @@ namespace Spanfold;
 /// <param name="Selectors">Selector descriptors provided by the extension.</param>
 /// <param name="Comparators">Comparator declarations provided by the extension.</param>
 /// <param name="MetadataKeys">Metadata keys emitted by the extension.</param>
-public sealed record ComparisonExtensionDescriptor(
+internal sealed record ComparisonExtensionDescriptor(
     string Id,
     string DisplayName,
     IReadOnlyList<ComparisonExtensionSelector> Selectors,

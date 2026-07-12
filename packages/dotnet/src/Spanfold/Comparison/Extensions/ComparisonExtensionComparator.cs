@@ -5,6 +5,6 @@ namespace Spanfold;
 /// </summary>
 /// <param name="Declaration">The comparator declaration string used in plans.</param>
 /// <param name="Description">A human-readable description for documentation and explain output.</param>
-public sealed record ComparisonExtensionComparator(
+internal sealed record ComparisonExtensionComparator(
     string Declaration,
     string Description);
