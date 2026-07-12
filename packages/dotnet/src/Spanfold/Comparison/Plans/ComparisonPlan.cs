@@ -178,6 +178,22 @@ public sealed class ComparisonPlan
                 "comparators",
                 ComparisonPlanDiagnosticSeverity.Error));
         }
+        else
+        {
+            for (var i = 0; i < Comparators.Count; i++)
+            {
+                if (ComparisonComparatorCatalog.IsKnownDeclaration(Comparators[i]))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(new ComparisonPlanDiagnostic(
+                    ComparisonPlanValidationCode.UnknownComparator,
+                    $"Comparator '{Comparators[i]}' is not registered.",
+                    $"comparators[{i}]",
+                    ComparisonPlanDiagnosticSeverity.Error));
+            }
+        }
 
         return diagnostics.ToArray();
     }
