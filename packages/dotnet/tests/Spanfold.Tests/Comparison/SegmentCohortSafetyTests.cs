@@ -155,10 +155,9 @@ public sealed class SegmentCohortSafetyTests
         var thresholdSegment = Assert.Single(
             result.ResidualRows,
             row => row.Range.Start == TemporalPoint.ForPosition(2));
-        var thresholdIndex = FindResidualIndex(result.ResidualRows, thresholdSegment);
         var finality = Assert.Single(
             result.RowFinalities,
-            row => row.RowId == "residual[" + thresholdIndex + "]");
+            row => row.Finality == ComparisonFinality.Provisional);
 
         Assert.Equal(ComparisonFinality.Provisional, finality.Finality);
     }

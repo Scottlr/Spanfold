@@ -22,7 +22,7 @@ public sealed class LiveFinalitySnapshotTests
         var row = Assert.Single(result.ResidualRows);
         Assert.Equal(TemporalRangeEndStatus.Closed, row.Range.EndStatus);
         var finality = Assert.Single(result.RowFinalities);
-        Assert.Equal("residual[0]", finality.RowId);
+        Assert.StartsWith("residual:", finality.RowId);
         Assert.Equal(ComparisonFinality.Provisional, finality.Finality);
     }
 

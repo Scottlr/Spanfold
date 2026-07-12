@@ -900,7 +900,7 @@ internal static class ComparisonRuntime
         for (var i = 0; i < overlapRows.Count; i++)
         {
             var row = overlapRows[i];
-            AddRowFinality(finalities, provisionalRecordIds, "overlap", i, row.TargetRecordIds, row.AgainstRecordIds);
+            AddRowFinality(finalities, provisionalRecordIds, "overlap", row, row.TargetRecordIds, row.AgainstRecordIds);
         }
 
         for (var i = 0; i < residualRows.Count; i++)
@@ -909,52 +909,52 @@ internal static class ComparisonRuntime
             if (cohortEvidence.HasCohort
                 && TryGetAlignedAgainstIds(aligned, row, out var againstRecordIds))
             {
-                AddRowFinality(finalities, provisionalRecordIds, "residual", i, row.TargetRecordIds, againstRecordIds);
+                AddRowFinality(finalities, provisionalRecordIds, "residual", row, row.TargetRecordIds, againstRecordIds);
             }
             else
             {
-                AddRowFinality(finalities, provisionalRecordIds, "residual", i, row.TargetRecordIds);
+                AddRowFinality(finalities, provisionalRecordIds, "residual", row, row.TargetRecordIds);
             }
         }
 
         for (var i = 0; i < missingRows.Count; i++)
         {
-            AddRowFinality(finalities, provisionalRecordIds, "missing", i, missingRows[i].AgainstRecordIds);
+            AddRowFinality(finalities, provisionalRecordIds, "missing", missingRows[i], missingRows[i].AgainstRecordIds);
         }
 
         for (var i = 0; i < coverageRows.Count; i++)
         {
             var row = coverageRows[i];
-            AddRowFinality(finalities, provisionalRecordIds, "coverage", i, row.TargetRecordIds, row.AgainstRecordIds);
+            AddRowFinality(finalities, provisionalRecordIds, "coverage", row, row.TargetRecordIds, row.AgainstRecordIds);
         }
 
         for (var i = 0; i < gapRows.Count; i++)
         {
-            AddRowFinality(finalities, provisionalRecordIds, "gap", i);
+            AddRowFinality(finalities, provisionalRecordIds, "gap", gapRows[i]);
         }
 
         for (var i = 0; i < symmetricDifferenceRows.Count; i++)
         {
             var row = symmetricDifferenceRows[i];
-            AddRowFinality(finalities, provisionalRecordIds, "symmetricDifference", i, row.TargetRecordIds, row.AgainstRecordIds);
+            AddRowFinality(finalities, provisionalRecordIds, "symmetricDifference", row, row.TargetRecordIds, row.AgainstRecordIds);
         }
 
         for (var i = 0; i < containmentRows.Count; i++)
         {
             var row = containmentRows[i];
-            AddRowFinality(finalities, provisionalRecordIds, "containment", i, row.TargetRecordIds, row.ContainerRecordIds);
+            AddRowFinality(finalities, provisionalRecordIds, "containment", row, row.TargetRecordIds, row.ContainerRecordIds);
         }
 
         for (var i = 0; i < leadLagRows.Count; i++)
         {
             var row = leadLagRows[i];
-            AddRowFinality(finalities, provisionalRecordIds, "leadLag", i, row.TargetRecordId, row.ComparisonRecordId);
+            AddRowFinality(finalities, provisionalRecordIds, "leadLag", row, row.TargetRecordId, row.ComparisonRecordId);
         }
 
         for (var i = 0; i < asOfRows.Count; i++)
         {
             var row = asOfRows[i];
-            AddRowFinality(finalities, provisionalRecordIds, "asOf", i, row.TargetRecordId, row.MatchedRecordId);
+            AddRowFinality(finalities, provisionalRecordIds, "asOf", row, row.TargetRecordId, row.MatchedRecordId);
         }
 
         return finalities.ToArray();
@@ -964,7 +964,7 @@ internal static class ComparisonRuntime
         List<ComparisonRowFinality> finalities,
         HashSet<WindowRecordId> provisionalRecordIds,
         string rowType,
-        int index,
+        object row,
         params IReadOnlyList<WindowRecordId>[] recordIdGroups)
     {
         var finality = HasProvisionalRecord(provisionalRecordIds, recordIdGroups)
@@ -973,7 +973,7 @@ internal static class ComparisonRuntime
 
         finalities.Add(new ComparisonRowFinality(
             rowType,
-            rowType + "[" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]",
+            ComparisonRowIdentity.Create(rowType, row),
             finality,
             finality == ComparisonFinality.Provisional
                 ? "Depends on at least one open window clipped to the evaluation horizon."
@@ -984,7 +984,7 @@ internal static class ComparisonRuntime
         List<ComparisonRowFinality> finalities,
         HashSet<WindowRecordId> provisionalRecordIds,
         string rowType,
-        int index,
+        object row,
         WindowRecordId firstRecordId,
         WindowRecordId? secondRecordId)
     {
@@ -995,7 +995,7 @@ internal static class ComparisonRuntime
 
         finalities.Add(new ComparisonRowFinality(
             rowType,
-            rowType + "[" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]",
+            ComparisonRowIdentity.Create(rowType, row),
             finality,
             finality == ComparisonFinality.Provisional
                 ? "Depends on at least one open window clipped to the evaluation horizon."
