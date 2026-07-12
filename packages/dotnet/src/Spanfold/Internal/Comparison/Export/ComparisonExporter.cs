@@ -456,15 +456,11 @@ internal static class ComparisonExporter
     private static void WriteNormalization(Utf8JsonWriter writer, ComparisonNormalizationPolicy policy)
     {
         writer.WriteStartObject();
-        writer.WriteBoolean("requireClosedWindows", policy.RequireClosedWindows);
-        writer.WriteBoolean("useHalfOpenRanges", policy.UseHalfOpenRanges);
         writer.WriteString("timeAxis", policy.TimeAxis.ToString());
         writer.WriteString("openWindowPolicy", policy.OpenWindowPolicy.ToString());
         writer.WritePropertyName("openWindowHorizon");
         WritePoint(writer, policy.OpenWindowHorizon);
         writer.WriteString("nullTimestampPolicy", policy.NullTimestampPolicy.ToString());
-        writer.WriteBoolean("coalesceAdjacentWindows", policy.CoalesceAdjacentWindows);
-        writer.WriteString("duplicateWindowPolicy", policy.DuplicateWindowPolicy.ToString());
         writer.WritePropertyName("knownAt");
         WritePoint(writer, policy.KnownAt);
         writer.WriteEndObject();

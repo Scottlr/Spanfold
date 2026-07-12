@@ -38,6 +38,7 @@ public static partial class SpanfoldSnapshot
     /// </summary>
     /// <param name="expected">The expected snapshot.</param>
     /// <param name="actual">The actual snapshot.</param>
+    /// <param name="normalizeUnlabeledHex">Whether every unlabeled 64-character lowercase hexadecimal token should be normalized.</param>
     /// <exception cref="SpanfoldAssertionException">Thrown when the normalized snapshots differ.</exception>
     public static void AssertEqual(
         string expected,

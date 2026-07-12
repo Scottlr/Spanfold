@@ -13,7 +13,7 @@ public sealed class FluentComparisonBuilderTests
             .Target("provider-a", s => s.Source("provider-a"))
             .Against("provider-b", s => s.Source("provider-b"))
             .Within(s => s.Window("DeviceOffline"))
-            .Normalize(n => n.RequireClosedWindows().HalfOpen())
+            .Normalize(n => n.RequireClosedWindows())
             .Using(c => c.Overlap().Residual().Coverage())
             .Build();
 
