@@ -73,11 +73,6 @@ public class SegmentCohortBenchmarks
             .RunLive(TemporalPoint.ForPosition(this.data.EventCount + 1));
     }
 
-    public SegmentCohortBenchmarkData GetDataForSmokeTest()
-    {
-        return this.data;
-    }
-
     private WindowComparisonBuilder CreateSegmentBuilder()
     {
         return this.data.History

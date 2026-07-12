@@ -124,11 +124,6 @@ public class ComparisonBenchmarks
         return this.liveResultForExport.ExportJson();
     }
 
-    public ComparisonBenchmarkData GetDataForSmokeTest()
-    {
-        return this.data;
-    }
-
     private WindowComparisonBuilder CreateBaseBuilder()
     {
         return this.data.History.Compare("Benchmark Provider QA")
