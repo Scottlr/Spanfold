@@ -29,6 +29,10 @@ The benchmark project covers:
 - live segment/cohort residual execution
 - JSON and Markdown export overhead
 
+The comparison benchmark also includes `DenseSingleScope`, a checked-in shape
+with one device key and alternating states across both sources. This keeps the
+alignment workload dense enough to expose per-scope scaling regressions.
+
 Run the .NET suite with:
 
 ```bash

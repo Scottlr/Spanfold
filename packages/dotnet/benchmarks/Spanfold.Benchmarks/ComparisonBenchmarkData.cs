@@ -61,6 +61,7 @@ public sealed class ComparisonBenchmarkData
             ComparisonScenario.HighOverlap => new BenchmarkShape(EventCount: 2_048, DeviceCount: 32, SourceCount: 2),
             ComparisonScenario.HighCardinality => new BenchmarkShape(EventCount: 4_096, DeviceCount: 2_048, SourceCount: 2),
             ComparisonScenario.ManySource => new BenchmarkShape(EventCount: 4_096, DeviceCount: 256, SourceCount: 8),
+            ComparisonScenario.DenseSingleScope => new BenchmarkShape(EventCount: 8_192, DeviceCount: 1, SourceCount: 2),
             _ => new BenchmarkShape(EventCount: 1_024, DeviceCount: 128, SourceCount: 2)
         };
     }
@@ -77,6 +78,7 @@ public sealed class ComparisonBenchmarkData
             ComparisonScenario.HighOverlap => (occurrence % 8) >= 4,
             ComparisonScenario.HighCardinality => (occurrence & 1) == 1,
             ComparisonScenario.ManySource => ((occurrence + sourceIndex) & 1) == 1,
+            ComparisonScenario.DenseSingleScope => (occurrence & 1) == 1,
             _ => (occurrence & 1) == 1
         };
     }
