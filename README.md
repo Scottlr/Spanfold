@@ -200,6 +200,7 @@ benchmarks, and package documentation.
 ```bash
 dotnet add package Spanfold         # core recording and comparison
 dotnet add package Spanfold.Testing # optional: fixtures, snapshots, assertions
+dotnet tool install --global Spanfold.Cli # fixture and audit command line workflows
 ```
 
 → [.NET package README](packages/dotnet/README.md)
