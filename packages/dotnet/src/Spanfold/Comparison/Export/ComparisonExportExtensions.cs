@@ -29,6 +29,18 @@ public static class ComparisonExportExtensions
     }
 
     /// <summary>
+    /// Exports a plan with structured selector descriptors suitable for
+    /// reconstructing executable selectors in another process.
+    /// </summary>
+    /// <param name="plan">The serializable plan to export.</param>
+    /// <returns>Portable plan JSON with selector descriptors.</returns>
+    public static string ExportPortableJson(this ComparisonPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return ComparisonExporter.ExportPortableJson(plan);
+    }
+
+    /// <summary>
     /// Exports a comparison result as deterministic JSON.
     /// </summary>
     /// <param name="result">The result to export.</param>
