@@ -415,15 +415,15 @@
 - name: Provider QA
 - strict: false
 - serializable: true
-- target: source:provider-a (source = provider-a; serializable=true)
+- target: source:provider-a \(source = provider-a; serializable=true\)
 - against: 1
-- against[0]: source:provider-b (source = provider-b; serializable=true)
+- against[0]: source:provider-b \(source = provider-b; serializable=true\)
 - scope: window=DeviceOffline; axis=ProcessingPosition
 - normalization: axis=ProcessingPosition; openPolicy=RequireClosed; horizon=<none>; nullTimestamp=Reject; knownAt=<none>
 - comparators: overlap, residual, coverage
 - output: alignedSegments=true; explainData=true
 - diagnostics: 1
-- diagnostic[0]: Warning UnknownComparator at comparators[3]: Comparator 'shape' is not registered.
+- diagnostic[0]: Warning UnknownComparator at comparators\[3\]: Comparator 'shape' is not registered.
 
 ## Preparation
 - selected windows: 2
@@ -431,14 +431,14 @@
 - normalized windows: 2
 - selected[0]: record=<record-id:1>; window=DeviceOffline; key=System.String:device-1; source=System.String:provider-a; partition=<null>; startPosition=1; endPosition=5; startTime=<null>; endTime=<null>
 - selected[1]: record=<record-id:2>; window=DeviceOffline; key=System.String:device-1; source=System.String:provider-b; partition=<null>; startPosition=3; endPosition=7; startTime=<null>; endTime=<null>
-- normalized[0]: record=<record-id:1>; side=Target; selector=source:provider-a; range=[pos:1, pos:5) endStatus=Closed
-- normalized[1]: record=<record-id:2>; side=Against; selector=source:provider-b; range=[pos:3, pos:7) endStatus=Closed
+- normalized[0]: record=<record-id:1>; side=Target; selector=source:provider-a; range=\[pos:1, pos:5\) endStatus=Closed
+- normalized[1]: record=<record-id:2>; side=Against; selector=source:provider-b; range=\[pos:3, pos:7\) endStatus=Closed
 
 ## Alignment
 - segments: 3
-- segment[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:1, pos:3) endStatus=Closed; target=[<record-id:1>]; against=[]
-- segment[1]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:3, pos:5) endStatus=Closed; target=[<record-id:1>]; against=[<record-id:2>]
-- segment[2]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:5, pos:7) endStatus=Closed; target=[]; against=[<record-id:2>]
+- segment[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:1, pos:3\) endStatus=Closed; target=\[<record-id:1>\]; against=\[\]
+- segment[1]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:3, pos:5\) endStatus=Closed; target=\[<record-id:1>\]; against=\[<record-id:2>\]
+- segment[2]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:5, pos:7\) endStatus=Closed; target=\[\]; against=\[<record-id:2>\]
 
 ## Result
 - valid: true
@@ -460,8 +460,8 @@
 - summary[0]: overlap rows=1
 - summary[1]: residual rows=1
 - summary[2]: coverage rows=2
-- overlap[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:3, pos:5) endStatus=Closed; target=[<record-id:1>]; against=[<record-id:2>]
-- residual[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:1, pos:3) endStatus=Closed; target=[<record-id:1>]
-- coverage[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:1, pos:3) endStatus=Closed; targetMagnitude=2; coveredMagnitude=0; target=[<record-id:1>]; against=[]
-- coverage[1]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=[pos:3, pos:5) endStatus=Closed; targetMagnitude=2; coveredMagnitude=2; target=[<record-id:1>]; against=[<record-id:2>]
+- overlap[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:3, pos:5\) endStatus=Closed; target=\[<record-id:1>\]; against=\[<record-id:2>\]
+- residual[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:1, pos:3\) endStatus=Closed; target=\[<record-id:1>\]
+- coverage[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:1, pos:3\) endStatus=Closed; targetMagnitude=2; coveredMagnitude=0; target=\[<record-id:1>\]; against=\[\]
+- coverage[1]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:3, pos:5\) endStatus=Closed; targetMagnitude=2; coveredMagnitude=2; target=\[<record-id:1>\]; against=\[<record-id:2>\]
 - coverageSummary[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; targetMagnitude=4; coveredMagnitude=2; ratio=0.5

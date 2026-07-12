@@ -524,7 +524,7 @@ internal static class ComparisonExplainer
                 this.builder.Append("# ");
             }
 
-            this.builder.AppendLine(value);
+            this.builder.AppendLine(this.FormatValue(value));
         }
 
         internal void Section(string value)
@@ -535,7 +535,7 @@ internal static class ComparisonExplainer
                 this.builder.Append("## ");
             }
 
-            this.builder.AppendLine(value);
+            this.builder.AppendLine(this.FormatValue(value));
         }
 
         internal void Item(string name, string value)
@@ -548,7 +548,50 @@ internal static class ComparisonExplainer
             this.builder
                 .Append(name)
                 .Append(": ")
-                .AppendLine(value);
+                .AppendLine(this.FormatValue(value));
+        }
+
+        private string FormatValue(string value)
+        {
+            return this.format == ComparisonExplanationFormat.Markdown
+                ? EscapeMarkdown(value)
+                : value;
+        }
+
+        private static string EscapeMarkdown(string value)
+        {
+            var escaped = new StringBuilder(value.Length);
+            foreach (var character in value)
+            {
+                switch (character)
+                {
+                    case '\\':
+                        escaped.Append(@"\\");
+                        break;
+                    case '\r':
+                        escaped.Append(@"\r");
+                        break;
+                    case '\n':
+                        escaped.Append(@"\n");
+                        break;
+                    case '*':
+                    case '_':
+                    case '[':
+                    case ']':
+                    case '(':
+                    case ')':
+                    case '#':
+                    case '|':
+                    case '`':
+                        escaped.Append('\\').Append(character);
+                        break;
+                    default:
+                        escaped.Append(character);
+                        break;
+                }
+            }
+
+            return escaped.ToString();
         }
 
         public override string ToString()

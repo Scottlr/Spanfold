@@ -61,6 +61,24 @@ public sealed class ComparisonExplainTests
         Assert.DoesNotContain("# Comparison Explain", explanation);
     }
 
+    [Fact]
+    public void MarkdownExplainEscapesUntrustedValues()
+    {
+        var plan = new ComparisonPlan(
+            "# plan\n- forged",
+            ComparisonSelector.ForSource("provider-a"),
+            [ComparisonSelector.ForSource("provider-b")],
+            ComparisonScope.Window("Device_[Offline]"),
+            ComparisonNormalizationPolicy.Default,
+            ["overlap"],
+            ComparisonOutputOptions.Default);
+
+        var explanation = plan.Explain(ComparisonExplanationFormat.Markdown);
+
+        Assert.Contains("\\# plan\\n- forged", explanation);
+        Assert.DoesNotContain("\n- forged", explanation, StringComparison.Ordinal);
+    }
+
     private static ComparisonResult CreateResult(ClosedWindow target, ClosedWindow against)
     {
         var plan = new ComparisonPlan(
