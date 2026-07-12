@@ -53,11 +53,12 @@ internal sealed class RollUpRuntime<TEvent>
             this.parents.Add(parentStateKey, parent);
         }
 
+        var membershipChanged = !parent.Children.ContainsKey(childKey);
         parent.Children[childKey] = childIsActive;
 
         var parentChanged = false;
 
-        if (!childChanged)
+        if (!childChanged && !membershipChanged)
         {
             PropagateToParents(
                 @event,
