@@ -50,6 +50,17 @@ public sealed class ComparisonPlanTests
     }
 
     [Fact]
+    public void UnknownComparatorIsRejectedDuringPlanValidation()
+    {
+        var plan = CreatePlan(comparators: ["unknown"]);
+
+        var diagnostic = Assert.Single(plan.Validate(), d => d.Code == ComparisonPlanValidationCode.UnknownComparator);
+
+        Assert.Equal("comparators[0]", diagnostic.Path);
+        Assert.Equal(ComparisonPlanDiagnosticSeverity.Error, diagnostic.Severity);
+    }
+
+    [Fact]
     public void RuntimeOnlySelectorsAreDiagnosed()
     {
         var plan = CreatePlan(
