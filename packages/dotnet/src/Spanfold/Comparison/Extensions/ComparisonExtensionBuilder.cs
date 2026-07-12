@@ -3,7 +3,7 @@ namespace Spanfold;
 /// <summary>
 /// Builds a comparison extension descriptor.
 /// </summary>
-public sealed class ComparisonExtensionBuilder
+internal sealed class ComparisonExtensionBuilder
 {
     private readonly string id;
     private readonly string displayName;
@@ -16,7 +16,7 @@ public sealed class ComparisonExtensionBuilder
     /// </summary>
     /// <param name="id">The stable extension identifier.</param>
     /// <param name="displayName">The human-readable extension name.</param>
-    public ComparisonExtensionBuilder(string id, string displayName)
+    internal ComparisonExtensionBuilder(string id, string displayName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
@@ -31,7 +31,7 @@ public sealed class ComparisonExtensionBuilder
     /// <param name="name">The selector name.</param>
     /// <param name="description">The selector description.</param>
     /// <returns>This builder.</returns>
-    public ComparisonExtensionBuilder AddSelector(string name, string description)
+    internal ComparisonExtensionBuilder AddSelector(string name, string description)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
@@ -46,7 +46,7 @@ public sealed class ComparisonExtensionBuilder
     /// <param name="declaration">The comparator declaration string.</param>
     /// <param name="description">The comparator description.</param>
     /// <returns>This builder.</returns>
-    public ComparisonExtensionBuilder AddComparator(string declaration, string description)
+    internal ComparisonExtensionBuilder AddComparator(string declaration, string description)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(declaration);
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
@@ -60,7 +60,7 @@ public sealed class ComparisonExtensionBuilder
     /// </summary>
     /// <param name="key">The metadata key.</param>
     /// <returns>This builder.</returns>
-    public ComparisonExtensionBuilder AddMetadataKey(string key)
+    internal ComparisonExtensionBuilder AddMetadataKey(string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
@@ -72,7 +72,7 @@ public sealed class ComparisonExtensionBuilder
     /// Builds the immutable extension descriptor.
     /// </summary>
     /// <returns>The extension descriptor.</returns>
-    public ComparisonExtensionDescriptor Build()
+    internal ComparisonExtensionDescriptor Build()
     {
         return new ComparisonExtensionDescriptor(
             this.id,

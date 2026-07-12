@@ -5,6 +5,6 @@ namespace Spanfold;
 /// </summary>
 /// <param name="Name">The selector name used in plans and output.</param>
 /// <param name="Description">A human-readable selector description.</param>
-public sealed record ComparisonExtensionSelector(
+internal sealed record ComparisonExtensionSelector(
     string Name,
     string Description);
