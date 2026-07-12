@@ -323,7 +323,6 @@ public sealed class WindowComparisonBuilder
         var plan = Build();
         var normalization = plan.Normalization with
         {
-            RequireClosedWindows = false,
             OpenWindowPolicy = ComparisonOpenWindowPolicy.ClipToHorizon,
             OpenWindowHorizon = evaluationHorizon
         };

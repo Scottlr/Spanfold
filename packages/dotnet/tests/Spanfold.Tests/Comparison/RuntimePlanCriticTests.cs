@@ -58,7 +58,6 @@ public sealed class RuntimePlanCriticTests
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default with
             {
-                RequireClosedWindows = false,
                 OpenWindowPolicy = ComparisonOpenWindowPolicy.ClipToHorizon,
                 OpenWindowHorizon = null
             },

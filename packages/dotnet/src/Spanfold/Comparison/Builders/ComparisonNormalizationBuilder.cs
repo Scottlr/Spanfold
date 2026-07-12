@@ -5,14 +5,10 @@ namespace Spanfold;
 /// </summary>
 public sealed class ComparisonNormalizationBuilder
 {
-    private bool requireClosedWindows = true;
-    private bool useHalfOpenRanges = true;
     private TemporalAxis timeAxis = TemporalAxis.ProcessingPosition;
     private ComparisonOpenWindowPolicy openWindowPolicy = ComparisonOpenWindowPolicy.RequireClosed;
     private TemporalPoint? openWindowHorizon;
     private ComparisonNullTimestampPolicy nullTimestampPolicy = ComparisonNullTimestampPolicy.Reject;
-    private bool coalesceAdjacentWindows;
-    private ComparisonDuplicateWindowPolicy duplicateWindowPolicy = ComparisonDuplicateWindowPolicy.Preserve;
     private TemporalPoint? knownAt;
 
     /// <summary>
@@ -21,7 +17,6 @@ public sealed class ComparisonNormalizationBuilder
     /// <returns>This builder.</returns>
     public ComparisonNormalizationBuilder RequireClosedWindows()
     {
-        this.requireClosedWindows = true;
         this.openWindowPolicy = ComparisonOpenWindowPolicy.RequireClosed;
         this.openWindowHorizon = null;
         return this;
@@ -39,19 +34,8 @@ public sealed class ComparisonNormalizationBuilder
     /// <returns>This builder.</returns>
     public ComparisonNormalizationBuilder ClipOpenWindowsTo(TemporalPoint horizon)
     {
-        this.requireClosedWindows = false;
         this.openWindowPolicy = ComparisonOpenWindowPolicy.ClipToHorizon;
         this.openWindowHorizon = horizon;
-        return this;
-    }
-
-    /// <summary>
-    /// Uses half-open start-inclusive, end-exclusive ranges.
-    /// </summary>
-    /// <returns>This builder.</returns>
-    public ComparisonNormalizationBuilder HalfOpen()
-    {
-        this.useHalfOpenRanges = true;
         return this;
     }
 
@@ -96,26 +80,6 @@ public sealed class ComparisonNormalizationBuilder
     }
 
     /// <summary>
-    /// Coalesces adjacent normalized windows with identical comparison scope.
-    /// </summary>
-    /// <returns>This builder.</returns>
-    public ComparisonNormalizationBuilder CoalesceAdjacentWindows()
-    {
-        this.coalesceAdjacentWindows = true;
-        return this;
-    }
-
-    /// <summary>
-    /// Rejects duplicate normalized windows.
-    /// </summary>
-    /// <returns>This builder.</returns>
-    public ComparisonNormalizationBuilder RejectDuplicateWindows()
-    {
-        this.duplicateWindowPolicy = ComparisonDuplicateWindowPolicy.Reject;
-        return this;
-    }
-
-    /// <summary>
     /// Applies a processing-position known-at point to prevent future leakage.
     /// </summary>
     /// <remarks>
@@ -150,14 +114,10 @@ public sealed class ComparisonNormalizationBuilder
     internal ComparisonNormalizationPolicy Build()
     {
         return new ComparisonNormalizationPolicy(
-            this.requireClosedWindows,
-            this.useHalfOpenRanges,
             this.timeAxis,
             this.openWindowPolicy,
             this.openWindowHorizon,
             this.nullTimestampPolicy,
-            this.coalesceAdjacentWindows,
-            this.duplicateWindowPolicy,
             this.knownAt);
     }
 }

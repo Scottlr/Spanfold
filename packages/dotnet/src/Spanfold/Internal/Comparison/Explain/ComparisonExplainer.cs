@@ -421,13 +421,9 @@ internal static class ComparisonExplainer
     private static string FormatNormalization(ComparisonNormalizationPolicy policy)
     {
         return "axis=" + policy.TimeAxis
-            + "; requireClosed=" + FormatBool(policy.RequireClosedWindows)
-            + "; halfOpen=" + FormatBool(policy.UseHalfOpenRanges)
             + "; openPolicy=" + policy.OpenWindowPolicy
             + "; horizon=" + (policy.OpenWindowHorizon.HasValue ? FormatPoint(policy.OpenWindowHorizon.Value) : "<none>")
             + "; nullTimestamp=" + policy.NullTimestampPolicy
-            + "; coalesceAdjacent=" + FormatBool(policy.CoalesceAdjacentWindows)
-            + "; duplicatePolicy=" + policy.DuplicateWindowPolicy
             + "; knownAt=" + (policy.KnownAt.HasValue ? FormatPoint(policy.KnownAt.Value) : "<none>");
     }
 
