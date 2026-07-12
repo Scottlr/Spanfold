@@ -78,6 +78,35 @@ public sealed class OneLevelRollUpRuntimeTests
             });
     }
 
+    [Fact]
+    public void RollUpUsesChildWindowKeyComparerForMembership()
+    {
+        var pipeline = Spanfold
+            .For<PriceTick>()
+            .Window(
+                "SelectionSuspension",
+                key: tick => tick.SelectionId,
+                isActive: tick => tick.Price == 0m,
+                comparer: StringComparer.OrdinalIgnoreCase)
+            .RollUp(
+                "MarketSuspension",
+                key: tick => tick.MarketId,
+                isActive: children => children.AllActive())
+            .Build();
+
+        pipeline.Ingest(new PriceTick("Selection-1", "market-1", 0m));
+        var result = pipeline.Ingest(new PriceTick("selection-1", "market-1", 1.01m));
+
+        Assert.Collection(
+            result.Emissions,
+            child => Assert.Equal(WindowTransitionKind.Closed, child.Kind),
+            parent =>
+            {
+                Assert.Equal("MarketSuspension", parent.WindowName);
+                Assert.Equal(WindowTransitionKind.Closed, parent.Kind);
+            });
+    }
+
     private static EventPipeline<PriceTick> CreatePipeline()
     {
         return Spanfold
