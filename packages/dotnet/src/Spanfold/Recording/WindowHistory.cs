@@ -288,6 +288,8 @@ public sealed class WindowHistory
     {
         return annotation.KnownAt is { } knownAt
             && knownAt.Axis == horizon.Axis
+            && (knownAt.Axis != TemporalAxis.Timestamp
+                || string.Equals(knownAt.Clock, horizon.Clock, StringComparison.Ordinal))
             && knownAt.CompareTo(horizon) <= 0;
     }
 
