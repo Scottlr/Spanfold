@@ -1,4 +1,5 @@
 using System.Globalization;
+using Spanfold.Internal.Keys;
 
 namespace Spanfold;
 
@@ -409,12 +410,7 @@ public sealed class WindowHistoryQuery
 
     private static string StableObjectValue(object? value)
     {
-        return value switch
-        {
-            null => "<null>",
-            IFormattable formattable => value.GetType().FullName + ":" + formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => value.GetType().FullName + ":" + value
-        };
+        return CanonicalValueFormatter.Format(value);
     }
 
     private readonly record struct ValueFilter(string Name, object? Value);
