@@ -81,7 +81,7 @@ internal static class ComparisonPreparer
             if (plan.Target.Value.Matches(window))
             {
                 matched = true;
-                AddNormalized(window, plan.Target.Value.Name, ComparisonSide.Target, plan, diagnostics, selected, excluded, normalized, memberships);
+                AddNormalized(window, plan.Target.Value.Name, ComparisonSide.Target, plan, knownAtFilter, canFilterByKnownAt, diagnostics, selected, excluded, normalized, memberships);
             }
 
             for (var i = 0; i < plan.Against.Count; i++)
@@ -93,7 +93,7 @@ internal static class ComparisonPreparer
                 }
 
                 matched = true;
-                AddNormalized(window, selector.Name, ComparisonSide.Against, plan, diagnostics, selected, excluded, normalized, memberships);
+                AddNormalized(window, selector.Name, ComparisonSide.Against, plan, knownAtFilter, canFilterByKnownAt, diagnostics, selected, excluded, normalized, memberships);
             }
 
             if (!matched)
@@ -110,6 +110,8 @@ internal static class ComparisonPreparer
         string selectorName,
         ComparisonSide side,
         ComparisonPlan plan,
+        TemporalPoint knownAt,
+        bool canFilterByKnownAt,
         List<ComparisonPlanDiagnostic> diagnostics,
         List<WindowRecord> selected,
         List<ExcludedWindowRecord> excluded,
@@ -121,7 +123,7 @@ internal static class ComparisonPreparer
             return;
         }
 
-        if (!TryCreateRange(window, plan.Normalization, diagnostics, excluded, out var range))
+        if (!TryCreateRange(window, plan.Normalization, canFilterByKnownAt ? knownAt : null, diagnostics, excluded, out var range))
         {
             return;
         }
@@ -137,6 +139,7 @@ internal static class ComparisonPreparer
     private static bool TryCreateRange(
         WindowRecord window,
         ComparisonNormalizationPolicy policy,
+        TemporalPoint? knownAt,
         List<ComparisonPlanDiagnostic> diagnostics,
         List<ExcludedWindowRecord> excluded,
         out TemporalRange range)
@@ -149,6 +152,13 @@ internal static class ComparisonPreparer
         }
 
         var start = TemporalPoint.ForPosition(window.StartPosition);
+        if (knownAt.HasValue && knownAt.Value.Position >= window.StartPosition
+            && (!window.EndPosition.HasValue || knownAt.Value.Position < window.EndPosition.Value))
+        {
+            range = TemporalRange.WithEffectiveEnd(start, knownAt.Value, TemporalRangeEndStatus.OpenAtHorizon);
+            return true;
+        }
+
         if (window.EndPosition.HasValue)
         {
             range = TemporalRange.Closed(start, TemporalPoint.ForPosition(window.EndPosition.Value));
@@ -326,8 +336,7 @@ internal static class ComparisonPreparer
 
     private static bool IsKnownAt(WindowRecord window, TemporalPoint knownAt)
     {
-        var availabilityPosition = window.EndPosition ?? window.StartPosition;
-        return availabilityPosition <= knownAt.Position;
+        return window.StartPosition <= knownAt.Position;
     }
 
     private static PreparedComparison Create(

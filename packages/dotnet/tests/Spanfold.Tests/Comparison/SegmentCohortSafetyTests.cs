@@ -55,7 +55,9 @@ public sealed class SegmentCohortSafetyTests
             .Using(comparators => comparators.Residual())
             .Run();
 
-        Assert.Empty(knownAtFive.Prepared!.NormalizedWindows);
+        Assert.Equal(2, knownAtFive.Prepared!.NormalizedWindows.Count);
+        Assert.All(knownAtFive.Prepared.NormalizedWindows, static window =>
+            Assert.Equal(TemporalRangeEndStatus.OpenAtHorizon, window.Range.EndStatus));
         Assert.Contains(knownAtFive.Diagnostics, diagnostic =>
             diagnostic.Code == ComparisonPlanValidationCode.FutureWindowExcluded);
     }
@@ -108,9 +110,7 @@ public sealed class SegmentCohortSafetyTests
             .Using(comparators => comparators.Residual())
             .Run();
 
-        Assert.Equal(5, result.ResidualRows.TotalPositionLength());
-        Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Code == ComparisonPlanValidationCode.FutureWindowExcluded);
+        Assert.Equal(0, result.ResidualRows.TotalPositionLength());
     }
 
     [Fact]
