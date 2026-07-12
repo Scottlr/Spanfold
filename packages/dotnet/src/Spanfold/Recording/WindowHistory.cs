@@ -359,11 +359,17 @@ public sealed class WindowHistory
         var orderedSources = sources as object[] ?? sources.ToArray();
         var cells = new List<SourceMatrixCell>(orderedSources.Length * orderedSources.Length);
         var sourceHasWindows = new Dictionary<object, bool>();
+        var uniqueSources = new HashSet<object>();
 
         for (var i = 0; i < orderedSources.Length; i++)
         {
             var source = orderedSources[i];
             ArgumentNullException.ThrowIfNull(source);
+            if (!uniqueSources.Add(source))
+            {
+                throw new ArgumentException("Source matrix identities must be unique.", nameof(sources));
+            }
+
             sourceHasWindows[source] = HasWindowForSource(windowName, source);
         }
 
