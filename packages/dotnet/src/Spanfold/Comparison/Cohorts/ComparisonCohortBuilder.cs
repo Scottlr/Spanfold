@@ -55,6 +55,15 @@ public sealed class ComparisonCohortBuilder
             throw new InvalidOperationException("Cohort must declare at least one source.");
         }
 
+        var uniqueSources = new HashSet<object>();
+        for (var i = 0; i < this.sources.Count; i++)
+        {
+            if (!uniqueSources.Add(this.sources[i]))
+            {
+                throw new InvalidOperationException("Cohort sources must be unique.");
+            }
+        }
+
         if (this.activity.Count.HasValue && this.activity.Count.Value > this.sources.Count)
         {
             throw new InvalidOperationException("Cohort activity count cannot exceed the number of declared sources.");
