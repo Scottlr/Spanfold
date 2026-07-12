@@ -133,7 +133,7 @@ public readonly record struct TemporalRange
             throw new InvalidOperationException("Only processing-position ranges expose a position length.");
         }
 
-        return end.Position - Start.Position;
+        return SaturatingSubtract(end.Position, Start.Position);
     }
 
     /// <summary>
@@ -153,7 +153,22 @@ public readonly record struct TemporalRange
             throw new InvalidOperationException("Only timestamp ranges expose a time duration.");
         }
 
-        return end.Timestamp - Start.Timestamp;
+        return TimeSpan.FromTicks(SaturatingSubtract(end.Timestamp.Ticks, Start.Timestamp.Ticks));
+    }
+
+    private static long SaturatingSubtract(long left, long right)
+    {
+        if (right > 0 && left < long.MinValue + right)
+        {
+            return long.MinValue;
+        }
+
+        if (right < 0 && left > long.MaxValue + right)
+        {
+            return long.MaxValue;
+        }
+
+        return left - right;
     }
 
     /// <summary>

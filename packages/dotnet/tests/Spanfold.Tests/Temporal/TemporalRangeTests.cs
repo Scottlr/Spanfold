@@ -19,6 +19,16 @@ public sealed class TemporalRangeTests
     }
 
     [Fact]
+    public void ExtremePositionRangeSaturatesLengthInsteadOfOverflowing()
+    {
+        var range = TemporalRange.Closed(
+            TemporalPoint.ForPosition(long.MinValue),
+            TemporalPoint.ForPosition(long.MaxValue));
+
+        Assert.Equal(long.MaxValue, range.GetPositionLength());
+    }
+
+    [Fact]
     public void ClosedTimestampRangeExposesDuration()
     {
         var range = TemporalRange.Closed(

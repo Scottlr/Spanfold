@@ -694,12 +694,12 @@ internal static class ComparisonRuntime
         TemporalAxis axis)
     {
         var best = candidates[0];
-        var bestDistance = Math.Abs(GetDeltaMagnitude(targetPoint, best.Point, axis));
+        var bestDistance = GetAbsoluteDistance(targetPoint, best.Point, axis);
 
         for (var i = 1; i < candidates.Count; i++)
         {
             var candidate = candidates[i];
-            var distance = Math.Abs(GetDeltaMagnitude(targetPoint, candidate.Point, axis));
+            var distance = GetAbsoluteDistance(targetPoint, candidate.Point, axis);
             if (distance < bestDistance
                 || (distance == bestDistance
                     && string.CompareOrdinal(candidate.RecordId.Value, best.RecordId.Value) < 0))
@@ -793,8 +793,8 @@ internal static class ComparisonRuntime
         TemporalAxis axis)
     {
         return axis == TemporalAxis.Timestamp
-            ? (targetPoint.Timestamp - comparisonPoint.Timestamp).Ticks
-            : targetPoint.Position - comparisonPoint.Position;
+            ? SaturatingSubtract(targetPoint.Timestamp.Ticks, comparisonPoint.Timestamp.Ticks)
+            : SaturatingSubtract(targetPoint.Position, comparisonPoint.Position);
     }
 
     private static long GetAbsoluteDistance(
@@ -802,7 +802,23 @@ internal static class ComparisonRuntime
         TemporalPoint comparisonPoint,
         TemporalAxis axis)
     {
-        return Math.Abs(GetDeltaMagnitude(targetPoint, comparisonPoint, axis));
+        var delta = GetDeltaMagnitude(targetPoint, comparisonPoint, axis);
+        return delta == long.MinValue ? long.MaxValue : Math.Abs(delta);
+    }
+
+    private static long SaturatingSubtract(long left, long right)
+    {
+        if (right > 0 && left < long.MinValue + right)
+        {
+            return long.MinValue;
+        }
+
+        if (right < 0 && left > long.MaxValue + right)
+        {
+            return long.MaxValue;
+        }
+
+        return left - right;
     }
 
     private static bool TryParseLeadLag(string comparator, out LeadLagOptions options)
