@@ -95,7 +95,7 @@ public sealed record ComparisonScope(
         return values switch
         {
             null => [],
-            T[] array => array,
+            T[] array => array.ToArray(),
             _ => values.ToArray()
         };
     }

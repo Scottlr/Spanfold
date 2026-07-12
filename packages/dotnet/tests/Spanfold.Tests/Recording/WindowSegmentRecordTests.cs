@@ -38,6 +38,17 @@ public sealed class WindowSegmentRecordTests
     }
 
     [Fact]
+    public void WindowRecordsCloneCallerOwnedCollections()
+    {
+        var segments = new[] { new WindowSegment("phase", "InPlay") };
+        var window = new ClosedWindow("SelectionPriced", "selection-1", 1, 5, Segments: segments);
+
+        segments[0] = new WindowSegment("phase", "Final");
+
+        Assert.Equal("InPlay", Assert.Single(window.Segments).Value);
+    }
+
+    [Fact]
     public void WindowRecordIdIncludesSegmentContext()
     {
         var pregame = new ClosedWindow(
