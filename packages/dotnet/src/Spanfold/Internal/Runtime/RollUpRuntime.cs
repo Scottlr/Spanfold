@@ -8,6 +8,7 @@ internal sealed class RollUpRuntime<TEvent>
     private readonly RollUpDefinition<TEvent> definition;
     private readonly IEqualityComparer<object> childKeyComparer;
     private readonly Dictionary<RollUpStateKey, ParentState> parents;
+    private readonly Dictionary<ChildIdentity, ChildMembership> childMemberships;
     private readonly RollUpRuntime<TEvent>[] rollUps;
 
     public RollUpRuntime(
@@ -18,6 +19,8 @@ internal sealed class RollUpRuntime<TEvent>
         this.childKeyComparer = childKeyComparer;
         this.parents = new Dictionary<RollUpStateKey, ParentState>(
             new RollUpStateKeyComparer(definition.KeyComparer));
+        this.childMemberships = new Dictionary<ChildIdentity, ChildMembership>(
+            new ChildIdentityComparer(childKeyComparer));
         this.rollUps = new RollUpRuntime<TEvent>[definition.RollUps.Count];
 
         for (var i = 0; i < this.rollUps.Length; i++)
@@ -47,6 +50,19 @@ internal sealed class RollUpRuntime<TEvent>
             partition,
             StableSegments(projectedSegments));
 
+        var childIdentity = new ChildIdentity(childKey, source, partition);
+        if (this.childMemberships.TryGetValue(childIdentity, out var previousMembership)
+            && !StateKeysEqual(previousMembership.StateKey, parentStateKey))
+        {
+            RemoveChildFromPreviousParent(
+                @event,
+                source,
+                partition,
+                childKey,
+                previousMembership,
+                ref emissions);
+        }
+
         if (!this.parents.TryGetValue(parentStateKey, out var parent))
         {
             parent = new ParentState(this.childKeyComparer);
@@ -55,6 +71,10 @@ internal sealed class RollUpRuntime<TEvent>
 
         var membershipChanged = !parent.Children.ContainsKey(childKey);
         parent.Children[childKey] = childIsActive;
+        this.childMemberships[childIdentity] = new ChildMembership(
+            parentStateKey,
+            projectedSegments.ToArray(),
+            tags.ToArray());
 
         var parentChanged = false;
 
@@ -171,6 +191,10 @@ internal sealed class RollUpRuntime<TEvent>
         }
 
         parent.Children[childKey] = true;
+        this.childMemberships[new ChildIdentity(childKey, source, partition)] = new ChildMembership(
+            parentStateKey,
+            projectedCurrentSegments.ToArray(),
+            currentTags.ToArray());
         var children = parent.ToChildActivityView();
         var isActive = this.definition.IsActive(children);
         var parentChanged = isActive != parent.IsActive;
@@ -202,6 +226,59 @@ internal sealed class RollUpRuntime<TEvent>
             projectedCurrentSegments,
             currentTags,
             ref emissions);
+    }
+
+    private void RemoveChildFromPreviousParent(
+        TEvent @event,
+        object? source,
+        object? partition,
+        object childKey,
+        ChildMembership previousMembership,
+        ref List<WindowEmission<TEvent>>? emissions)
+    {
+        if (!this.parents.TryGetValue(previousMembership.StateKey, out var previousParent)
+            || !previousParent.Children.Remove(childKey))
+        {
+            return;
+        }
+
+        var isActive = this.definition.IsActive(previousParent.ToChildActivityView());
+        var parentChanged = isActive != previousParent.IsActive;
+        if (parentChanged)
+        {
+            previousParent.IsActive = isActive;
+            WindowRuntime<TEvent>.AddEmission(
+                ref emissions,
+                new WindowEmission<TEvent>(
+                    this.definition.Name,
+                    previousMembership.StateKey.Key,
+                    @event,
+                    isActive ? WindowTransitionKind.Opened : WindowTransitionKind.Closed,
+                    source,
+                    partition,
+                    previousMembership.Segments,
+                    previousMembership.Tags,
+                    isActive ? null : WindowBoundaryReason.ActivePredicateEnded));
+        }
+
+        PropagateToParents(
+            @event,
+            source,
+            partition,
+            previousMembership.StateKey.Key,
+            previousParent.IsActive,
+            parentChanged,
+            previousMembership.Segments,
+            previousMembership.Tags,
+            ref emissions);
+    }
+
+    private bool StateKeysEqual(RollUpStateKey left, RollUpStateKey right)
+    {
+        return this.definition.KeyComparer.Equals(left.Key, right.Key)
+            && EqualityComparer<object?>.Default.Equals(left.Source, right.Source)
+            && EqualityComparer<object?>.Default.Equals(left.Partition, right.Partition)
+            && string.Equals(left.SegmentContext, right.SegmentContext, StringComparison.Ordinal);
     }
 
     private void PropagateToParents(
@@ -299,6 +376,41 @@ internal sealed class RollUpRuntime<TEvent>
             }
 
             return new ChildActivityView(activeCount, Children.Count);
+        }
+    }
+
+    private readonly record struct ChildIdentity(
+        object Key,
+        object? Source,
+        object? Partition);
+
+    private sealed record ChildMembership(
+        RollUpStateKey StateKey,
+        IReadOnlyList<WindowSegment> Segments,
+        IReadOnlyList<WindowTag> Tags);
+
+    private sealed class ChildIdentityComparer : IEqualityComparer<ChildIdentity>
+    {
+        private readonly IEqualityComparer<object> keyComparer;
+
+        public ChildIdentityComparer(IEqualityComparer<object> keyComparer)
+        {
+            this.keyComparer = keyComparer;
+        }
+
+        public bool Equals(ChildIdentity x, ChildIdentity y)
+        {
+            return this.keyComparer.Equals(x.Key, y.Key)
+                && EqualityComparer<object?>.Default.Equals(x.Source, y.Source)
+                && EqualityComparer<object?>.Default.Equals(x.Partition, y.Partition);
+        }
+
+        public int GetHashCode(ChildIdentity obj)
+        {
+            return HashCode.Combine(
+                this.keyComparer.GetHashCode(obj.Key),
+                obj.Source,
+                obj.Partition);
         }
     }
 

@@ -70,6 +70,28 @@ public sealed class OneLevelRollUpRuntimeTests
     }
 
     [Fact]
+    public void ActiveChildMovesBetweenParentKeysAtomically()
+    {
+        var pipeline = CreatePipeline();
+
+        pipeline.Ingest(new PriceTick("selection-1", "market-1", 0m));
+        var result = pipeline.Ingest(new PriceTick("selection-1", "market-2", 0m));
+
+        Assert.Collection(
+            result.Emissions,
+            oldParent =>
+            {
+                Assert.Equal("market-1", oldParent.Key);
+                Assert.Equal(WindowTransitionKind.Closed, oldParent.Kind);
+            },
+            newParent =>
+            {
+                Assert.Equal("market-2", newParent.Key);
+                Assert.Equal(WindowTransitionKind.Opened, newParent.Kind);
+            });
+    }
+
+    [Fact]
     public void RollUpStateIsPartitionedByParentKey()
     {
         var pipeline = CreatePipeline();
