@@ -14,7 +14,7 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageTags>spanfold;cli;fixtures;audit</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Initial preview command-line tooling for fixture and audit workflows.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fix NuGet package README logo rendering.</PackageReleaseNotes>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>spanfold</ToolCommandName>

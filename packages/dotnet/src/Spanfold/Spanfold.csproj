@@ -13,7 +13,7 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageTags>events;windows;rollups;analytics</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Initial preview for stateful event windows, comparison plans, live finality, and testing helpers.</PackageReleaseNotes>
+    <PackageReleaseNotes>Fix NuGet package README logo rendering.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <WarningsAsErrors>$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <IncludeSymbols>true</IncludeSymbols>
