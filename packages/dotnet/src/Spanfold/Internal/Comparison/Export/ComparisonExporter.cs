@@ -787,6 +787,7 @@ internal static class ComparisonExporter
     private static void WriteGapRowFields(Utf8JsonWriter writer, GapRow row)
     {
         WriteCommonRowFields(writer, row.WindowName, row.Key, row.Partition, row.Range);
+        WriteIds(writer, "boundaryRecordIds", row.BoundaryRecordIds);
     }
 
     private static void WriteSymmetricDifferenceRowFields(Utf8JsonWriter writer, SymmetricDifferenceRow row)

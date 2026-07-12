@@ -16,4 +16,11 @@ public sealed record GapRow(
     string WindowName,
     object Key,
     object? Partition,
-    TemporalRange Range);
+    TemporalRange Range,
+    IReadOnlyList<WindowRecordId>? BoundaryRecordIds = null)
+{
+    /// <summary>
+    /// Gets the records bounding this gap and determining its live finality.
+    /// </summary>
+    public IReadOnlyList<WindowRecordId> BoundaryRecordIds { get; } = BoundaryRecordIds?.ToArray() ?? [];
+}
