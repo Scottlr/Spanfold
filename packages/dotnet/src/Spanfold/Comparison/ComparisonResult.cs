@@ -76,12 +76,12 @@ public sealed class ComparisonResult
         ExtensionMetadata = Materialize(extensionMetadata);
         RecordEvidence = prepared is null
             ? []
-            : prepared.SelectedWindows
+            : Array.AsReadOnly(prepared.SelectedWindows
                 .Select(static window => new WindowRecordEvidence(window))
                 .GroupBy(static evidence => evidence.Id)
                 .Select(static group => group.First())
                 .OrderBy(static evidence => evidence.Id.Value, StringComparer.Ordinal)
-                .ToArray();
+                .ToArray());
     }
 
     /// <summary>
@@ -215,8 +215,7 @@ public sealed class ComparisonResult
         return values switch
         {
             null => [],
-            T[] array => array.ToArray(),
-            _ => values.ToArray()
+            _ => Array.AsReadOnly(values.ToArray())
         };
     }
 }

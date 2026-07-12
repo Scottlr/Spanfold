@@ -16,6 +16,7 @@ public sealed class WindowHistoryQuery
 {
     private readonly WindowHistory history;
     private readonly IReadOnlyList<WindowRecord>? windows;
+    private readonly IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers;
     private readonly List<ValueFilter> segmentFilters = [];
     private readonly List<ValueFilter> tagFilters = [];
     private string? windowName;
@@ -29,12 +30,16 @@ public sealed class WindowHistoryQuery
     internal WindowHistoryQuery(WindowHistory history)
     {
         this.history = history;
+        this.keyComparers = history.KeyComparers;
     }
 
-    internal WindowHistoryQuery(IEnumerable<WindowRecord> windows)
+    internal WindowHistoryQuery(
+        IEnumerable<WindowRecord> windows,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         this.history = null!;
-        this.windows = windows as WindowRecord[] ?? windows.ToArray();
+        this.windows = windows.ToArray();
+        this.keyComparers = keyComparers;
     }
 
     /// <summary>
@@ -267,7 +272,7 @@ public sealed class WindowHistoryQuery
             return false;
         }
 
-        if (this.hasKey && !EqualityComparer<object>.Default.Equals(window.Key, this.key))
+        if (this.hasKey && !GetKeyComparer(window.WindowName).Equals(window.Key, this.key!))
         {
             return false;
         }
@@ -299,6 +304,13 @@ public sealed class WindowHistoryQuery
         }
 
         return true;
+    }
+
+    private IEqualityComparer<object> GetKeyComparer(string windowName)
+    {
+        return this.keyComparers.TryGetValue(windowName, out var comparer)
+            ? comparer
+            : EqualityComparer<object>.Default;
     }
 
     private WindowSnapshotQuery CreateSnapshotQuery(TemporalPoint horizon)

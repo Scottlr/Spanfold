@@ -19,6 +19,8 @@ public sealed class WindowHistory
     private readonly List<ClosedWindow> closedWindows;
     private readonly List<WindowAnnotation> annotations;
 
+    internal IReadOnlyDictionary<string, IEqualityComparer<object>> KeyComparers => this.keyComparers;
+
     internal WindowHistory(bool enabled)
         : this(enabled, new Dictionary<string, IEqualityComparer<object>>(StringComparer.Ordinal))
     {
@@ -63,7 +65,7 @@ public sealed class WindowHistory
     /// <summary>
     /// Gets closed windows recorded by the pipeline.
     /// </summary>
-    public IReadOnlyList<ClosedWindow> ClosedWindows => this.closedWindows.ToArray();
+    public IReadOnlyList<ClosedWindow> ClosedWindows => Array.AsReadOnly(this.closedWindows.ToArray());
 
     /// <summary>
     /// Gets all recorded windows, including closed windows and currently open windows.
@@ -87,7 +89,7 @@ public sealed class WindowHistory
                 index++;
             }
 
-            return windows;
+            return Array.AsReadOnly(windows);
         }
     }
 
@@ -107,14 +109,14 @@ public sealed class WindowHistory
                 index++;
             }
 
-            return windows;
+            return Array.AsReadOnly(windows);
         }
     }
 
     /// <summary>
     /// Gets annotations attached to recorded windows.
     /// </summary>
-    public IReadOnlyList<WindowAnnotation> Annotations => this.annotations.ToArray();
+    public IReadOnlyList<WindowAnnotation> Annotations => Array.AsReadOnly(this.annotations.ToArray());
 
     /// <summary>
     /// Removes closed windows whose end position is at or before a retention boundary.
@@ -559,7 +561,7 @@ public sealed class WindowHistory
     /// <returns>The overlapping window pairs.</returns>
     public IReadOnlyList<WindowOverlap> FindOverlaps()
     {
-        return WindowHistoryAnalytics.FindOverlaps(this.closedWindows);
+        return WindowHistoryAnalytics.FindOverlaps(this.closedWindows, this.keyComparers);
     }
 
     /// <summary>
@@ -570,65 +572,101 @@ public sealed class WindowHistory
     public IReadOnlyList<WindowResidualSegment> FindResiduals(object targetSource)
     {
         ArgumentNullException.ThrowIfNull(targetSource);
-        return WindowHistoryAnalytics.FindResiduals(this.closedWindows, targetSource);
+        return WindowHistoryAnalytics.FindResiduals(this.closedWindows, targetSource, this.keyComparers);
     }
 
     internal void Record<TEvent>(
         IReadOnlyList<WindowEmission<TEvent>> emissions,
         long processingPosition,
-        DateTimeOffset? eventTime)
+        DateTimeOffset? eventTime,
+        string? eventTimeClock = null)
     {
         if (!this.enabled)
         {
             return;
         }
 
-        foreach (var emission in emissions)
+        var undo = new List<Action>();
+        try
         {
-            var key = new WindowRecordingKey(
-                emission.WindowName,
-                emission.Key,
-                emission.Source,
-                emission.Partition,
-                new SegmentContext(emission.Segments));
-
-            if (emission.Kind == WindowTransitionKind.Opened)
+            foreach (var emission in emissions)
             {
-                this.openWindows[key] = new OpenWindow(
+                var key = new WindowRecordingKey(
                     emission.WindowName,
                     emission.Key,
-                    processingPosition,
                     emission.Source,
                     emission.Partition,
+                    new SegmentContext(emission.Segments));
+
+                if (emission.Kind == WindowTransitionKind.Opened)
+                {
+                    var opened = new OpenWindow(
+                        emission.WindowName,
+                        emission.Key,
+                        processingPosition,
+                        emission.Source,
+                        emission.Partition,
+                        eventTime,
+                        emission.Segments,
+                        emission.Tags,
+                        eventTimeClock);
+                    var existed = this.openWindows.TryGetValue(key, out var previous);
+                    undo.Add(() =>
+                    {
+                        if (existed)
+                        {
+                            this.openWindows[key] = previous!;
+                        }
+                        else
+                        {
+                            this.openWindows.Remove(key);
+                        }
+                    });
+                    this.openWindows[key] = opened;
+                    continue;
+                }
+
+                if (!this.TryRemoveOpenWindow(key, out var removedKey, out var open))
+                {
+                    continue;
+                }
+
+                undo.Add(() => this.openWindows[removedKey] = open);
+                var closed = new ClosedWindow(
+                    open.WindowName,
+                    open.Key,
+                    open.StartPosition,
+                    processingPosition,
+                    open.Source,
+                    open.Partition,
+                    open.StartTime,
                     eventTime,
-                    emission.Segments,
-                    emission.Tags);
-                continue;
+                    open.Segments,
+                    open.Tags,
+                    emission.BoundaryReason,
+                    emission.BoundaryChanges,
+                    open.TimestampClock);
+                this.closedWindows.Add(closed);
+                undo.Add(() => this.closedWindows.RemoveAt(this.closedWindows.Count - 1));
             }
-
-            if (!this.TryRemoveOpenWindow(key, out var open))
+        }
+        catch
+        {
+            for (var i = undo.Count - 1; i >= 0; i--)
             {
-                continue;
+                undo[i]();
             }
 
-            this.closedWindows.Add(new ClosedWindow(
-                open.WindowName,
-                open.Key,
-                open.StartPosition,
-                processingPosition,
-                open.Source,
-                open.Partition,
-                open.StartTime,
-                eventTime,
-                open.Segments,
-                open.Tags,
-                emission.BoundaryReason,
-                emission.BoundaryChanges));
+            throw;
         }
     }
 
-    private bool TryRemoveOpenWindow(WindowRecordingKey key, out OpenWindow open)
+    private bool TryRemoveOpenWindow(
+        WindowRecordingKey key,
+        out WindowRecordingKey removedKey,
+        out OpenWindow open)
     {
+        removedKey = key;
         open = null!;
         if (this.openWindows.Remove(key, out open!))
         {
@@ -653,6 +691,7 @@ public sealed class WindowHistory
                 continue;
             }
 
+            removedKey = candidate;
             return this.openWindows.Remove(candidate, out open!);
         }
 

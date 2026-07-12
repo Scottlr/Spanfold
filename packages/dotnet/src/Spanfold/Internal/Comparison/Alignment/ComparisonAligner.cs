@@ -30,16 +30,31 @@ internal static class ComparisonAligner
 
         Array.Sort(windows, static (left, right) => Compare(left, right));
 
-        var groupStart = 0;
-        for (var i = 1; i <= windows.Length; i++)
+        var groups = new Dictionary<AlignmentGroupKey, List<SortableNormalizedWindow>>(
+            new AlignmentGroupKeyComparer(prepared.KeyComparers));
+        for (var i = 0; i < windows.Length; i++)
         {
-            if (i < windows.Length && IsSameScope(windows[groupStart], windows[i]))
+            var window = windows[i];
+            var key = new AlignmentGroupKey(
+                window.Window.Window.WindowName,
+                window.Window.Window.Key,
+                window.Window.Window.Partition,
+                window.SegmentContext);
+            if (!groups.TryGetValue(key, out var group))
             {
-                continue;
+                group = [];
+                groups.Add(key, group);
             }
 
-            AddSegments(CreateScope(windows[groupStart]), windows, groupStart, i - groupStart, segments);
-            groupStart = i;
+            group.Add(window);
+        }
+
+        var orderedGroups = groups.Values.Select(static group => group.ToArray()).ToArray();
+        Array.Sort(orderedGroups, static (left, right) => Compare(left[0], right[0]));
+        for (var i = 0; i < orderedGroups.Length; i++)
+        {
+            var group = orderedGroups[i];
+            AddSegments(CreateScope(group[0]), group, 0, group.Length, segments);
         }
 
         return new AlignedComparison(prepared, segments.ToArray());
@@ -235,16 +250,6 @@ internal static class ComparisonAligner
         return string.Compare(left.Window.SelectorName, right.Window.SelectorName, StringComparison.Ordinal);
     }
 
-    private static bool IsSameScope(SortableNormalizedWindow first, SortableNormalizedWindow second)
-    {
-        return string.Equals(first.Window.Window.WindowName, second.Window.Window.WindowName, StringComparison.Ordinal)
-            && string.Equals(first.KeySort, second.KeySort, StringComparison.Ordinal)
-            && string.Equals(first.PartitionSort, second.PartitionSort, StringComparison.Ordinal)
-            && first.SegmentContext.Equals(second.SegmentContext)
-            && EqualityComparer<object>.Default.Equals(first.Window.Window.Key, second.Window.Window.Key)
-            && EqualityComparer<object?>.Default.Equals(first.Window.Window.Partition, second.Window.Window.Partition);
-    }
-
     private static AlignmentScope CreateScope(SortableNormalizedWindow window)
     {
         return new AlignmentScope(
@@ -282,6 +287,44 @@ internal static class ComparisonAligner
         object Key,
         object? Partition,
         IReadOnlyList<WindowSegment> Segments);
+
+    private readonly record struct AlignmentGroupKey(
+        string WindowName,
+        object Key,
+        object? Partition,
+        SegmentContext Segments);
+
+    private sealed class AlignmentGroupKeyComparer(
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
+        : IEqualityComparer<AlignmentGroupKey>
+    {
+        public bool Equals(AlignmentGroupKey x, AlignmentGroupKey y)
+        {
+            if (!string.Equals(x.WindowName, y.WindowName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var comparer = keyComparers.TryGetValue(x.WindowName, out var configured)
+                ? configured
+                : EqualityComparer<object>.Default;
+            return comparer.Equals(x.Key, y.Key)
+                && EqualityComparer<object?>.Default.Equals(x.Partition, y.Partition)
+                && x.Segments.Equals(y.Segments);
+        }
+
+        public int GetHashCode(AlignmentGroupKey obj)
+        {
+            var comparer = keyComparers.TryGetValue(obj.WindowName, out var configured)
+                ? configured
+                : EqualityComparer<object>.Default;
+            return HashCode.Combine(
+                StringComparer.Ordinal.GetHashCode(obj.WindowName),
+                comparer.GetHashCode(obj.Key),
+                obj.Partition,
+                obj.Segments);
+        }
+    }
 
     private readonly record struct SortableNormalizedWindow(
         NormalizedWindowRecord Window,

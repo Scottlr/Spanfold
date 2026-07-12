@@ -13,4 +13,8 @@ public sealed record MissingRow(
     object Key,
     object? Partition,
     TemporalRange Range,
-    IReadOnlyList<WindowRecordId> AgainstRecordIds);
+    IReadOnlyList<WindowRecordId> AgainstRecordIds)
+{
+    /// <summary>Gets the comparison record IDs active for the missing segment.</summary>
+    public IReadOnlyList<WindowRecordId> AgainstRecordIds { get; } = Array.AsReadOnly(AgainstRecordIds.ToArray());
+}

@@ -7,4 +7,8 @@ namespace Spanfold;
 /// <param name="RollUps">The child roll-ups attached to this window.</param>
 public sealed record WindowMetadata(
     string Name,
-    IReadOnlyList<WindowMetadata> RollUps);
+    IReadOnlyList<WindowMetadata> RollUps)
+{
+    /// <summary>Gets child roll-up metadata.</summary>
+    public IReadOnlyList<WindowMetadata> RollUps { get; } = Array.AsReadOnly(RollUps.ToArray());
+}

@@ -22,8 +22,8 @@ public sealed record AlignedSegment
         Key = key;
         Partition = partition;
         Range = range;
-        TargetRecordIds = targetRecordIds;
-        AgainstRecordIds = againstRecordIds;
+        TargetRecordIds = Array.AsReadOnly(targetRecordIds.ToArray());
+        AgainstRecordIds = Array.AsReadOnly(againstRecordIds.ToArray());
         Segments = Materialize(segments);
     }
 
@@ -50,8 +50,7 @@ public sealed record AlignedSegment
         return values switch
         {
             null => [],
-            T[] array => array.ToArray(),
-            _ => values.ToArray()
+            _ => Array.AsReadOnly(values.ToArray())
         };
     }
 }

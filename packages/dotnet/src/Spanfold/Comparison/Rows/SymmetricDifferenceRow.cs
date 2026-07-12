@@ -17,4 +17,11 @@ public sealed record SymmetricDifferenceRow(
     TemporalRange Range,
     ComparisonSide Side,
     IReadOnlyList<WindowRecordId> TargetRecordIds,
-    IReadOnlyList<WindowRecordId> AgainstRecordIds);
+    IReadOnlyList<WindowRecordId> AgainstRecordIds)
+{
+    /// <summary>Gets the target record IDs active for the segment.</summary>
+    public IReadOnlyList<WindowRecordId> TargetRecordIds { get; } = Array.AsReadOnly(TargetRecordIds.ToArray());
+
+    /// <summary>Gets the comparison record IDs active for the segment.</summary>
+    public IReadOnlyList<WindowRecordId> AgainstRecordIds { get; } = Array.AsReadOnly(AgainstRecordIds.ToArray());
+}

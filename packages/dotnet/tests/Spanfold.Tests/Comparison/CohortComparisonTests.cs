@@ -231,6 +231,19 @@ public sealed class CohortComparisonTests
     }
 
     [Fact]
+    public void DirectCohortSelectorEnforcesPopulationInvariants()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            ComparisonSelector.ForCohortSources(
+                ["source-b", "source-b"],
+                CohortActivity.All()));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ComparisonSelector.ForCohortSources(
+                ["source-b"],
+                CohortActivity.AtLeast(2)));
+    }
+
+    [Fact]
     public void NegativeCohortActivityCountsAreRejected()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => CohortActivity.AtMost(-1));

@@ -40,6 +40,7 @@ internal sealed class RollUpRuntime<TEvent>
         bool childChanged,
         IReadOnlyList<WindowSegment> segments,
         IReadOnlyList<WindowTag> tags,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         var projectedSegments = this.definition.SegmentProjection.Project(segments);
@@ -60,21 +61,22 @@ internal sealed class RollUpRuntime<TEvent>
                 partition,
                 childKey,
                 previousMembership,
+                journal,
                 ref emissions);
         }
 
         if (!this.parents.TryGetValue(parentStateKey, out var parent))
         {
             parent = new ParentState(this.childKeyComparer);
-            this.parents.Add(parentStateKey, parent);
+            journal.Set(this.parents, parentStateKey, parent);
         }
 
         var membershipChanged = !parent.Children.ContainsKey(childKey);
-        parent.Children[childKey] = childIsActive;
-        this.childMemberships[childIdentity] = new ChildMembership(
+        journal.Set(parent.Children, childKey, childIsActive);
+        journal.Set(this.childMemberships, childIdentity, new ChildMembership(
             parentStateKey,
             projectedSegments.ToArray(),
-            tags.ToArray());
+            tags.ToArray()));
 
         var parentChanged = false;
 
@@ -89,6 +91,7 @@ internal sealed class RollUpRuntime<TEvent>
                 parentChanged,
                 projectedSegments,
                 tags,
+                journal,
                 ref emissions);
             return;
         }
@@ -107,11 +110,12 @@ internal sealed class RollUpRuntime<TEvent>
                 parentChanged,
                 projectedSegments,
                 tags,
+                journal,
                 ref emissions);
             return;
         }
 
-        parent.IsActive = isActive;
+        SetParentActive(parent, isActive, journal);
         parentChanged = true;
         WindowRuntime<TEvent>.AddEmission(
             ref emissions,
@@ -135,6 +139,7 @@ internal sealed class RollUpRuntime<TEvent>
             parentChanged,
             projectedSegments,
             tags,
+            journal,
             ref emissions);
     }
 
@@ -176,6 +181,7 @@ internal sealed class RollUpRuntime<TEvent>
         IReadOnlyList<WindowTag> previousTags,
         IReadOnlyList<WindowSegment> currentSegments,
         IReadOnlyList<WindowTag> currentTags,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         var projectedPreviousSegments = this.definition.SegmentProjection.Project(previousSegments);
@@ -192,6 +198,7 @@ internal sealed class RollUpRuntime<TEvent>
                 childChanged: true,
                 previousSegments,
                 previousTags,
+                journal,
                 ref emissions);
             ObserveChild(
                 @event,
@@ -202,6 +209,7 @@ internal sealed class RollUpRuntime<TEvent>
                 childChanged: true,
                 currentSegments,
                 currentTags,
+                journal,
                 ref emissions);
             return;
         }
@@ -213,24 +221,38 @@ internal sealed class RollUpRuntime<TEvent>
             partition,
             StableSegments(projectedCurrentSegments));
 
+        var childIdentity = new ChildIdentity(childKey, source, partition);
+        if (this.childMemberships.TryGetValue(childIdentity, out var previousMembership)
+            && !StateKeysEqual(previousMembership.StateKey, parentStateKey))
+        {
+            RemoveChildFromPreviousParent(
+                @event,
+                source,
+                partition,
+                childKey,
+                previousMembership,
+                journal,
+                ref emissions);
+        }
+
         if (!this.parents.TryGetValue(parentStateKey, out var parent))
         {
             parent = new ParentState(this.childKeyComparer);
-            this.parents.Add(parentStateKey, parent);
+            journal.Set(this.parents, parentStateKey, parent);
         }
 
-        parent.Children[childKey] = true;
-        this.childMemberships[new ChildIdentity(childKey, source, partition)] = new ChildMembership(
+        journal.Set(parent.Children, childKey, true);
+        journal.Set(this.childMemberships, childIdentity, new ChildMembership(
             parentStateKey,
             projectedCurrentSegments.ToArray(),
-            currentTags.ToArray());
+            currentTags.ToArray()));
         var children = parent.ToChildActivityView();
         var isActive = this.definition.IsActive(children);
         var parentChanged = isActive != parent.IsActive;
 
         if (parentChanged)
         {
-            parent.IsActive = isActive;
+            SetParentActive(parent, isActive, journal);
             WindowRuntime<TEvent>.AddEmission(
                 ref emissions,
                 new WindowEmission<TEvent>(
@@ -254,6 +276,7 @@ internal sealed class RollUpRuntime<TEvent>
             parentChanged,
             projectedCurrentSegments,
             currentTags,
+            journal,
             ref emissions);
     }
 
@@ -263,10 +286,11 @@ internal sealed class RollUpRuntime<TEvent>
         object? partition,
         object childKey,
         ChildMembership previousMembership,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         if (!this.parents.TryGetValue(previousMembership.StateKey, out var previousParent)
-            || !previousParent.Children.Remove(childKey))
+            || !journal.Remove(previousParent.Children, childKey))
         {
             return;
         }
@@ -275,7 +299,7 @@ internal sealed class RollUpRuntime<TEvent>
         var parentChanged = isActive != previousParent.IsActive;
         if (parentChanged)
         {
-            previousParent.IsActive = isActive;
+            SetParentActive(previousParent, isActive, journal);
             WindowRuntime<TEvent>.AddEmission(
                 ref emissions,
                 new WindowEmission<TEvent>(
@@ -299,6 +323,7 @@ internal sealed class RollUpRuntime<TEvent>
             parentChanged,
             previousMembership.Segments,
             previousMembership.Tags,
+            journal,
             ref emissions);
     }
 
@@ -319,6 +344,7 @@ internal sealed class RollUpRuntime<TEvent>
         bool parentChanged,
         IReadOnlyList<WindowSegment> segments,
         IReadOnlyList<WindowTag> tags,
+        RuntimeMutationJournal journal,
         ref List<WindowEmission<TEvent>>? emissions)
     {
         foreach (var rollUp in this.rollUps)
@@ -332,11 +358,22 @@ internal sealed class RollUpRuntime<TEvent>
                 parentChanged,
                 segments,
                 tags,
+                journal,
                 ref emissions);
         }
     }
 
     private static SegmentContext StableSegments(IReadOnlyList<WindowSegment> segments) => new(segments);
+
+    private static void SetParentActive(
+        ParentState parent,
+        bool isActive,
+        RuntimeMutationJournal journal)
+    {
+        var previous = parent.IsActive;
+        journal.Record(() => parent.IsActive = previous);
+        parent.IsActive = isActive;
+    }
 
     private static bool SegmentContextsEqual(
         IReadOnlyList<WindowSegment> left,

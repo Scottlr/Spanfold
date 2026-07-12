@@ -7,4 +7,8 @@ namespace Spanfold;
 /// <param name="Windows">The configured source windows.</param>
 public sealed record EventPipelineMetadata(
     Type EventType,
-    IReadOnlyList<WindowMetadata> Windows);
+    IReadOnlyList<WindowMetadata> Windows)
+{
+    /// <summary>Gets configured source window metadata.</summary>
+    public IReadOnlyList<WindowMetadata> Windows { get; } = Array.AsReadOnly(Windows.ToArray());
+}

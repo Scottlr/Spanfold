@@ -70,9 +70,21 @@ public sealed class WindowRecordIdTests
     [Fact]
     public void UnsupportedIdentityValuesAreRejected()
     {
-        var window = new OpenWindow("DeviceOffline", new UnsupportedIdentity(), StartPosition: 10);
+        Assert.Throws<ArgumentException>(() =>
+            new OpenWindow("DeviceOffline", new UnsupportedIdentity(), StartPosition: 10));
+    }
 
-        Assert.Throws<ArgumentException>(() => _ = window.Id);
+    [Fact]
+    public void ReadingIdDoesNotChangeRecordEqualityOrHashCode()
+    {
+        var first = new OpenWindow("DeviceOffline", "device-1", StartPosition: 10);
+        var second = new OpenWindow("DeviceOffline", "device-1", StartPosition: 10);
+        var before = first.GetHashCode();
+
+        _ = first.Id;
+
+        Assert.Equal(second, first);
+        Assert.Equal(before, first.GetHashCode());
     }
 
     [Fact]

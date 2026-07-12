@@ -1,7 +1,6 @@
 namespace Spanfold;
 
-/// <summary>Identifies a built-in comparator implementation.</summary>
-public enum ComparisonComparatorKind
+internal enum ComparisonComparatorKind
 {
     /// <summary>No known comparator kind.</summary>
     Unknown = 0,
@@ -42,11 +41,12 @@ public static class ComparisonComparatorCatalog
         "symmetric-difference",
         "containment"
     ];
+    private static readonly IReadOnlyList<string> BuiltInView = Array.AsReadOnly(BuiltIns);
 
     /// <summary>
     /// Gets exact built-in comparator declarations.
     /// </summary>
-    public static IReadOnlyList<string> BuiltInDeclarations => BuiltIns;
+    public static IReadOnlyList<string> BuiltInDeclarations => BuiltInView;
 
     /// <summary>
     /// Returns true when the declaration is an exact built-in comparator name.
@@ -68,12 +68,7 @@ public static class ComparisonComparatorCatalog
         return false;
     }
 
-    /// <summary>
-    /// Resolves an exact built-in declaration to its typed implementation kind.
-    /// </summary>
-    /// <param name="declaration">The comparator declaration.</param>
-    /// <returns>The built-in kind, or <see cref="ComparisonComparatorKind.Unknown" />.</returns>
-    public static ComparisonComparatorKind GetBuiltInKind(string declaration)
+    internal static ComparisonComparatorKind GetBuiltInKind(string declaration)
     {
         ArgumentNullException.ThrowIfNull(declaration);
         return declaration switch

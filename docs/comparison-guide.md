@@ -495,8 +495,8 @@ key.
 
 When a result crosses a support, CI, or external-agent boundary, prefer the
 value-redacted context export. It includes row counts, stable row IDs, finality,
-and diagnostic codes, but excludes keys, sources, partitions, tags, segments,
-and diagnostic text:
+and diagnostic codes, but excludes plan names, keys, sources, partitions, tags,
+segments, and diagnostic text:
 
 ```csharp
 var safeContext = result.ExportRedactedAgentContext();

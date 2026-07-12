@@ -15,4 +15,11 @@ public sealed record HierarchyComparisonRow(
     object? Partition,
     TemporalRange Range,
     IReadOnlyList<WindowRecordId> ParentRecordIds,
-    IReadOnlyList<WindowRecordId> ChildRecordIds);
+    IReadOnlyList<WindowRecordId> ChildRecordIds)
+{
+    /// <summary>Gets active parent record IDs.</summary>
+    public IReadOnlyList<WindowRecordId> ParentRecordIds { get; } = Array.AsReadOnly(ParentRecordIds.ToArray());
+
+    /// <summary>Gets active child contribution record IDs.</summary>
+    public IReadOnlyList<WindowRecordId> ChildRecordIds { get; } = Array.AsReadOnly(ChildRecordIds.ToArray());
+}

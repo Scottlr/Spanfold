@@ -9,12 +9,21 @@
     <PackageProjectUrl>https://github.com/Scottlr/spanfold</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Scottlr/Spanfold</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 Spanfold contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageTags>spanfold;cli;fixtures;audit</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Initial preview command-line tooling for fixture and audit workflows.</PackageReleaseNotes>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>spanfold</ToolCommandName>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <ProjectReference Include="../Spanfold/Spanfold.csproj" />
     <ProjectReference Include="../Spanfold.Testing/Spanfold.Testing.csproj" />
   </ItemGroup>

@@ -50,11 +50,37 @@ public sealed class EventTimeWindowRecordingTests
     }
 
     [Fact]
+    public void ConfiguredTimestampClockFlowsThroughHistoryAndSnapshots()
+    {
+        var openedAt = new DateTimeOffset(2026, 4, 12, 10, 0, 0, TimeSpan.Zero);
+        var closedAt = openedAt.AddMinutes(5);
+        var pipeline = Spanfold
+            .For<PriceTick>()
+            .RecordWindows()
+            .WithEventTime(tick => tick.Timestamp, "exchange-clock")
+            .Window(
+                "SelectionSuspension",
+                key: tick => tick.SelectionId,
+                isActive: tick => tick.Price == 0m)
+            .Build();
+
+        pipeline.Ingest(new PriceTick("selection-1", 0m, openedAt));
+        pipeline.Ingest(new PriceTick("selection-1", 1.01m, closedAt));
+
+        var window = Assert.Single(pipeline.History.ClosedWindows);
+        Assert.Equal("exchange-clock", window.TimestampClock);
+        var snapshot = pipeline.History.SnapshotAt(
+            TemporalPoint.ForTimestamp(closedAt, "exchange-clock"));
+        Assert.Single(snapshot.Records);
+    }
+
+    [Fact]
     public void EventTimeSelectorIsRequired()
     {
         var builder = Spanfold.For<PriceTick>();
 
         Assert.Throws<ArgumentNullException>(() => builder.WithEventTime(null!));
+        Assert.Throws<ArgumentException>(() => builder.WithEventTime(tick => tick.Timestamp, " "));
     }
 
     private sealed record PriceTick(

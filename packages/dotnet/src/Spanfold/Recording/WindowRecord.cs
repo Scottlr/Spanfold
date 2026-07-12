@@ -5,6 +5,8 @@ namespace Spanfold;
 /// </summary>
 public abstract record WindowRecord
 {
+    private readonly WindowRecordId id;
+
     /// <summary>Initializes a validated recorded window.</summary>
     protected WindowRecord(
         string windowName,
@@ -55,6 +57,13 @@ public abstract record WindowRecord
             throw new ArgumentException("Timestamp clock identity cannot be blank.", nameof(timestampClock));
         }
 
+        if (timestampClock is not null && !startTime.HasValue)
+        {
+            throw new ArgumentException(
+                "Timestamp clock identity requires a recorded start timestamp.",
+                nameof(timestampClock));
+        }
+
         WindowName = windowName;
         Key = key;
         StartPosition = startPosition;
@@ -68,6 +77,7 @@ public abstract record WindowRecord
         Tags = Materialize(tags);
         BoundaryReason = boundaryReason;
         BoundaryChanges = Materialize(boundaryChanges);
+        this.id = WindowRecordId.From(this);
     }
 
     /// <summary>Gets the configured window name.</summary>
@@ -90,7 +100,6 @@ public abstract record WindowRecord
     /// <summary>Gets the identity of the clock that produced the timestamps.</summary>
     public string? TimestampClock { get; }
 
-    private WindowRecordId? cachedId;
     /// <summary>
     /// Gets analytical segment values attached to this window.
     /// </summary>
@@ -118,7 +127,7 @@ public abstract record WindowRecord
     /// The identity is stable for the same recorded window data in a
     /// deterministic replay. It is not a distributed global identifier.
     /// </remarks>
-    public WindowRecordId Id => this.cachedId ??= WindowRecordId.From(this);
+    public WindowRecordId Id => this.id;
 
     /// <summary>
     /// Gets whether this window has an end position.
@@ -130,8 +139,7 @@ public abstract record WindowRecord
         return values switch
         {
             null => [],
-            T[] array => array.ToArray(),
-            _ => values.ToArray()
+            _ => Array.AsReadOnly(values.ToArray())
         };
     }
 }

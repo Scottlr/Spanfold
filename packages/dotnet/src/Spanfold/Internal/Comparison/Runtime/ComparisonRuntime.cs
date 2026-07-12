@@ -478,7 +478,7 @@ internal static class ComparisonRuntime
 
             var nearest = FindNearest(candidates, targetPoint, options.Axis);
             var delta = GetDeltaMagnitude(targetPoint, nearest.Point, options.Axis);
-            var absoluteDelta = Math.Abs(delta);
+            var absoluteDelta = delta == long.MinValue ? long.MaxValue : Math.Abs(delta);
 
             rows.Add(new LeadLagRow(
                 target.Window.WindowName,

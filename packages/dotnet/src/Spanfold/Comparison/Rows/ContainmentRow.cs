@@ -23,4 +23,11 @@ public sealed record ContainmentRow(
     TemporalRange Range,
     ContainmentStatus Status,
     IReadOnlyList<WindowRecordId> TargetRecordIds,
-    IReadOnlyList<WindowRecordId> ContainerRecordIds);
+    IReadOnlyList<WindowRecordId> ContainerRecordIds)
+{
+    /// <summary>Gets the target record IDs active for the range.</summary>
+    public IReadOnlyList<WindowRecordId> TargetRecordIds { get; } = Array.AsReadOnly(TargetRecordIds.ToArray());
+
+    /// <summary>Gets the comparison record IDs containing the range.</summary>
+    public IReadOnlyList<WindowRecordId> ContainerRecordIds { get; } = Array.AsReadOnly(ContainerRecordIds.ToArray());
+}

@@ -1,9 +1,15 @@
 # C#/.NET Quality Audit Issue Catalog
 
+> **Historical audit snapshot.** The `Open` labels below describe revision
+> `7f39c18`; they are not the current status of `main`. Findings were addressed
+> through the linked NET-* pull-request series, and the final current-state
+> review is tracked in repository history rather than by rewriting this
+> evidence snapshot.
+
 **Audit date:** 2026-07-12  
 **Audited revision:** `7f39c18` (`main`)  
 **Scope:** the complete C#/.NET surface under `packages/dotnet`, including the core library, testing package, CLI, samples, benchmarks, tests, package metadata, root documentation, and .NET CI gates  
-**Disposition:** **Not showcase-quality and not ready for a high-confidence OSS release. Treat the current surface as an experimental preview.**
+**Disposition at audited revision:** **Not showcase-quality and not ready for a high-confidence OSS release.**
 
 This is an intentionally aggressive principal-level review. It traces actual state, comparison, export, CLI, and packaging paths rather than treating passing tests or public XML documentation as proof of correctness. The review assumes keys and segment values can be non-trivial objects, events can fail during user projections, histories can grow, live snapshots can change shape, and exported schemas will become compatibility contracts.
 
