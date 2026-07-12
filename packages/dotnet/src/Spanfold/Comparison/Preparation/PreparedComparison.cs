@@ -17,13 +17,33 @@ namespace Spanfold;
 /// <param name="SelectedWindows">The recorded windows selected by the plan.</param>
 /// <param name="ExcludedWindows">The recorded windows excluded during preparation.</param>
 /// <param name="NormalizedWindows">The normalized windows ready for alignment.</param>
-public sealed record PreparedComparison(
-    ComparisonPlan Plan,
-    IReadOnlyList<ComparisonPlanDiagnostic> Diagnostics,
-    IReadOnlyList<WindowRecord> SelectedWindows,
-    IReadOnlyList<ExcludedWindowRecord> ExcludedWindows,
-    IReadOnlyList<NormalizedWindowRecord> NormalizedWindows)
+public sealed record PreparedComparison
 {
+    internal PreparedComparison(
+        ComparisonPlan plan,
+        IReadOnlyList<ComparisonPlanDiagnostic> diagnostics,
+        IReadOnlyList<WindowRecord> selectedWindows,
+        IReadOnlyList<ExcludedWindowRecord> excludedWindows,
+        IReadOnlyList<NormalizedWindowRecord> normalizedWindows)
+    {
+        Plan = plan;
+        Diagnostics = diagnostics;
+        SelectedWindows = selectedWindows;
+        ExcludedWindows = excludedWindows;
+        NormalizedWindows = normalizedWindows;
+    }
+
+    /// <summary>Gets the comparison plan.</summary>
+    public ComparisonPlan Plan { get; }
+    /// <summary>Gets validation diagnostics.</summary>
+    public IReadOnlyList<ComparisonPlanDiagnostic> Diagnostics { get; }
+    /// <summary>Gets selected source windows.</summary>
+    public IReadOnlyList<WindowRecord> SelectedWindows { get; }
+    /// <summary>Gets windows excluded during preparation.</summary>
+    public IReadOnlyList<ExcludedWindowRecord> ExcludedWindows { get; }
+    /// <summary>Gets normalized windows ready for alignment.</summary>
+    public IReadOnlyList<NormalizedWindowRecord> NormalizedWindows { get; }
+
     /// <summary>
     /// Aligns normalized windows into reusable temporal segments.
     /// </summary>

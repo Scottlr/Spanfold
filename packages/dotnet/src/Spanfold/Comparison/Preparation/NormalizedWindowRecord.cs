@@ -9,18 +9,39 @@ namespace Spanfold;
 /// <param name="Side">The comparison side.</param>
 /// <param name="Range">The normalized temporal range.</param>
 /// <param name="Segments">The segment context preserved from the source window.</param>
-public sealed record NormalizedWindowRecord(
-    WindowRecord Window,
-    WindowRecordId RecordId,
-    string SelectorName,
-    ComparisonSide Side,
-    TemporalRange Range,
-    IReadOnlyList<WindowSegment>? Segments = null)
+public sealed record NormalizedWindowRecord
 {
+    internal NormalizedWindowRecord(
+        WindowRecord window,
+        WindowRecordId recordId,
+        string selectorName,
+        ComparisonSide side,
+        TemporalRange range,
+        IReadOnlyList<WindowSegment>? segments = null)
+    {
+        Window = window;
+        RecordId = recordId;
+        SelectorName = selectorName;
+        Side = side;
+        Range = range;
+        Segments = Materialize(segments);
+    }
+
+    /// <summary>Gets the source recorded window.</summary>
+    public WindowRecord Window { get; }
+    /// <summary>Gets the source window identifier.</summary>
+    public WindowRecordId RecordId { get; }
+    /// <summary>Gets the selector that matched the window.</summary>
+    public string SelectorName { get; }
+    /// <summary>Gets the comparison side.</summary>
+    public ComparisonSide Side { get; }
+    /// <summary>Gets the normalized temporal range.</summary>
+    public TemporalRange Range { get; }
+
     /// <summary>
     /// Gets the segment context preserved from the source window.
     /// </summary>
-    public IReadOnlyList<WindowSegment> Segments { get; } = Materialize(Segments);
+    public IReadOnlyList<WindowSegment> Segments { get; }
 
     private static IReadOnlyList<T> Materialize<T>(IReadOnlyList<T>? values)
     {
