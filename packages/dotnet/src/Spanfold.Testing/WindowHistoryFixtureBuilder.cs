@@ -1,6 +1,3 @@
-using System.Collections;
-using System.Reflection;
-
 namespace Spanfold.Testing;
 
 /// <summary>
@@ -148,66 +145,6 @@ public sealed class WindowHistoryFixtureBuilder
     /// <returns>A window history fixture.</returns>
     public WindowHistory Build()
     {
-        var constructor = typeof(WindowHistory).GetConstructor(
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            [typeof(bool)],
-            modifiers: null)
-            ?? throw new InvalidOperationException("Spanfold history constructor was not found.");
-        var history = (WindowHistory)constructor.Invoke([true]);
-        var field = typeof(WindowHistory).GetField(
-            "closedWindows",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Spanfold closed-window storage was not found.");
-        var closed = (List<ClosedWindow>)field.GetValue(history)!;
-
-        for (var i = 0; i < this.closedWindows.Count; i++)
-        {
-            closed.Add(this.closedWindows[i]);
-        }
-
-        AddOpenWindows(history);
-
-        return history;
+        return WindowHistory.CreateFixture(this.closedWindows, this.openWindows);
     }
-
-    private void AddOpenWindows(WindowHistory history)
-    {
-        if (this.openWindows.Count == 0)
-        {
-            return;
-        }
-
-        var keyType = typeof(WindowHistory).Assembly.GetType("Spanfold.Internal.Recording.WindowRecordingKey")
-            ?? throw new InvalidOperationException("Spanfold window recording key type was not found.");
-        var field = typeof(WindowHistory).GetField(
-            "openWindows",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Spanfold open-window storage was not found.");
-        var open = (IDictionary)field.GetValue(history)!;
-        var segmentContextType = typeof(WindowHistory).Assembly.GetType("Spanfold.Internal.Keys.SegmentContext")
-            ?? throw new InvalidOperationException("Spanfold segment context type was not found.");
-
-        for (var i = 0; i < this.openWindows.Count; i++)
-        {
-            var window = this.openWindows[i];
-            var segmentContext = Activator.CreateInstance(
-                segmentContextType,
-                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
-                binder: null,
-                args: [window.Segments],
-                culture: null)
-                ?? throw new InvalidOperationException("Spanfold segment context could not be created.");
-            var key = Activator.CreateInstance(
-                keyType,
-                window.WindowName,
-                window.Key,
-                window.Source,
-                window.Partition,
-                segmentContext)
-                ?? throw new InvalidOperationException("Spanfold window recording key could not be created.");
-            open.Add(key, window);
-        }
-    }
-
 }

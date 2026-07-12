@@ -35,6 +35,31 @@ public sealed class WindowHistory
         this.annotations = [];
     }
 
+    internal static WindowHistory CreateFixture(
+        IReadOnlyList<ClosedWindow> closedWindows,
+        IReadOnlyList<OpenWindow> openWindows)
+    {
+        ArgumentNullException.ThrowIfNull(closedWindows);
+        ArgumentNullException.ThrowIfNull(openWindows);
+
+        var history = new WindowHistory(enabled: true);
+        history.closedWindows.AddRange(closedWindows);
+        for (var i = 0; i < openWindows.Count; i++)
+        {
+            var window = openWindows[i];
+            history.openWindows.Add(
+                new WindowRecordingKey(
+                    window.WindowName,
+                    window.Key,
+                    window.Source,
+                    window.Partition,
+                    new SegmentContext(window.Segments)),
+                window);
+        }
+
+        return history;
+    }
+
     /// <summary>
     /// Gets closed windows recorded by the pipeline.
     /// </summary>
