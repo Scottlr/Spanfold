@@ -28,11 +28,13 @@ var pipeline = Spanfold.Spanfold
     .RecordWindows()
     .TrackWindow("Outage",
         key:       e => e.ServiceId,
-        predicate: e => e.Status == "down");
+        isActive:  e => e.Status == "down");
 
 // 2. Ingest events from each source
-pipeline.Ingest(providerAEvents, source: "provider-a");
-pipeline.Ingest(providerBEvents, source: "provider-b");
+pipeline.Ingest(new MonitorEvent("orders", "down"), source: "provider-a");
+pipeline.Ingest(new MonitorEvent("orders", "up"), source: "provider-a");
+pipeline.Ingest(new MonitorEvent("orders", "down"), source: "provider-b");
+pipeline.Ingest(new MonitorEvent("orders", "up"), source: "provider-b");
 
 // 3. Compare: who saw what, when, and for how long?
 var result = pipeline.History
@@ -46,6 +48,8 @@ var result = pipeline.History
 // result.OverlapRows   — periods both sources agreed on
 // result.ResidualRows  — periods A reported that B missed
 // result.MissingRows   — periods B reported that A missed
+
+public sealed record MonitorEvent(string ServiceId, string Status);
 ```
 
 ---
@@ -96,7 +100,7 @@ var result = pipeline.History
         .Residual()  // A saw, B missed
         .Missing()   // B saw, A missed
         .Gap()       // empty periods inside observed scope
-        .LeadLag()   // transition timing drift between sources
+        .LeadLag(LeadLagTransition.Start, TemporalAxis.ProcessingPosition, 1) // transition timing drift between sources
         .Coverage()) // magnitude and coverage percentage
     .Run();
 // Known-at filtering and live horizons are built into the comparison model.
