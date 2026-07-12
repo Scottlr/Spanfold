@@ -300,11 +300,18 @@ internal static class ComparisonRuntime
                 continue;
             }
 
+            var boundaryRecordIds = current.TargetRecordIds
+                .Concat(current.AgainstRecordIds)
+                .Concat(next.TargetRecordIds)
+                .Concat(next.AgainstRecordIds)
+                .Distinct()
+                .ToArray();
             rows.Add(new GapRow(
                 current.WindowName,
                 current.Key,
                 current.Partition,
-                TemporalRange.Closed(gapStart, gapEnd)));
+                TemporalRange.Closed(gapStart, gapEnd),
+                boundaryRecordIds));
         }
     }
 
@@ -931,7 +938,7 @@ internal static class ComparisonRuntime
 
         for (var i = 0; i < gapRows.Count; i++)
         {
-            AddRowFinality(finalities, provisionalRecordIds, "gap", gapRows[i]);
+            AddRowFinality(finalities, provisionalRecordIds, "gap", gapRows[i], gapRows[i].BoundaryRecordIds);
         }
 
         for (var i = 0; i < symmetricDifferenceRows.Count; i++)
