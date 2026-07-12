@@ -17,7 +17,12 @@ public sealed class WindowSnapshotQuery
 
         for (var i = 0; i < snapshot.Records.Count; i++)
         {
-            this.recordsById[snapshot.Records[i].Window.Id] = snapshot.Records[i];
+            var record = snapshot.Records[i];
+            if (!this.recordsById.TryAdd(record.Window.Id, record))
+            {
+                throw new InvalidOperationException(
+                    $"Window record identity collision detected for '{record.Window.Id}'.");
+            }
         }
     }
 

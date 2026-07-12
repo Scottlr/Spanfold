@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Spanfold;
+using Spanfold.Internal.Keys;
 
 namespace Spanfold.Internal.Comparison;
 
@@ -346,11 +347,6 @@ internal static class ComparisonPreparer
 
     private static string StableObjectValue(object? value)
     {
-        return value switch
-        {
-            null => "<null>",
-            IFormattable formattable => value.GetType().FullName + ":" + formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => value.GetType().FullName + ":" + value
-        };
+        return CanonicalValueFormatter.Format(value);
     }
 }
