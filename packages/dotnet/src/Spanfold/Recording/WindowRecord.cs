@@ -29,6 +29,7 @@ public abstract record WindowRecord(
     WindowBoundaryReason? BoundaryReason = null,
     IReadOnlyList<WindowBoundaryChange>? BoundaryChanges = null)
 {
+    private WindowRecordId? cachedId;
     /// <summary>
     /// Gets analytical segment values attached to this window.
     /// </summary>
@@ -56,7 +57,7 @@ public abstract record WindowRecord(
     /// The identity is stable for the same recorded window data in a
     /// deterministic replay. It is not a distributed global identifier.
     /// </remarks>
-    public WindowRecordId Id => WindowRecordId.From(this);
+    public WindowRecordId Id => this.cachedId ??= WindowRecordId.From(this);
 
     /// <summary>
     /// Gets whether this window has an end position.
