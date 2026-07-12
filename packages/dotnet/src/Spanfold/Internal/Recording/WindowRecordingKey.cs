@@ -1,3 +1,5 @@
+using Spanfold.Internal.Keys;
+
 namespace Spanfold.Internal.Recording;
 
 internal sealed record WindowRecordingKey(
@@ -5,4 +7,16 @@ internal sealed record WindowRecordingKey(
     object Key,
     object? Source,
     object? Partition,
-    string SegmentContext = "");
+    SegmentContext? SegmentContext = null)
+{
+    // Kept for the fixture builder's reflection-based compatibility path.
+    public WindowRecordingKey(
+        string windowName,
+        object key,
+        object? source,
+        object? partition,
+        string segmentContext)
+        : this(windowName, key, source, partition, (SegmentContext?)null)
+    {
+    }
+}

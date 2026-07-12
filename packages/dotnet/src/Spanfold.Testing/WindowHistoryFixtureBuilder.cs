@@ -185,42 +185,29 @@ public sealed class WindowHistoryFixtureBuilder
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Spanfold open-window storage was not found.");
         var open = (IDictionary)field.GetValue(history)!;
+        var segmentContextType = typeof(WindowHistory).Assembly.GetType("Spanfold.Internal.Keys.SegmentContext")
+            ?? throw new InvalidOperationException("Spanfold segment context type was not found.");
 
         for (var i = 0; i < this.openWindows.Count; i++)
         {
             var window = this.openWindows[i];
+            var segmentContext = Activator.CreateInstance(
+                segmentContextType,
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
+                binder: null,
+                args: [window.Segments],
+                culture: null)
+                ?? throw new InvalidOperationException("Spanfold segment context could not be created.");
             var key = Activator.CreateInstance(
                 keyType,
                 window.WindowName,
                 window.Key,
                 window.Source,
                 window.Partition,
-                StableSegments(window.Segments))
+                segmentContext)
                 ?? throw new InvalidOperationException("Spanfold window recording key could not be created.");
             open.Add(key, window);
         }
     }
 
-    private static string StableSegments(IReadOnlyList<WindowSegment> segments)
-    {
-        if (segments.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var builder = new System.Text.StringBuilder();
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var segment = segments[i];
-            builder
-                .Append(segment.ParentName ?? string.Empty)
-                .Append('/')
-                .Append(segment.Name)
-                .Append('=')
-                .Append(segment.Value)
-                .Append(';');
-        }
-
-        return builder.ToString();
-    }
 }

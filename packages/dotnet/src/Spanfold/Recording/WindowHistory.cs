@@ -1,4 +1,5 @@
 using Spanfold.Internal.Recording;
+using Spanfold.Internal.Keys;
 
 namespace Spanfold;
 
@@ -644,7 +645,9 @@ public sealed class WindowHistory
                 || !comparer.Equals(candidate.Key, key.Key)
                 || !EqualityComparer<object?>.Default.Equals(candidate.Source, key.Source)
                 || !EqualityComparer<object?>.Default.Equals(candidate.Partition, key.Partition)
-                || !string.Equals(candidate.SegmentContext, key.SegmentContext, StringComparison.Ordinal))
+                || (candidate.SegmentContext is not null
+                    && key.SegmentContext is not null
+                    && !Equals(candidate.SegmentContext, key.SegmentContext)))
             {
                 continue;
             }
@@ -867,35 +870,14 @@ public sealed class WindowHistory
         };
     }
 
-    private static string StableSegments(IReadOnlyList<WindowSegment> segments)
-    {
-        if (segments.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var builder = new System.Text.StringBuilder();
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var segment = segments[i];
-            builder
-                .Append(segment.ParentName ?? string.Empty)
-                .Append('/')
-                .Append(segment.Name)
-                .Append('=')
-                .Append(StableObjectValue(segment.Value))
-                .Append(';');
-        }
-
-        return builder.ToString();
-    }
+    private static SegmentContext StableSegments(IReadOnlyList<WindowSegment> segments) => new(segments);
 
     private static bool IsSameScope(ClosedWindow first, ClosedWindow second)
     {
         return string.Equals(first.WindowName, second.WindowName, StringComparison.Ordinal)
             && EqualityComparer<object>.Default.Equals(first.Key, second.Key)
             && EqualityComparer<object?>.Default.Equals(first.Partition, second.Partition)
-            && string.Equals(StableSegments(first.Segments), StableSegments(second.Segments), StringComparison.Ordinal);
+            && Equals(StableSegments(first.Segments), StableSegments(second.Segments));
     }
 
     private static bool HasSegment(WindowRecord window, string name, object? value)
