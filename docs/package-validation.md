@@ -21,14 +21,14 @@ Expected package contents include:
 - `lib/net10.0/Spanfold.xml`
 - `README.md`
 
-Run a consumer smoke test from a temporary directory:
+Verify the package contract directly from the archive:
 
 ```bash
-dotnet new console --framework net10.0 # Create a temporary consumer app.
-dotnet add package Spanfold --version 0.1.0 --source /absolute/path/to/spanfold/artifacts/package # Reference the local package.
-dotnet build # Verify the consumer can restore and compile.
+unzip -Z1 artifacts/package/Spanfold.0.1.0.nupkg | grep -Fx 'README.md'
+unzip -Z1 artifacts/package/Spanfold.0.1.0.nupkg | grep -Fx 'lib/net10.0/Spanfold.dll'
+unzip -Z1 artifacts/package/Spanfold.0.1.0.nupkg | grep -Fx 'lib/net10.0/Spanfold.xml'
 ```
 
-Package validation is enabled in the project. Source Link and symbol packages
-are produced for local verification, while public publishing remains a separate
-release step.
+The same package-content and dependency checks run in CI. Package validation is
+enabled in the projects, and Source Link and symbol packages are produced for
+local verification while public publishing remains a separate release step.
