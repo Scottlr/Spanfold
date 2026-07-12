@@ -3,18 +3,6 @@ namespace Spanfold;
 /// <summary>
 /// Describes the common shape of an open or closed span.
 /// </summary>
-/// <param name="WindowName">The configured window name.</param>
-/// <param name="Key">The logical key for the window.</param>
-/// <param name="StartPosition">The processing position where the window started.</param>
-/// <param name="EndPosition">The processing position where the window ended, if closed.</param>
-/// <param name="Source">Optional source identity supplied when the window started.</param>
-/// <param name="Partition">Optional partition identity supplied when the window started.</param>
-/// <param name="StartTime">Optional event timestamp where the window started.</param>
-/// <param name="EndTime">Optional event timestamp where the window ended, if closed.</param>
-/// <param name="Segments">Analytical segment values attached to this window.</param>
-/// <param name="Tags">Descriptive non-boundary metadata attached to this window.</param>
-/// <param name="BoundaryReason">The reason this window closed, when known.</param>
-/// <param name="BoundaryChanges">The segment changes that caused this window to close.</param>
 public abstract record WindowRecord
 {
     /// <summary>Initializes a validated recorded window.</summary>

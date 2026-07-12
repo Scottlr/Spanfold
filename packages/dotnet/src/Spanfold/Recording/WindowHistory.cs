@@ -474,12 +474,15 @@ public sealed class WindowHistory
     }
 
     /// <summary>
-    /// Compares parent windows against child contribution windows.
+    /// Compares parent windows against child contribution windows using temporal co-activity.
     /// </summary>
     /// <remarks>
-    /// Lineage is inferred by matching source and partition for the supplied
-    /// parent and child window names. Parent and child keys may differ because
-    /// rollups often aggregate several child keys into one parent key.
+    /// This comparison does not infer semantic parent/child lineage. It groups
+    /// windows by source and partition and reports whether they are temporally
+    /// co-active. Parent and child keys may differ because rollups often
+    /// aggregate several child keys into one parent key. Open windows are not
+    /// assigned an end boundary; callers must provide a bounded recording
+    /// horizon before treating the result as complete.
     /// </remarks>
     /// <param name="name">A human-readable comparison name.</param>
     /// <param name="parentWindowName">The parent recorded window name.</param>
@@ -513,6 +516,15 @@ public sealed class WindowHistory
                 ComparisonPlanValidationCode.MissingLineage,
                 "Hierarchy comparison found no child contribution windows.",
                 "childWindowName",
+                ComparisonPlanDiagnosticSeverity.Warning));
+        }
+
+        if (ContainsOpenWindow(parents) || ContainsOpenWindow(children))
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.HierarchyOpenWindowsWithoutHorizon,
+                "Hierarchy co-activity excludes open-window duration because no evaluation horizon was supplied.",
+                "windowNames",
                 ComparisonPlanDiagnosticSeverity.Warning));
         }
 
@@ -852,6 +864,19 @@ public sealed class WindowHistory
             boundaries.Add(TemporalPoint.ForPosition(window.StartPosition));
             boundaries.Add(TemporalPoint.ForPosition(window.EndPosition.Value));
         }
+    }
+
+    private static bool ContainsOpenWindow(List<WindowRecord> windows)
+    {
+        for (var i = 0; i < windows.Count; i++)
+        {
+            if (!windows[i].EndPosition.HasValue)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static IReadOnlyList<WindowRecordId> ActiveIds(

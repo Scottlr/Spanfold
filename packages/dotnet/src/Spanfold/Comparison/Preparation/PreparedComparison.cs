@@ -12,11 +12,6 @@ namespace Spanfold;
 /// records into deterministic temporal ranges according to the normalization
 /// policy.
 /// </remarks>
-/// <param name="Plan">The comparison plan.</param>
-/// <param name="Diagnostics">The validation diagnostics.</param>
-/// <param name="SelectedWindows">The recorded windows selected by the plan.</param>
-/// <param name="ExcludedWindows">The recorded windows excluded during preparation.</param>
-/// <param name="NormalizedWindows">The normalized windows ready for alignment.</param>
 public sealed record PreparedComparison
 {
     internal PreparedComparison(

@@ -118,5 +118,10 @@ public enum ComparisonPlanValidationCode
     /// <summary>
     /// Indicates that runtime criticism found timestamp points from incompatible clocks.
     /// </summary>
-    MixedClockRisk = 22
+    MixedClockRisk = 22,
+
+    /// <summary>
+    /// Indicates that hierarchy co-activity includes open windows without a bounded horizon.
+    /// </summary>
+    HierarchyOpenWindowsWithoutHorizon = 23
 }
