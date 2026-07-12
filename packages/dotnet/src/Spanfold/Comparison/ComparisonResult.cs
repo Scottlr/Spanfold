@@ -74,6 +74,14 @@ public sealed class ComparisonResult
         AsOfRows = Materialize(asOfRows);
         RowFinalities = Materialize(rowFinalities);
         ExtensionMetadata = Materialize(extensionMetadata);
+        RecordEvidence = prepared is null
+            ? []
+            : prepared.SelectedWindows
+                .Select(static window => new WindowRecordEvidence(window))
+                .GroupBy(static evidence => evidence.Id)
+                .Select(static group => group.First())
+                .OrderBy(static evidence => evidence.Id.Value, StringComparer.Ordinal)
+                .ToArray();
     }
 
     /// <summary>
@@ -186,6 +194,11 @@ public sealed class ComparisonResult
     /// Gets serializable metadata emitted by comparison extensions.
     /// </summary>
     public IReadOnlyList<ComparisonExtensionMetadata> ExtensionMetadata { get; }
+
+    /// <summary>
+    /// Gets source segment, tag, and boundary evidence for selected records.
+    /// </summary>
+    public IReadOnlyList<WindowRecordEvidence> RecordEvidence { get; }
 
     /// <summary>
     /// Gets whether the result has no error diagnostics.

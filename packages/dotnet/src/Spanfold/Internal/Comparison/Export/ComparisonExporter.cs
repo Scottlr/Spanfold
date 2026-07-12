@@ -244,6 +244,14 @@ internal static class ComparisonExporter
         WritePlanFields(writer, result.Plan, result.Diagnostics);
         writer.WriteEndObject();
         WriteDiagnostics(writer, "diagnostics", result.Diagnostics);
+        if (result.RecordEvidence.Any(static evidence =>
+                evidence.Segments.Count > 0
+                || evidence.Tags.Count > 0
+                || evidence.BoundaryReason.HasValue
+                || evidence.BoundaryChanges.Count > 0))
+        {
+            WriteRecordEvidence(writer, result.RecordEvidence);
+        }
         if (result.Plan.Output.IncludeExplainData)
         {
             WritePrepared(writer, result.Prepared);
@@ -268,6 +276,47 @@ internal static class ComparisonExporter
         WriteCoverageSummaries(writer, result.CoverageSummaries);
         WriteLeadLagSummaries(writer, result.LeadLagSummaries);
         writer.WriteEndObject();
+    }
+
+    private static void WriteRecordEvidence(
+        Utf8JsonWriter writer,
+        IReadOnlyList<WindowRecordEvidence> evidence)
+    {
+        writer.WritePropertyName("recordEvidence");
+        writer.WriteStartArray();
+        for (var i = 0; i < evidence.Count; i++)
+        {
+            var item = evidence[i];
+            writer.WriteStartObject();
+            writer.WriteString("id", item.Id.Value);
+            writer.WriteString("windowName", item.WindowName);
+            WriteSegments(writer, "segments", item.Segments);
+            WriteTags(writer, "tags", item.Tags);
+            if (item.BoundaryReason.HasValue)
+            {
+                writer.WriteString("boundaryReason", item.BoundaryReason.Value.ToString());
+            }
+            else
+            {
+                writer.WriteNull("boundaryReason");
+            }
+
+            writer.WritePropertyName("boundaryChanges");
+            writer.WriteStartArray();
+            for (var j = 0; j < item.BoundaryChanges.Count; j++)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("segmentName", item.BoundaryChanges[j].SegmentName);
+                WriteObjectValue(writer, "previousValue", item.BoundaryChanges[j].PreviousValue);
+                WriteObjectValue(writer, "currentValue", item.BoundaryChanges[j].CurrentValue);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
     }
 
     private static void WriteResultLine(Utf8JsonWriter writer, ComparisonResult result)
@@ -971,6 +1020,51 @@ internal static class ComparisonExporter
         }
 
         writer.WriteEndObject();
+    }
+
+    private static void WriteSegments(
+        Utf8JsonWriter writer,
+        string propertyName,
+        IReadOnlyList<WindowSegment> segments)
+    {
+        writer.WritePropertyName(propertyName);
+        writer.WriteStartArray();
+        for (var i = 0; i < segments.Count; i++)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("name", segments[i].Name);
+            WriteObjectValue(writer, "value", segments[i].Value);
+            if (segments[i].ParentName is null)
+            {
+                writer.WriteNull("parentName");
+            }
+            else
+            {
+                writer.WriteString("parentName", segments[i].ParentName);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+    }
+
+    private static void WriteTags(
+        Utf8JsonWriter writer,
+        string propertyName,
+        IReadOnlyList<WindowTag> tags)
+    {
+        writer.WritePropertyName(propertyName);
+        writer.WriteStartArray();
+        for (var i = 0; i < tags.Count; i++)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("name", tags[i].Name);
+            WriteObjectValue(writer, "value", tags[i].Value);
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
     }
 
     private static void WriteObjectValue(Utf8JsonWriter writer, string propertyName, object? value)
