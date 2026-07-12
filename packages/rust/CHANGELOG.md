@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.1
+
+- Give the library and CLI distinct crates.io documentation focused on their
+  respective Rust API and command-line workflows.
+
 ## 0.1.0
 
 - Add event-driven state-window recording with hierarchical roll-ups, segment
