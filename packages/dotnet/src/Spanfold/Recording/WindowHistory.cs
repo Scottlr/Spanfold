@@ -560,20 +560,38 @@ public sealed class WindowHistory
     public IReadOnlyList<WindowOverlap> FindOverlaps()
     {
         var overlaps = new List<WindowOverlap>();
+        var scopes = this.closedWindows
+            .GroupBy(static window => new OverlapScope(
+                window.WindowName,
+                window.Key,
+                window.Partition,
+                StableSegments(window.Segments)))
+            .ToArray();
 
-        for (var i = 0; i < this.closedWindows.Count; i++)
+        for (var scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
         {
-            var first = this.closedWindows[i];
+            var windows = scopes[scopeIndex]
+                .OrderBy(static window => window.StartPosition)
+                .ThenBy(static window => window.EndPosition)
+                .ToArray();
 
-            for (var j = i + 1; j < this.closedWindows.Count; j++)
+            for (var i = 0; i < windows.Length; i++)
             {
-                var second = this.closedWindows[j];
-                if (!IsSameScope(first, second) || !Overlaps(first, second))
+                var first = windows[i];
+                var firstEnd = ClosedEndPosition(first);
+                for (var j = i + 1; j < windows.Length; j++)
                 {
-                    continue;
-                }
+                    var second = windows[j];
+                    if (second.StartPosition >= firstEnd)
+                    {
+                        break;
+                    }
 
-                overlaps.Add(new WindowOverlap(first, second));
+                    if (Overlaps(first, second))
+                    {
+                        overlaps.Add(new WindowOverlap(first, second));
+                    }
+                }
             }
         }
 
@@ -1025,4 +1043,10 @@ public sealed class WindowHistory
     private readonly record struct PositionSegment(long Start, long End);
 
     private sealed record HierarchyScope(object? Source, object? Partition);
+
+    private sealed record OverlapScope(
+        string WindowName,
+        object Key,
+        object? Partition,
+        SegmentContext Segments);
 }
