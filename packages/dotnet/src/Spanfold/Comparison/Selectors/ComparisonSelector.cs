@@ -18,7 +18,8 @@ public readonly record struct ComparisonSelector
         bool isSerializable,
         Func<WindowRecord, bool>? predicate,
         CohortActivity? cohortActivity = null,
-        IReadOnlyList<object>? cohortSources = null)
+        IReadOnlyList<object>? cohortSources = null,
+        ComparisonSelectorDescriptor? descriptor = null)
     {
         Name = name;
         Description = description;
@@ -26,6 +27,7 @@ public readonly record struct ComparisonSelector
         this.predicate = predicate;
         CohortActivity = cohortActivity;
         CohortSources = cohortSources ?? [];
+        Descriptor = descriptor;
     }
 
     /// <summary>
@@ -53,6 +55,9 @@ public readonly record struct ComparisonSelector
     /// </summary>
     public IReadOnlyList<object> CohortSources { get; }
 
+    /// <summary>Gets the structured executable descriptor, when available.</summary>
+    public ComparisonSelectorDescriptor? Descriptor { get; }
+
     /// <summary>
     /// Creates a serializable selector descriptor.
     /// </summary>
@@ -64,7 +69,8 @@ public readonly record struct ComparisonSelector
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
 
-        return new ComparisonSelector(name, description, isSerializable: true, predicate: null);
+        return new ComparisonSelector(name, description, isSerializable: true, predicate: null,
+            descriptor: new ComparisonSelectorDescriptor("named"));
     }
 
     /// <summary>
@@ -80,7 +86,8 @@ public readonly record struct ComparisonSelector
             $"window:{windowName}",
             $"window name = {windowName}",
             isSerializable: true,
-            window => string.Equals(window.WindowName, windowName, StringComparison.Ordinal));
+            window => string.Equals(window.WindowName, windowName, StringComparison.Ordinal),
+            descriptor: new ComparisonSelectorDescriptor("windowName", value: windowName));
     }
 
     /// <summary>
@@ -96,7 +103,8 @@ public readonly record struct ComparisonSelector
             $"key:{key}",
             $"key = {key}",
             isSerializable: true,
-            window => EqualityComparer<object>.Default.Equals(window.Key, key));
+            window => EqualityComparer<object>.Default.Equals(window.Key, key),
+            descriptor: new ComparisonSelectorDescriptor("key", value: key));
     }
 
     /// <summary>
@@ -112,7 +120,8 @@ public readonly record struct ComparisonSelector
             $"source:{source}",
             $"source = {source}",
             isSerializable: true,
-                window => EqualityComparer<object?>.Default.Equals(window.Source, source));
+                window => EqualityComparer<object?>.Default.Equals(window.Source, source),
+            descriptor: new ComparisonSelectorDescriptor("source", value: source));
     }
 
     /// <summary>
@@ -174,7 +183,12 @@ public readonly record struct ComparisonSelector
                 return false;
             },
             cohortActivity,
-            orderedSources);
+            orderedSources,
+            new ComparisonSelectorDescriptor(
+                cohortActivity is null ? "sources" : "cohort",
+                values: orderedSources,
+                activity: cohortActivity?.Name,
+                count: cohortActivity?.Count));
     }
 
     /// <summary>
@@ -190,7 +204,8 @@ public readonly record struct ComparisonSelector
             $"partition:{partition}",
             $"partition = {partition}",
             isSerializable: true,
-            window => EqualityComparer<object?>.Default.Equals(window.Partition, partition));
+            window => EqualityComparer<object?>.Default.Equals(window.Partition, partition),
+            descriptor: new ComparisonSelectorDescriptor("partition", value: partition));
     }
 
     /// <summary>
@@ -211,7 +226,8 @@ public readonly record struct ComparisonSelector
             $"start position in [{startInclusive}, {endExclusive?.ToString() ?? "*"})",
             isSerializable: true,
             window => window.StartPosition >= startInclusive
-                && (!endExclusive.HasValue || window.StartPosition < endExclusive.Value));
+                && (!endExclusive.HasValue || window.StartPosition < endExclusive.Value),
+            descriptor: new ComparisonSelectorDescriptor("positionRange", startPosition: startInclusive, endPosition: endExclusive));
     }
 
     /// <summary>
@@ -233,7 +249,8 @@ public readonly record struct ComparisonSelector
             isSerializable: true,
             window => window.StartTime.HasValue
                 && window.StartTime.Value >= startInclusive
-                && (!endExclusive.HasValue || window.StartTime.Value < endExclusive.Value));
+                && (!endExclusive.HasValue || window.StartTime.Value < endExclusive.Value),
+            descriptor: new ComparisonSelectorDescriptor("timeRange", startTime: startInclusive, endTime: endExclusive));
     }
 
     /// <summary>
@@ -281,7 +298,8 @@ public readonly record struct ComparisonSelector
             IsSerializable,
             this.predicate,
             CohortActivity,
-            CohortSources);
+            CohortSources,
+            Descriptor);
     }
 
     /// <summary>
@@ -297,7 +315,10 @@ public readonly record struct ComparisonSelector
             $"{Name}&{other.Name}",
             $"({Description}) and ({other.Description})",
             IsSerializable && other.IsSerializable,
-            window => current.Matches(window) && other.Matches(window));
+            window => current.Matches(window) && other.Matches(window),
+            descriptor: current.Descriptor is { } left && other.Descriptor is { } right
+                ? new ComparisonSelectorDescriptor("and", children: [left, right])
+                : null);
     }
 
     /// <summary>
@@ -313,7 +334,10 @@ public readonly record struct ComparisonSelector
             $"{Name}|{other.Name}",
             $"({Description}) or ({other.Description})",
             IsSerializable && other.IsSerializable,
-            window => current.Matches(window) || other.Matches(window));
+            window => current.Matches(window) || other.Matches(window),
+            descriptor: current.Descriptor is { } left && other.Descriptor is { } right
+                ? new ComparisonSelectorDescriptor("or", children: [left, right])
+                : null);
     }
 
     /// <summary>

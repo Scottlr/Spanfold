@@ -27,6 +27,19 @@ internal static class ComparisonExporter
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
+    internal static string ExportPortableJson(ComparisonPlan plan)
+    {
+        EnsureExportable(plan);
+
+        using var stream = new MemoryStream();
+        using (var writer = CreateWriter(stream, indented: true))
+        {
+            WritePlanEnvelope(writer, plan, plan.Validate(), includeDescriptors: true);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     internal static string ExportJson(ComparisonResult result)
     {
         EnsureExportable(result.Plan);
@@ -218,13 +231,14 @@ internal static class ComparisonExporter
     private static void WritePlanEnvelope(
         Utf8JsonWriter writer,
         ComparisonPlan plan,
-        IReadOnlyList<ComparisonPlanDiagnostic> diagnostics)
+        IReadOnlyList<ComparisonPlanDiagnostic> diagnostics,
+        bool includeDescriptors = false)
     {
         writer.WriteStartObject();
         writer.WriteString("schema", PlanSchema);
         writer.WriteNumber("schemaVersion", SchemaVersion);
         writer.WriteString("artifact", "plan");
-        WritePlanFields(writer, plan, diagnostics);
+        WritePlanFields(writer, plan, diagnostics, includeDescriptors);
         writer.WriteEndObject();
     }
 
@@ -454,7 +468,8 @@ internal static class ComparisonExporter
     private static void WritePlanFields(
         Utf8JsonWriter writer,
         ComparisonPlan plan,
-        IReadOnlyList<ComparisonPlanDiagnostic> diagnostics)
+        IReadOnlyList<ComparisonPlanDiagnostic> diagnostics,
+        bool includeDescriptors = false)
     {
         writer.WriteString("name", plan.Name);
         writer.WriteBoolean("isStrict", plan.IsStrict);
@@ -462,7 +477,7 @@ internal static class ComparisonExporter
         writer.WritePropertyName("target");
         if (plan.Target.HasValue)
         {
-            WriteSelector(writer, plan.Target.Value);
+            WriteSelector(writer, plan.Target.Value, includeDescriptors);
         }
         else
         {
@@ -473,7 +488,7 @@ internal static class ComparisonExporter
         writer.WriteStartArray();
         for (var i = 0; i < plan.Against.Count; i++)
         {
-            WriteSelector(writer, plan.Against[i]);
+                WriteSelector(writer, plan.Against[i], includeDescriptors);
         }
 
         writer.WriteEndArray();
@@ -487,12 +502,16 @@ internal static class ComparisonExporter
         WriteDiagnostics(writer, "diagnostics", diagnostics);
     }
 
-    private static void WriteSelector(Utf8JsonWriter writer, ComparisonSelector selector)
+    private static void WriteSelector(Utf8JsonWriter writer, ComparisonSelector selector, bool includeDescriptor = false)
     {
         writer.WriteStartObject();
         writer.WriteString("name", selector.Name);
         writer.WriteString("description", selector.Description);
         writer.WriteBoolean("isSerializable", selector.IsSerializable);
+        if (includeDescriptor && selector.Descriptor is { } descriptor)
+        {
+            WriteSelectorDescriptor(writer, descriptor);
+        }
         if (selector.CohortActivity is not null)
         {
             writer.WritePropertyName("cohort");
@@ -512,6 +531,53 @@ internal static class ComparisonExporter
 
             writer.WriteEndArray();
             writer.WriteEndObject();
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteSelectorDescriptor(
+        Utf8JsonWriter writer,
+        ComparisonSelectorDescriptor descriptor)
+    {
+        writer.WritePropertyName("descriptor");
+        writer.WriteStartObject();
+        writer.WriteString("kind", descriptor.Kind);
+        if (descriptor.Value is not null)
+        {
+            WriteObjectValue(writer, "value", descriptor.Value);
+        }
+
+        if (descriptor.Values.Count > 0)
+        {
+            writer.WriteStartArray("values");
+            for (var i = 0; i < descriptor.Values.Count; i++)
+            {
+                WriteObjectValue(writer, descriptor.Values[i]);
+            }
+
+            writer.WriteEndArray();
+        }
+
+        WriteNullableNumber(writer, "startPosition", descriptor.StartPosition);
+        WriteNullableNumber(writer, "endPosition", descriptor.EndPosition);
+        WriteNullableTimestamp(writer, "startTime", descriptor.StartTime);
+        WriteNullableTimestamp(writer, "endTime", descriptor.EndTime);
+        WriteNullableString(writer, "activity", descriptor.Activity);
+        if (descriptor.Count.HasValue)
+        {
+            writer.WriteNumber("count", descriptor.Count.Value);
+        }
+
+        if (descriptor.Children.Count > 0)
+        {
+            writer.WriteStartArray("children");
+            for (var i = 0; i < descriptor.Children.Count; i++)
+            {
+                WriteSelectorDescriptor(writer, descriptor.Children[i]);
+            }
+
+            writer.WriteEndArray();
         }
 
         writer.WriteEndObject();
