@@ -439,7 +439,13 @@ internal static class ComparisonRuntime
 
         foreach (var pair in comparisonTransitions)
         {
-            pair.Value.Sort(static (left, right) => left.Point.CompareTo(right.Point));
+            pair.Value.Sort(static (left, right) =>
+            {
+                var pointComparison = left.Point.CompareTo(right.Point);
+                return pointComparison != 0
+                    ? pointComparison
+                    : string.CompareOrdinal(left.RecordId.Value, right.RecordId.Value);
+            });
         }
 
         for (var i = 0; i < prepared.NormalizedWindows.Count; i++)
@@ -694,7 +700,9 @@ internal static class ComparisonRuntime
         {
             var candidate = candidates[i];
             var distance = Math.Abs(GetDeltaMagnitude(targetPoint, candidate.Point, axis));
-            if (distance < bestDistance)
+            if (distance < bestDistance
+                || (distance == bestDistance
+                    && string.CompareOrdinal(candidate.RecordId.Value, best.RecordId.Value) < 0))
             {
                 best = candidate;
                 bestDistance = distance;
