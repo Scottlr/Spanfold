@@ -117,6 +117,29 @@ public sealed class WindowHistory
     public IReadOnlyList<WindowAnnotation> Annotations => this.annotations.ToArray();
 
     /// <summary>
+    /// Removes closed windows whose end position is at or before a retention boundary.
+    /// </summary>
+    /// <remarks>
+    /// This is an explicit history-drain operation for long-running pipelines.
+    /// Open windows and annotations are retained; callers should persist or
+    /// export any required evidence before trimming.
+    /// </remarks>
+    /// <param name="endPositionExclusive">The exclusive processing-position retention boundary.</param>
+    /// <returns>The number of closed windows removed.</returns>
+    public int TrimClosedBefore(long endPositionExclusive)
+    {
+        if (endPositionExclusive < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(endPositionExclusive));
+        }
+
+        var removed = this.closedWindows.RemoveAll(
+            window => window.EndPosition.HasValue
+                && window.EndPosition.Value <= endPositionExclusive);
+        return removed;
+    }
+
+    /// <summary>
     /// Starts a staged comparison over this recorded window history.
     /// </summary>
     /// <param name="name">A human-readable name for the comparison.</param>

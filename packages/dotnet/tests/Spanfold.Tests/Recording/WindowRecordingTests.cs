@@ -52,6 +52,20 @@ public sealed class WindowRecordingTests
         Assert.Empty(pipeline.History.ClosedWindows);
     }
 
+    [Fact]
+    public void ClosedHistoryCanBeDrainedAtAnExplicitBoundary()
+    {
+        var pipeline = CreatePipeline();
+
+        pipeline.Ingest(new PriceTick("selection-1", 0m));
+        pipeline.Ingest(new PriceTick("selection-1", 1.01m));
+        pipeline.Ingest(new PriceTick("selection-2", 0m));
+
+        Assert.Equal(1, pipeline.History.TrimClosedBefore(2));
+        Assert.Empty(pipeline.History.ClosedWindows);
+        Assert.Single(pipeline.History.OpenWindows);
+    }
+
     private static EventPipeline<PriceTick> CreatePipeline()
     {
         return Spanfold
