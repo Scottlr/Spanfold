@@ -34,6 +34,7 @@ public readonly record struct WindowRecordId(string Value)
         Append(builder, "end-position", window.EndPosition?.ToString(CultureInfo.InvariantCulture) ?? "<open>");
         Append(builder, "start-time", StableTimestampValue(window.StartTime));
         Append(builder, "end-time", StableTimestampValue(window.EndTime));
+        Append(builder, "timestamp-clock", window.TimestampClock ?? "<null>");
         Append(builder, "end-status", window.IsClosed ? "closed" : "open");
         AppendSegments(builder, window.Segments);
         AppendTags(builder, window.Tags);

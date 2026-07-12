@@ -18,7 +18,8 @@ public abstract record WindowRecord
         IReadOnlyList<WindowSegment>? segments = null,
         IReadOnlyList<WindowTag>? tags = null,
         WindowBoundaryReason? boundaryReason = null,
-        IReadOnlyList<WindowBoundaryChange>? boundaryChanges = null)
+        IReadOnlyList<WindowBoundaryChange>? boundaryChanges = null,
+        string? timestampClock = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(windowName);
         ArgumentNullException.ThrowIfNull(key);
@@ -49,6 +50,11 @@ public abstract record WindowRecord
             throw new ArgumentException("End timestamp must not precede start timestamp.", nameof(endTime));
         }
 
+        if (timestampClock is not null && string.IsNullOrWhiteSpace(timestampClock))
+        {
+            throw new ArgumentException("Timestamp clock identity cannot be blank.", nameof(timestampClock));
+        }
+
         WindowName = windowName;
         Key = key;
         StartPosition = startPosition;
@@ -57,6 +63,7 @@ public abstract record WindowRecord
         Partition = partition;
         StartTime = startTime;
         EndTime = endTime;
+        TimestampClock = timestampClock;
         Segments = Materialize(segments);
         Tags = Materialize(tags);
         BoundaryReason = boundaryReason;
@@ -79,6 +86,9 @@ public abstract record WindowRecord
     public DateTimeOffset? StartTime { get; }
     /// <summary>Gets the optional closing timestamp.</summary>
     public DateTimeOffset? EndTime { get; }
+
+    /// <summary>Gets the identity of the clock that produced the timestamps.</summary>
+    public string? TimestampClock { get; }
 
     private WindowRecordId? cachedId;
     /// <summary>
