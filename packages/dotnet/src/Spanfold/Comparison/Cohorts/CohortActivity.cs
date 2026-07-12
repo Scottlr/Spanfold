@@ -105,7 +105,7 @@ public sealed record CohortActivity
     {
         return Name switch
         {
-            "any" => memberCount == 0 ? 1 : 1,
+            "any" => 1,
             "all" => memberCount,
             "none" => 0,
             "at-least" => Count!.Value,
