@@ -1,4 +1,5 @@
 using Spanfold;
+using Spanfold.Internal.Comparison;
 using Spanfold.Tests.Support;
 
 namespace Spanfold.Tests.Comparison;
@@ -97,6 +98,37 @@ public sealed class ComparisonSnapshotTests
                     segment.AgainstRecordIds);
             })
             .ToArray();
+        var overlapRow = new OverlapRow(
+            overlap.WindowName,
+            overlap.Key,
+            overlap.Partition,
+            overlap.Range,
+            overlap.TargetRecordIds,
+            overlap.AgainstRecordIds);
+        var residualRow = new ResidualRow(
+            residual.WindowName,
+            residual.Key,
+            residual.Partition,
+            residual.Range,
+            residual.TargetRecordIds);
+        var rowFinalities = new List<ComparisonRowFinality>
+        {
+            new(
+                "overlap",
+                ComparisonRowIdentity.Create(ComparisonRowKind.Overlap, overlapRow),
+                ComparisonFinality.Final,
+                "closed"),
+            new(
+                "residual",
+                ComparisonRowIdentity.Create(ComparisonRowKind.Residual, residualRow),
+                ComparisonFinality.Final,
+                "closed")
+        };
+        rowFinalities.AddRange(coverageRows.Select(static row => new ComparisonRowFinality(
+            "coverage",
+            ComparisonRowIdentity.Create(ComparisonRowKind.Coverage, row),
+            ComparisonFinality.Final,
+            "closed")));
 
         return new ComparisonResult(
             plan,
@@ -109,21 +141,10 @@ public sealed class ComparisonSnapshotTests
                 new ComparatorSummary("coverage", 2)
             ],
             [
-                new OverlapRow(
-                    overlap.WindowName,
-                    overlap.Key,
-                    overlap.Partition,
-                    overlap.Range,
-                    overlap.TargetRecordIds,
-                    overlap.AgainstRecordIds)
+                overlapRow
             ],
             [
-                new ResidualRow(
-                    residual.WindowName,
-                    residual.Key,
-                    residual.Partition,
-                    residual.Range,
-                    residual.TargetRecordIds)
+                residualRow
             ],
             coverageRows: coverageRows,
             coverageSummaries:
@@ -135,6 +156,7 @@ public sealed class ComparisonSnapshotTests
                     TargetMagnitude: 4,
                     CoveredMagnitude: 2,
                     CoverageRatio: 0.5)
-            ]);
+            ],
+            rowFinalities: rowFinalities);
     }
 }

@@ -1,8 +1,13 @@
 namespace Spanfold;
 
 /// <summary>
-/// Describes target coverage for one aligned segment.
+/// Describes target coverage for one aligned target-active segment.
 /// </summary>
+/// <remarks>
+/// A segment is normally wholly covered or wholly uncovered, so its covered
+/// magnitude is normally zero or the complete target magnitude. Use
+/// <see cref="CoverageSummary" /> for grouped aggregate coverage.
+/// </remarks>
 public sealed record CoverageRow(
     string WindowName,
     object Key,

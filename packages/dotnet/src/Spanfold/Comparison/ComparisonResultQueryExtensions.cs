@@ -1,3 +1,5 @@
+using Spanfold.Internal.Comparison;
+
 namespace Spanfold;
 
 /// <summary>
@@ -5,6 +7,105 @@ namespace Spanfold;
 /// </summary>
 public static class ComparisonResultQueryExtensions
 {
+    /// <summary>Gets overlap rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical overlap order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<OverlapRow>> OverlapRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.Overlap);
+        return Pair(result.OverlapRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets residual rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical residual order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<ResidualRow>> ResidualRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.Residual);
+        return Pair(result.ResidualRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets missing rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical missing order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<MissingRow>> MissingRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.Missing);
+        return Pair(result.MissingRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets coverage rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical coverage order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<CoverageRow>> CoverageRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.Coverage);
+        return Pair(result.CoverageRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets gap rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical gap order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<GapRow>> GapRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.Gap);
+        return Pair(result.GapRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets symmetric-difference rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical symmetric-difference order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<SymmetricDifferenceRow>> SymmetricDifferenceRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.SymmetricDifference);
+        return Pair(result.SymmetricDifferenceRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets containment rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical containment order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<ContainmentRow>> ContainmentRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.Containment);
+        return Pair(result.ContainmentRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets lead/lag rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical lead/lag order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<LeadLagRow>> LeadLagRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.LeadLag);
+        return Pair(result.LeadLagRows, result.RowFinalities, offset);
+    }
+
+    /// <summary>Gets as-of rows paired with authoritative result metadata.</summary>
+    /// <param name="result">The comparison result.</param>
+    /// <returns>Rows and metadata in canonical as-of order.</returns>
+    /// <exception cref="ComparisonRowMetadataException">The result metadata layout is inconsistent.</exception>
+    public static IEnumerable<ComparisonRowWithFinality<AsOfRow>> AsOfRowsWithFinality(this ComparisonResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var offset = ComparisonRowMetadataValidator.ValidateAndGetOffset(result, ComparisonRowKind.AsOf);
+        return Pair(result.AsOfRows, result.RowFinalities, offset);
+    }
+
     /// <summary>
     /// Gets error diagnostics from a comparison result.
     /// </summary>
@@ -105,5 +206,16 @@ public static class ComparisonResultQueryExtensions
         }
 
         return finalities.ToArray();
+    }
+
+    private static IEnumerable<ComparisonRowWithFinality<TRow>> Pair<TRow>(
+        IReadOnlyList<TRow> rows,
+        IReadOnlyList<ComparisonRowFinality> metadata,
+        int offset)
+    {
+        for (var index = 0; index < rows.Count; index++)
+        {
+            yield return new ComparisonRowWithFinality<TRow>(rows[index], metadata[offset + index]);
+        }
     }
 }

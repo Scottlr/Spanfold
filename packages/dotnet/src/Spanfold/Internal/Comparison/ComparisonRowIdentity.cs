@@ -7,9 +7,10 @@ namespace Spanfold.Internal.Comparison;
 
 internal static class ComparisonRowIdentity
 {
-    internal static string Create(string rowType, object row)
+    internal static string Create(ComparisonRowKind kind, object row)
     {
         ArgumentNullException.ThrowIfNull(row);
+        var rowType = kind.ToArtifactLabel();
         var payload = rowType + "\n" + Describe(row);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return rowType + ":" + Convert.ToHexString(hash).ToLowerInvariant();
