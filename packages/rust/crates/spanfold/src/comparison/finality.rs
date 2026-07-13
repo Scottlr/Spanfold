@@ -23,8 +23,10 @@ pub(super) fn build_row_finalities(
     finalities
 }
 
-pub(super) fn stable_row_id<T: Serialize>(row_type: &str, row: &T) -> String {
-    let payload = serde_json::to_vec(row).unwrap_or_default();
+fn stable_row_id<T: Serialize>(kind: ComparisonRowKind, row: &T) -> String {
+    let row_type = kind.as_str();
+    let payload = serde_json::to_vec(row)
+        .expect("Spanfold comparison row DTOs must remain JSON serializable");
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in row_type.bytes().chain(payload) {
         hash ^= u64::from(byte);
@@ -33,20 +35,14 @@ pub(super) fn stable_row_id<T: Serialize>(row_type: &str, row: &T) -> String {
     format!("{row_type}:{hash:016x}")
 }
 
-pub(crate) fn stable_row_id_for_export<T: Serialize>(row_type: &str, row: &T) -> String {
-    stable_row_id(row_type, row)
-}
-
 pub(super) fn append_gap_finalities(finalities: &mut Vec<ComparisonRowFinality>, rows: &[GapRow]) {
     for row in rows {
-        finalities.push(ComparisonRowFinality {
-            row_type: "gap".to_owned(),
-            row_id: stable_row_id("gap", row),
-            finality: ComparisonFinality::Final,
-            reason: "derived from closed windows".to_owned(),
-            version: 1,
-            supersedes_row_id: None,
-        });
+        push_finality(
+            finalities,
+            ComparisonRowKind::Gap,
+            stable_row_id(ComparisonRowKind::Gap, row),
+            false,
+        );
     }
 }
 
@@ -58,8 +54,8 @@ pub(super) fn append_overlap_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "overlap",
-            stable_row_id("overlap", row),
+            ComparisonRowKind::Overlap,
+            stable_row_id(ComparisonRowKind::Overlap, row),
             row.target_record_ids
                 .iter()
                 .chain(row.against_record_ids.iter())
@@ -76,8 +72,8 @@ pub(super) fn append_residual_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "residual",
-            stable_row_id("residual", row),
+            ComparisonRowKind::Residual,
+            stable_row_id(ComparisonRowKind::Residual, row),
             row.target_record_ids
                 .iter()
                 .any(|id| provisional_record_ids.contains(id)),
@@ -93,8 +89,8 @@ pub(super) fn append_missing_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "missing",
-            stable_row_id("missing", row),
+            ComparisonRowKind::Missing,
+            stable_row_id(ComparisonRowKind::Missing, row),
             row.against_record_ids
                 .iter()
                 .any(|id| provisional_record_ids.contains(id)),
@@ -110,8 +106,8 @@ pub(super) fn append_coverage_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "coverage",
-            stable_row_id("coverage", row),
+            ComparisonRowKind::Coverage,
+            stable_row_id(ComparisonRowKind::Coverage, row),
             row.target_record_ids
                 .iter()
                 .chain(row.against_record_ids.iter())
@@ -128,8 +124,8 @@ pub(super) fn append_symmetric_difference_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "symmetricDifference",
-            stable_row_id("symmetricDifference", row),
+            ComparisonRowKind::SymmetricDifference,
+            stable_row_id(ComparisonRowKind::SymmetricDifference, row),
             row.target_record_ids
                 .iter()
                 .chain(row.against_record_ids.iter())
@@ -146,8 +142,8 @@ pub(super) fn append_containment_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "containment",
-            stable_row_id("containment", row),
+            ComparisonRowKind::Containment,
+            stable_row_id(ComparisonRowKind::Containment, row),
             row.target_record_ids
                 .iter()
                 .chain(row.container_record_ids.iter())
@@ -164,8 +160,8 @@ pub(super) fn append_lead_lag_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "leadLag",
-            stable_row_id("leadLag", row),
+            ComparisonRowKind::LeadLag,
+            stable_row_id(ComparisonRowKind::LeadLag, row),
             provisional_record_ids.contains(&row.target_record_id)
                 || row
                     .comparison_record_id
@@ -183,8 +179,8 @@ pub(super) fn append_as_of_finalities(
     for row in rows {
         push_finality(
             finalities,
-            "asOf",
-            stable_row_id("asOf", row),
+            ComparisonRowKind::AsOf,
+            stable_row_id(ComparisonRowKind::AsOf, row),
             provisional_record_ids.contains(&row.target_record_id)
                 || row
                     .matched_record_id
@@ -196,12 +192,12 @@ pub(super) fn append_as_of_finalities(
 
 pub(super) fn push_finality(
     finalities: &mut Vec<ComparisonRowFinality>,
-    row_type: &str,
+    kind: ComparisonRowKind,
     row_id: String,
     provisional: bool,
 ) {
     finalities.push(ComparisonRowFinality {
-        row_type: row_type.to_owned(),
+        row_type: kind.as_str().to_owned(),
         row_id,
         finality: if provisional {
             ComparisonFinality::Provisional

@@ -159,7 +159,12 @@ pub struct LeadLagSummary {
     pub maximum_delta_magnitude: Option<i64>,
 }
 
-/// Coverage summary for one comparison scope.
+/// Aggregate coverage summary for one window name, key, and partition.
+///
+/// Unlike [`CoverageRow`], which describes one aligned target segment, this
+/// type contains the grouped numerator, denominator, and ratio consumers should
+/// use when reporting overall coverage. The exact integer numerator and
+/// denominator are the authority for aggregate coverage.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CoverageSummary {
     /// Window family.
@@ -186,6 +191,79 @@ pub struct CoverageSummary {
     pub coverage_ratio: f64,
 }
 
+/// Closed family of rows emitted by comparison results.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ComparisonRowKind {
+    /// Overlap rows.
+    Overlap,
+    /// Residual rows.
+    Residual,
+    /// Missing rows.
+    Missing,
+    /// Coverage rows.
+    Coverage,
+    /// Gap rows.
+    Gap,
+    /// Symmetric-difference rows.
+    SymmetricDifference,
+    /// Containment rows.
+    Containment,
+    /// Lead/lag rows.
+    LeadLag,
+    /// As-of rows.
+    AsOf,
+}
+
+impl ComparisonRowKind {
+    /// Returns the canonical comparison-artifact spelling for this row kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Overlap => "overlap",
+            Self::Residual => "residual",
+            Self::Missing => "missing",
+            Self::Coverage => "coverage",
+            Self::Gap => "gap",
+            Self::SymmetricDifference => "symmetricDifference",
+            Self::Containment => "containment",
+            Self::LeadLag => "leadLag",
+            Self::AsOf => "asOf",
+        }
+    }
+}
+
+impl std::fmt::Display for ComparisonRowKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Error returned when a comparison row-kind label is unsupported.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("unsupported comparison row kind '{0}'")]
+pub struct ComparisonRowKindParseError(String);
+
+impl std::str::FromStr for ComparisonRowKind {
+    type Err = ComparisonRowKindParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "overlap" => Ok(Self::Overlap),
+            "residual" => Ok(Self::Residual),
+            "missing" => Ok(Self::Missing),
+            "coverage" => Ok(Self::Coverage),
+            "gap" => Ok(Self::Gap),
+            "symmetricDifference" | "symmetric-difference" => Ok(Self::SymmetricDifference),
+            "containment" => Ok(Self::Containment),
+            "leadLag" | "lead-lag" => Ok(Self::LeadLag),
+            "asOf" | "asof" => Ok(Self::AsOf),
+            _ => Err(ComparisonRowKindParseError(value.to_owned())),
+        }
+    }
+}
+
 /// Finality state for an emitted row.
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -203,10 +281,14 @@ pub enum ComparisonFinality {
 /// Finality metadata for a materialized row.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ComparisonRowFinality {
-    /// Exported row family.
+    /// Canonical exported row family.
     #[serde(rename = "rowType")]
     pub row_type: String,
-    /// Deterministic row identifier.
+    /// Opaque deterministic identifier assigned by the producing Rust result.
+    ///
+    /// Consumers should preserve this value rather than recomputing it. The
+    /// current scheme is scoped to the Rust artifact/schema contract and is
+    /// not promised to be permanent or identical to .NET identifiers.
     #[serde(rename = "rowId")]
     pub row_id: String,
     /// Finality state.
@@ -218,6 +300,48 @@ pub struct ComparisonRowFinality {
     /// Superseded row identifier, when any.
     #[serde(rename = "supersedesRowId")]
     pub supersedes_row_id: Option<String>,
+}
+
+impl ComparisonRowFinality {
+    /// Returns the typed row kind represented by this metadata.
+    ///
+    /// Canonical artifact spellings and the three Rust 0.1.0 JSON Lines aliases
+    /// are accepted.
+    pub fn row_kind(&self) -> Result<ComparisonRowKind, ComparisonRowKindParseError> {
+        self.row_type.parse()
+    }
+}
+
+/// Borrowed association between a typed comparison row and its result metadata.
+#[derive(Clone, Copy, Debug)]
+pub struct ComparisonRowWithFinality<'a, R> {
+    /// Typed row emitted by the comparison.
+    pub row: &'a R,
+    /// Authoritative identity and finality produced for the row.
+    pub metadata: &'a ComparisonRowFinality,
+}
+
+/// Error returned when result rows and finality metadata do not share the
+/// canonical count/kind layout.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error(
+    "inconsistent {family:?} row metadata at index {metadata_index}: expected \
+     {expected_count} {expected_kind:?} records, found {actual_count}; actual \
+     kind: {actual_kind:?}"
+)]
+pub struct ComparisonRowMetadataError {
+    /// Row family being validated.
+    pub family: ComparisonRowKind,
+    /// Absolute index in `ComparisonResult::row_finalities` where validation failed.
+    pub metadata_index: usize,
+    /// Number of metadata records expected for the family.
+    pub expected_count: usize,
+    /// Number of metadata records observed in the family's layout span.
+    pub actual_count: usize,
+    /// Row kind expected at the failing metadata index.
+    pub expected_kind: ComparisonRowKind,
+    /// Raw row-kind label found at the index, or `None` when metadata is absent.
+    pub actual_kind: Option<String>,
 }
 
 /// As-of lookup direction.
@@ -300,7 +424,11 @@ pub struct MissingRow {
     pub against_record_ids: Vec<String>,
 }
 
-/// Coverage row.
+/// Coverage for one aligned target-active segment.
+///
+/// A segment is normally either wholly covered or wholly uncovered, so
+/// `covered_magnitude` is normally either zero or `target_magnitude`. Use
+/// [`CoverageSummary`] rather than per-row ratios for grouped overall coverage.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CoverageRow {
     /// Window family.
@@ -459,7 +587,7 @@ pub struct AsOfRow {
     pub matched_record_id: Option<String>,
 }
 
-/// Comparator row collections.
+/// Canonical comparator row collections used for storage and serialization.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ComparisonRows {
     /// Overlap rows.
@@ -531,6 +659,16 @@ impl RowAccumulator {
 }
 
 /// Structured comparison result.
+///
+/// [`Self::rows`] is the canonical grouped row storage. For genuine,
+/// unmodified Spanfold results, [`Self::row_finalities`] is partitioned in the
+/// same family order and remains parallel to row order within each family.
+/// The typed `*_rows_with_finality` views validate detectable count and kind
+/// corruption before exposing that association.
+///
+/// Independently replacing or reordering the public row or metadata fields is
+/// unsupported. Validation deliberately does not rehash rows, so it cannot
+/// detect metadata reordered within the same family.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ComparisonResult {
     /// Result schema.
@@ -567,42 +705,326 @@ pub struct ComparisonResult {
     /// Coverage summaries.
     #[serde(rename = "coverageSummaries")]
     pub coverage_summaries: Vec<CoverageSummary>,
-    /// Result rows grouped by family.
+    /// Canonical result rows grouped by family.
     pub rows: ComparisonRows,
-    /// Overlap rows.
+    /// Zero-copy overlap-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub overlap_rows: Arc<Vec<OverlapRow>>,
-    /// Residual rows.
+    /// Zero-copy residual-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub residual_rows: Arc<Vec<ResidualRow>>,
-    /// Missing rows.
+    /// Zero-copy missing-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub missing_rows: Arc<Vec<MissingRow>>,
-    /// Coverage rows.
+    /// Zero-copy coverage-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub coverage_rows: Arc<Vec<CoverageRow>>,
-    /// Gap rows.
+    /// Zero-copy gap-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub gap_rows: Arc<Vec<GapRow>>,
-    /// Symmetric-difference rows.
+    /// Zero-copy symmetric-difference-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub symmetric_difference_rows: Arc<Vec<SymmetricDifferenceRow>>,
-    /// Containment rows.
+    /// Zero-copy containment-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub containment_rows: Arc<Vec<ContainmentRow>>,
-    /// Lead/lag rows.
+    /// Zero-copy lead/lag-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub lead_lag_rows: Arc<Vec<LeadLagRow>>,
     /// Lead/lag summaries.
     #[serde(skip)]
     pub lead_lag_summaries: Vec<LeadLagSummary>,
-    /// As-of rows.
+    /// Zero-copy as-of-row compatibility view. Prefer [`Self::rows`].
     #[serde(skip)]
     pub as_of_rows: Arc<Vec<AsOfRow>>,
-    /// Row finality metadata.
+    /// Authoritative row identity and finality metadata in canonical family
+    /// and row order.
     #[serde(rename = "rowFinalities")]
     pub row_finalities: Vec<ComparisonRowFinality>,
     /// Serializable extension metadata.
     #[serde(rename = "extensionMetadata")]
     pub extension_metadata: Vec<ComparisonExtensionMetadata>,
+}
+
+impl ComparisonResult {
+    /// Returns overlap rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn overlap_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, OverlapRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::Overlap,
+            self.rows.overlap.as_slice(),
+        )
+    }
+
+    /// Returns residual rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn residual_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, ResidualRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::Residual,
+            self.rows.residual.as_slice(),
+        )
+    }
+
+    /// Returns missing rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn missing_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, MissingRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::Missing,
+            self.rows.missing.as_slice(),
+        )
+    }
+
+    /// Returns coverage rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn coverage_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, CoverageRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::Coverage,
+            self.rows.coverage.as_slice(),
+        )
+    }
+
+    /// Returns gap rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn gap_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, GapRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(self, ComparisonRowKind::Gap, self.rows.gap.as_slice())
+    }
+
+    /// Returns symmetric-difference rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn symmetric_difference_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, SymmetricDifferenceRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::SymmetricDifference,
+            self.rows.symmetric_difference.as_slice(),
+        )
+    }
+
+    /// Returns containment rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn containment_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, ContainmentRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::Containment,
+            self.rows.containment.as_slice(),
+        )
+    }
+
+    /// Returns lead/lag rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn lead_lag_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, LeadLagRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::LeadLag,
+            self.rows.lead_lag.as_slice(),
+        )
+    }
+
+    /// Returns as-of rows paired with their authoritative result metadata.
+    ///
+    /// Returns an error if the result's metadata count/kind layout is inconsistent.
+    pub fn as_of_rows_with_finality(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, AsOfRow>>,
+        ComparisonRowMetadataError,
+    > {
+        row_finality_pairs(self, ComparisonRowKind::AsOf, self.rows.as_of.as_slice())
+    }
+
+    fn row_family_layouts(&self) -> [(ComparisonRowKind, usize); 9] {
+        [
+            (ComparisonRowKind::Overlap, self.rows.overlap.len()),
+            (ComparisonRowKind::Residual, self.rows.residual.len()),
+            (ComparisonRowKind::Missing, self.rows.missing.len()),
+            (ComparisonRowKind::Coverage, self.rows.coverage.len()),
+            (ComparisonRowKind::Gap, self.rows.gap.len()),
+            (
+                ComparisonRowKind::SymmetricDifference,
+                self.rows.symmetric_difference.len(),
+            ),
+            (ComparisonRowKind::Containment, self.rows.containment.len()),
+            (ComparisonRowKind::LeadLag, self.rows.lead_lag.len()),
+            (ComparisonRowKind::AsOf, self.rows.as_of.len()),
+        ]
+    }
+
+    fn row_family_bounds(&self, kind: ComparisonRowKind) -> (usize, usize) {
+        let mut start = 0;
+        for (candidate, count) in self.row_family_layouts() {
+            if candidate == kind {
+                return (start, count);
+            }
+            start += count;
+        }
+        unreachable!("all comparison row kinds have a canonical layout")
+    }
+
+    fn validate_row_metadata_layout(&self) -> Result<(), ComparisonRowMetadataError> {
+        let layouts = self.row_family_layouts();
+        let expected_total = layouts.iter().map(|(_, count)| count).sum::<usize>();
+        let actual_total = self.row_finalities.len();
+
+        let mut start = 0;
+        for (kind, count) in layouts {
+            let end = start + count;
+            let available_end = end.min(actual_total);
+            let metadata = &self.row_finalities[start.min(actual_total)..available_end];
+            if let Some((relative_index, actual)) = metadata
+                .iter()
+                .enumerate()
+                .find(|(_, item)| item.row_kind().ok() != Some(kind))
+            {
+                return Err(ComparisonRowMetadataError {
+                    family: kind,
+                    metadata_index: start + relative_index,
+                    expected_count: count,
+                    actual_count: metadata
+                        .iter()
+                        .filter(|item| item.row_kind().ok() == Some(kind))
+                        .count(),
+                    expected_kind: kind,
+                    actual_kind: Some(actual.row_type.clone()),
+                });
+            }
+
+            if available_end < end {
+                return Err(ComparisonRowMetadataError {
+                    family: kind,
+                    metadata_index: available_end,
+                    expected_count: count,
+                    actual_count: available_end.saturating_sub(start),
+                    expected_kind: kind,
+                    actual_kind: None,
+                });
+            }
+            start = end;
+        }
+
+        if actual_total > expected_total {
+            let (family, expected_count) = layouts[layouts.len() - 1];
+            let family_start = expected_total - expected_count;
+            return Err(ComparisonRowMetadataError {
+                family,
+                metadata_index: expected_total,
+                expected_count,
+                actual_count: actual_total - family_start,
+                expected_kind: family,
+                actual_kind: self
+                    .row_finalities
+                    .get(expected_total)
+                    .map(|metadata| metadata.row_type.clone()),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+fn row_finality_pairs<'a, R>(
+    result: &'a ComparisonResult,
+    kind: ComparisonRowKind,
+    rows: &'a [R],
+) -> Result<
+    impl ExactSizeIterator<Item = ComparisonRowWithFinality<'a, R>> + 'a,
+    ComparisonRowMetadataError,
+> {
+    result.validate_row_metadata_layout()?;
+    let (start, count) = result.row_family_bounds(kind);
+    debug_assert_eq!(rows.len(), count);
+    let metadata = &result.row_finalities[start..start + count];
+    Ok(rows
+        .iter()
+        .zip(metadata)
+        .map(|(row, metadata)| ComparisonRowWithFinality { row, metadata }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ComparisonRowKind;
+
+    #[test]
+    fn row_kinds_parse_canonical_labels_and_rust_0_1_0_aliases() {
+        let cases = [
+            ("overlap", ComparisonRowKind::Overlap, "overlap"),
+            ("residual", ComparisonRowKind::Residual, "residual"),
+            ("missing", ComparisonRowKind::Missing, "missing"),
+            ("coverage", ComparisonRowKind::Coverage, "coverage"),
+            ("gap", ComparisonRowKind::Gap, "gap"),
+            (
+                "symmetricDifference",
+                ComparisonRowKind::SymmetricDifference,
+                "symmetricDifference",
+            ),
+            (
+                "symmetric-difference",
+                ComparisonRowKind::SymmetricDifference,
+                "symmetricDifference",
+            ),
+            ("containment", ComparisonRowKind::Containment, "containment"),
+            ("leadLag", ComparisonRowKind::LeadLag, "leadLag"),
+            ("lead-lag", ComparisonRowKind::LeadLag, "leadLag"),
+            ("asOf", ComparisonRowKind::AsOf, "asOf"),
+            ("asof", ComparisonRowKind::AsOf, "asOf"),
+        ];
+
+        for (label, expected_kind, canonical_label) in cases {
+            let kind = label.parse::<ComparisonRowKind>().expect("known row kind");
+            assert_eq!(kind, expected_kind, "label {label}");
+            assert_eq!(kind.as_str(), canonical_label, "label {label}");
+        }
+
+        assert!("lead_lag".parse::<ComparisonRowKind>().is_err());
+    }
 }

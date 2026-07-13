@@ -1,8 +1,8 @@
 [package]
 name = "spanfold-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Command-line fixture, import, comparison, and audit workflows for Spanfold."
-readme = "../../README.md"
+readme = "README.md"
 publish = ["crates-io"]
 keywords = ["temporal", "interval", "comparison", "cli"]
 categories = ["command-line-utilities", "data-structures"]
@@ -23,7 +23,7 @@ clap.workspace = true
 csv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-spanfold = { version = "0.1.0", path = "../spanfold" }
+spanfold = { version = "0.1.1", path = "../spanfold" }
 
 [dev-dependencies]
 assert_cmd = "2.1.1"
