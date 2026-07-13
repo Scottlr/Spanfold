@@ -19,7 +19,6 @@ pub use rows::*;
 mod comparators;
 use comparators::*;
 mod finality;
-pub(crate) use finality::stable_row_id_for_export;
 use finality::*;
 
 /// Comparator family supported by the Rust implementation.
@@ -2907,6 +2906,27 @@ mod tests {
         assert_eq!(result.overlap_rows[0].range.end, 5);
         assert_eq!(result.residual_rows[0].range.start, 1);
         assert_eq!(result.residual_rows[0].range.end, 3);
+    }
+
+    #[test]
+    fn coverage_rows_are_segments_and_summary_is_the_grouped_ratio() {
+        let fixture = ContractFixture::parse_json(include_str!(
+            "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/basic-overlap.json"
+        ))
+        .expect("fixture should parse");
+        let result = compare(fixture.history(), fixture.plan());
+
+        assert_eq!(result.rows.coverage.len(), 2);
+        assert_eq!(result.rows.coverage[0].target_magnitude, 2);
+        assert_eq!(result.rows.coverage[0].covered_magnitude, 0);
+        assert_eq!(result.rows.coverage[1].target_magnitude, 2);
+        assert_eq!(result.rows.coverage[1].covered_magnitude, 2);
+
+        assert_eq!(result.coverage_summaries.len(), 1);
+        let summary = &result.coverage_summaries[0];
+        assert_eq!(summary.target_magnitude_exact, 4);
+        assert_eq!(summary.covered_magnitude_exact, 2);
+        assert_eq!(summary.coverage_ratio, 0.5);
     }
 
     #[test]

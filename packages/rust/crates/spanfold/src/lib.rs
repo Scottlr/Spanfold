@@ -53,13 +53,14 @@ pub use comparison::{
     AsOfRow, CohortActivity, Comparator, ComparatorParseError, ComparatorSummary,
     ComparisonDiagnostic, ComparisonDuplicateWindowPolicy, ComparisonFinality,
     ComparisonNormalizationPolicy, ComparisonNullTimestampPolicy, ComparisonOutputOptions,
-    ComparisonPlan, ComparisonResult, ComparisonRowFinality, ComparisonRows, ComparisonScope,
-    ComparisonSelector, ComparisonSelectorError, ComparisonSide, ContainmentRow, ContainmentStatus,
-    CoverageRow, CoverageSummary, DiagnosticSeverity, ExcludedWindowRecord, GapRow,
-    LeadLagDirection, LeadLagRow, LeadLagSummary, LeadLagTransition, MissingRow,
-    NormalizedWindowRecord, OpenWindowPolicy, OverlapRow, PreparedComparison, ResidualRow,
-    RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact, WindowFilter, align, compare,
-    compare_live, prepare, prepare_live,
+    ComparisonPlan, ComparisonResult, ComparisonRowFinality, ComparisonRowKind,
+    ComparisonRowKindParseError, ComparisonRowMetadataError, ComparisonRowWithFinality,
+    ComparisonRows, ComparisonScope, ComparisonSelector, ComparisonSelectorError, ComparisonSide,
+    ContainmentRow, ContainmentStatus, CoverageRow, CoverageSummary, DiagnosticSeverity,
+    ExcludedWindowRecord, GapRow, LeadLagDirection, LeadLagRow, LeadLagSummary, LeadLagTransition,
+    MissingRow, NormalizedWindowRecord, OpenWindowPolicy, OverlapRow, PreparedComparison,
+    ResidualRow, RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact, WindowFilter, align,
+    compare, compare_live, prepare, prepare_live,
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
