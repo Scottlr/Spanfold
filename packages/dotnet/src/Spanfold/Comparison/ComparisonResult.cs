@@ -8,7 +8,9 @@ namespace Spanfold;
 /// materialized so consumers can inspect the result deterministically without
 /// re-running comparison logic. Rows keep stable row positions and source
 /// record IDs so a result can be exported, explained, and reviewed without a
-/// debugger.
+/// debugger. RowFinalities are emitted in the same canonical family order as
+/// the nine typed row collections; the `*RowsWithFinality` query views validate
+/// that detectable count and family-kind invariant before pairing entries.
 /// </remarks>
 public sealed class ComparisonResult
 {
@@ -188,6 +190,13 @@ public sealed class ComparisonResult
     /// <summary>
     /// Gets finality metadata for emitted result rows.
     /// </summary>
+    /// <remarks>
+    /// For results produced by Spanfold, entries are ordered by the nine row
+    /// families: overlap, residual, missing, coverage, gap,
+    /// symmetric-difference, containment, lead/lag, and as-of. Use the typed
+    /// `*RowsWithFinality` views to consume this association without relying on
+    /// ordinal indexes.
+    /// </remarks>
     public IReadOnlyList<ComparisonRowFinality> RowFinalities { get; }
 
     /// <summary>

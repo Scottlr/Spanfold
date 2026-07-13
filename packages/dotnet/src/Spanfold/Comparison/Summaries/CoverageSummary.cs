@@ -3,6 +3,11 @@ namespace Spanfold;
 /// <summary>
 /// Summarizes target coverage within one comparison scope.
 /// </summary>
+/// <remarks>
+/// The exact numerator and denominator are the authority for aggregate
+/// coverage. Consumers should not average individual <see cref="CoverageRow" />
+/// segment ratios to derive this value.
+/// </remarks>
 public sealed record CoverageSummary(
     string WindowName,
     object Key,

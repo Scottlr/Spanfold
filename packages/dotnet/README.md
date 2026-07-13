@@ -106,6 +106,25 @@ foreach (var row in result.ResidualRows) // Inspect target-only rows.
 }
 ```
 
+When a consumer needs to persist or project evidence, use the result-owned
+typed row/finality views instead of creating ordinal IDs or recomputing the
+private identity hash:
+
+```csharp
+foreach (var entry in result.ResidualRowsWithFinality())
+{
+    Console.WriteLine($"{entry.Metadata.RowId} {entry.Metadata.Finality}: {entry.Row.Range.Start}..{entry.Row.Range.End}");
+}
+```
+
+Equivalent views are available for overlap, missing, coverage, gap,
+symmetric-difference, containment, lead/lag, and as-of rows. The row ID is an
+opaque identifier owned by the producing C# result and should be preserved as
+provided; it is not currently promised to match Rust IDs or remain unchanged
+across identity-scheme revisions. `CoverageRow` describes one aligned target
+segment, while `CoverageSummaries` is the authority for grouped aggregate
+coverage.
+
 The result is structured data:
 
 - diagnostics

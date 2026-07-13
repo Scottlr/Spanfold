@@ -391,7 +391,40 @@
     "leadLag": [],
     "asOf": []
   },
-  "rowFinalities": [],
+  "rowFinalities": [
+    {
+      "rowType": "overlap",
+      "rowId": "overlap[0]",
+      "finality": "Final",
+      "reason": "closed",
+      "version": 1,
+      "supersedesRowId": null
+    },
+    {
+      "rowType": "residual",
+      "rowId": "residual[0]",
+      "finality": "Final",
+      "reason": "closed",
+      "version": 1,
+      "supersedesRowId": null
+    },
+    {
+      "rowType": "coverage",
+      "rowId": "coverage[0]",
+      "finality": "Final",
+      "reason": "closed",
+      "version": 1,
+      "supersedesRowId": null
+    },
+    {
+      "rowType": "coverage",
+      "rowId": "coverage[1]",
+      "finality": "Final",
+      "reason": "closed",
+      "version": 1,
+      "supersedesRowId": null
+    }
+  ],
   "extensionMetadata": [],
   "coverageSummaries": [
     {
@@ -455,11 +488,15 @@
 - lead lag rows: 0
 - lead lag summaries: 0
 - as of rows: 0
-- row finalities: 0
+- row finalities: 4
 - extension metadata: 0
 - summary[0]: overlap rows=1
 - summary[1]: residual rows=1
 - summary[2]: coverage rows=2
+- finality[0]: overlap[0]=Final; reason=closed
+- finality[1]: residual[0]=Final; reason=closed
+- finality[2]: coverage[0]=Final; reason=closed
+- finality[3]: coverage[1]=Final; reason=closed
 - overlap[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:3, pos:5\) endStatus=Closed; target=\[<record-id:1>\]; against=\[<record-id:2>\]
 - residual[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:1, pos:3\) endStatus=Closed; target=\[<record-id:1>\]
 - coverage[0]: window=DeviceOffline; key=System.String:device-1; partition=<null>; range=\[pos:1, pos:3\) endStatus=Closed; targetMagnitude=2; coveredMagnitude=0; target=\[<record-id:1>\]; against=\[\]

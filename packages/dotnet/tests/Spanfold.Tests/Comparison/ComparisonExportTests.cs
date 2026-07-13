@@ -120,6 +120,181 @@ public sealed class ComparisonExportTests
     }
 
     [Fact]
+    public void TypedRowsUseTheStoredResultMetadataAssociation()
+    {
+        var result = CreateResultWithFinality([
+            new ComparisonRowFinality("overlap", "overlap:stored", ComparisonFinality.Provisional, "live", 3, "overlap:prior")
+        ]);
+
+        var entry = Assert.Single(result.OverlapRowsWithFinality());
+
+        Assert.Same(result.OverlapRows[0], entry.Row);
+        Assert.Equal("overlap:stored", entry.Metadata.RowId);
+        Assert.Equal(ComparisonFinality.Provisional, entry.Metadata.Finality);
+        Assert.Equal(3, entry.Metadata.Version);
+        Assert.Equal("overlap:prior", entry.Metadata.SupersedesRowId);
+    }
+
+    [Fact]
+    public void ResultExportsPreserveStoredIdentityAndFullJsonLinesFinality()
+    {
+        var result = CreateResultWithFinality([
+            new ComparisonRowFinality("overlap", "overlap:stored", ComparisonFinality.Provisional, "live", 3, "overlap:prior")
+        ]);
+
+        using var json = JsonDocument.Parse(result.ExportJson());
+        var jsonRow = json.RootElement.GetProperty("rows").GetProperty("overlap")[0];
+        Assert.Equal("overlap:stored", jsonRow.GetProperty("rowId").GetString());
+        Assert.Equal("Provisional", jsonRow.GetProperty("finality").GetString());
+
+        var lines = result.ExportJsonLines().ToArray();
+        using var jsonLine = JsonDocument.Parse(lines[1]);
+        Assert.Equal("overlap:stored", jsonLine.RootElement.GetProperty("rowId").GetString());
+        Assert.Equal("Provisional", jsonLine.RootElement.GetProperty("finality").GetString());
+        Assert.Equal("live", jsonLine.RootElement.GetProperty("reason").GetString());
+        Assert.Equal(3, jsonLine.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal("overlap:prior", jsonLine.RootElement.GetProperty("supersedesRowId").GetString());
+
+        using var llm = JsonDocument.Parse(result.ExportLlmContext());
+        var llmRow = llm.RootElement.GetProperty("rowDocuments")[1];
+        Assert.Equal("overlap:stored", llmRow.GetProperty("rowId").GetString());
+        Assert.Equal("Provisional", llmRow.GetProperty("finality").GetString());
+        Assert.Equal("live", llmRow.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public void TypedViewsAndExportsFailClosedOnMetadataLayoutCorruption()
+    {
+        var missing = CreateResultWithFinality([]);
+        var missingException = Assert.Throws<ComparisonRowMetadataException>(
+            () => missing.OverlapRowsWithFinality().ToArray());
+
+        Assert.Equal(ComparisonRowKind.Overlap, missingException.Family);
+        Assert.Equal(0, missingException.MetadataIndex);
+        Assert.Equal(1, missingException.ExpectedCount);
+        Assert.Equal(0, missingException.ActualCount);
+        Assert.Null(missingException.ActualKind);
+        Assert.Throws<ComparisonRowMetadataException>(() => missing.ExportJson());
+
+        var wrongKind = CreateResultWithFinality([
+            new ComparisonRowFinality("residual", "residual:wrong", ComparisonFinality.Final, "closed")
+        ]);
+        var wrongKindException = Assert.Throws<ComparisonRowMetadataException>(
+            () => wrongKind.ExportJsonLines().ToArray());
+
+        Assert.Equal(ComparisonRowKind.Overlap, wrongKindException.Family);
+        Assert.Equal(0, wrongKindException.MetadataIndex);
+        Assert.Equal("residual", wrongKindException.ActualKind);
+
+        var nullMetadata = CreateResultWithFinality([null!]);
+        var nullMetadataException = Assert.Throws<ComparisonRowMetadataException>(
+            () => nullMetadata.OverlapRowsWithFinality().ToArray());
+
+        Assert.Equal(0, nullMetadataException.MetadataIndex);
+        Assert.Null(nullMetadataException.ActualKind);
+    }
+
+    [Fact]
+    public void RowKindsParseCanonicalLabelsAndRustJsonLinesAliases()
+    {
+        var cases = new Dictionary<string, ComparisonRowKind>
+        {
+            ["overlap"] = ComparisonRowKind.Overlap,
+            ["residual"] = ComparisonRowKind.Residual,
+            ["missing"] = ComparisonRowKind.Missing,
+            ["coverage"] = ComparisonRowKind.Coverage,
+            ["gap"] = ComparisonRowKind.Gap,
+            ["symmetricDifference"] = ComparisonRowKind.SymmetricDifference,
+            ["symmetric-difference"] = ComparisonRowKind.SymmetricDifference,
+            ["containment"] = ComparisonRowKind.Containment,
+            ["leadLag"] = ComparisonRowKind.LeadLag,
+            ["lead-lag"] = ComparisonRowKind.LeadLag,
+            ["asOf"] = ComparisonRowKind.AsOf,
+            ["asof"] = ComparisonRowKind.AsOf
+        };
+
+        foreach (var (label, expected) in cases)
+        {
+            Assert.True(ComparisonRowKindExtensions.TryParseArtifactLabel(label, out var actual));
+            Assert.Equal(expected, actual);
+            Assert.Equal(label is "symmetric-difference" ? "symmetricDifference"
+                : label is "lead-lag" ? "leadLag"
+                : label is "asof" ? "asOf"
+                : label, actual.ToArtifactLabel());
+        }
+
+        Assert.False(ComparisonRowKindExtensions.TryParseArtifactLabel("lead_lag", out _));
+    }
+
+    [Fact]
+    public void AllTypedFamiliesShareAuthoritativeMetadataAcrossExports()
+    {
+        var result = CreateAllFamilyResult();
+
+        Assert.NotEmpty(result.OverlapRowsWithFinality());
+        Assert.NotEmpty(result.ResidualRowsWithFinality());
+        Assert.NotEmpty(result.MissingRowsWithFinality());
+        Assert.NotEmpty(result.CoverageRowsWithFinality());
+        Assert.NotEmpty(result.GapRowsWithFinality());
+        Assert.NotEmpty(result.SymmetricDifferenceRowsWithFinality());
+        Assert.NotEmpty(result.ContainmentRowsWithFinality());
+        Assert.NotEmpty(result.LeadLagRowsWithFinality());
+        Assert.NotEmpty(result.AsOfRowsWithFinality());
+
+        var expected = result.RowFinalities
+            .Select(static metadata => (metadata.RowType, metadata.RowId, metadata.Finality.ToString()))
+            .ToArray();
+        var kinds = new[]
+        {
+            ComparisonRowKind.Overlap,
+            ComparisonRowKind.Residual,
+            ComparisonRowKind.Missing,
+            ComparisonRowKind.Coverage,
+            ComparisonRowKind.Gap,
+            ComparisonRowKind.SymmetricDifference,
+            ComparisonRowKind.Containment,
+            ComparisonRowKind.LeadLag,
+            ComparisonRowKind.AsOf
+        };
+
+        using var json = JsonDocument.Parse(result.ExportJson());
+        var jsonAssociations = new List<(string, string, string)>();
+        foreach (var kind in kinds)
+        {
+            foreach (var row in json.RootElement.GetProperty("rows").GetProperty(kind.ToArtifactLabel()).EnumerateArray())
+            {
+                jsonAssociations.Add((
+                    kind.ToArtifactLabel(),
+                    row.GetProperty("rowId").GetString()!,
+                    row.GetProperty("finality").GetString()!));
+            }
+        }
+
+        Assert.Equal(expected, jsonAssociations);
+
+        var jsonLineAssociations = result.ExportJsonLines()
+            .Skip(1)
+            .Select(static line => JsonDocument.Parse(line).RootElement)
+            .Select(static row => (
+                row.GetProperty("rowType").GetString()!,
+                row.GetProperty("rowId").GetString()!,
+                row.GetProperty("finality").GetString()!))
+            .ToArray();
+        Assert.Equal(expected, jsonLineAssociations);
+
+        using var llm = JsonDocument.Parse(result.ExportLlmContext());
+        var llmAssociations = llm.RootElement.GetProperty("rowDocuments")
+            .EnumerateArray()
+            .Skip(1)
+            .Select(static row => (
+                row.GetProperty("rowType").GetString()!,
+                row.GetProperty("rowId").GetString()!,
+                row.GetProperty("finality").GetString()!))
+            .ToArray();
+        Assert.Equal(expected, llmAssociations);
+    }
+
+    [Fact]
     public void ResultDebugHtmlExportProducesStableVisualDocument()
     {
         var result = CreateResult();
@@ -222,6 +397,39 @@ public sealed class ComparisonExportTests
 
     private static ComparisonResult CreateResult(params ComparisonPlanDiagnostic[] diagnostics)
     {
+        return CreateResultWithFinality(null, diagnostics);
+    }
+
+    private static ComparisonResult CreateAllFamilyResult()
+    {
+        var history = new WindowHistoryFixtureBuilder()
+            .AddClosedWindow("DeviceOffline", "device-1", 1, 5, window => window.Source("provider-a"))
+            .AddClosedWindow("DeviceOffline", "device-1", 9, 11, window => window.Source("provider-a"))
+            .AddClosedWindow("DeviceOffline", "device-1", 3, 7, window => window.Source("provider-b"))
+            .AddClosedWindow("DeviceOffline", "device-1", 12, 13, window => window.Source("provider-b"))
+            .Build();
+
+        return history.Compare("All row families")
+            .Target("provider-a", selector => selector.Source("provider-a"))
+            .Against("provider-b", selector => selector.Source("provider-b"))
+            .Within(scope => scope.Window("DeviceOffline"))
+            .Using(comparators => comparators
+                .Overlap()
+                .Residual()
+                .Missing()
+                .Coverage()
+                .Gap()
+                .SymmetricDifference()
+                .Containment()
+                .LeadLag(LeadLagTransition.Start, TemporalAxis.ProcessingPosition, 100)
+                .AsOf(AsOfDirection.Previous, TemporalAxis.ProcessingPosition, 100))
+            .Run();
+    }
+
+    private static ComparisonResult CreateResultWithFinality(
+        IReadOnlyList<ComparisonRowFinality>? rowFinalities,
+        params ComparisonPlanDiagnostic[] diagnostics)
+    {
         var target = new ClosedWindow("DeviceOffline", "device-1", StartPosition: 1, EndPosition: 5, Source: "provider-a");
         var against = new ClosedWindow("DeviceOffline", "device-1", StartPosition: 3, EndPosition: 7, Source: "provider-b");
         var plan = CreatePlan();
@@ -267,6 +475,10 @@ public sealed class ComparisonExportTests
                     overlap.Range,
                     overlap.TargetRecordIds,
                     overlap.AgainstRecordIds)
+            ],
+            rowFinalities: rowFinalities ??
+            [
+                new ComparisonRowFinality("overlap", "overlap:stored", ComparisonFinality.Final, "closed")
             ]);
     }
 }
