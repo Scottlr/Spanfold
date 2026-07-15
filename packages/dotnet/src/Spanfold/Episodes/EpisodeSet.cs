@@ -10,11 +10,13 @@ public sealed record EpisodeSet
     internal EpisodeSet(
         EpisodeFormationPlan plan,
         IReadOnlyList<Episode> episodes,
+        EpisodeSetSummary summary,
         TemporalPoint? evaluationHorizon,
         IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         Plan = plan;
         Episodes = Array.AsReadOnly(episodes.ToArray());
+        Summary = summary;
         EvaluationHorizon = evaluationHorizon;
         KeyComparers = CopyComparers(keyComparers);
     }
@@ -27,6 +29,9 @@ public sealed record EpisodeSet
 
     /// <summary>Gets the deterministically ordered episodes.</summary>
     public IReadOnlyList<Episode> Episodes { get; }
+
+    /// <summary>Gets the materialized occurrence and magnitude summary.</summary>
+    public EpisodeSetSummary Summary { get; }
 
     /// <summary>Gets the live or known-at evaluation horizon, when present.</summary>
     public TemporalPoint? EvaluationHorizon { get; }
