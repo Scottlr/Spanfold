@@ -1,6 +1,6 @@
 using Spanfold.Internal.Comparison;
 
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Builds a staged comparison over recorded window history.
@@ -19,7 +19,6 @@ public sealed class WindowComparisonBuilder
     private ComparisonSelector? target;
     private ComparisonScope? scope;
     private ComparisonNormalizationPolicy normalization;
-    private ComparisonOutputOptions output;
     private bool isStrict;
 
     internal WindowComparisonBuilder(WindowHistory history, string name)
@@ -29,7 +28,6 @@ public sealed class WindowComparisonBuilder
         this.against = [];
         this.comparators = [];
         this.normalization = ComparisonNormalizationPolicy.Default;
-        this.output = ComparisonOutputOptions.Default;
     }
 
     /// <summary>
@@ -124,19 +122,6 @@ public sealed class WindowComparisonBuilder
     }
 
     /// <summary>
-    /// Configures which prepared and aligned artifacts are retained in exported output.
-    /// </summary>
-    /// <param name="options">The output preferences.</param>
-    /// <returns>This builder.</returns>
-    public WindowComparisonBuilder Output(ComparisonOutputOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-
-        this.output = options;
-        return this;
-    }
-
-    /// <summary>
     /// Adds comparator declarations.
     /// </summary>
     /// <param name="configure">The comparator configuration.</param>
@@ -179,7 +164,6 @@ public sealed class WindowComparisonBuilder
             this.scope,
             this.normalization,
             this.comparators,
-            this.output,
             this.isStrict);
     }
 
@@ -234,44 +218,6 @@ public sealed class WindowComparisonBuilder
     }
 
     /// <summary>
-    /// Runs the current plan and optionally writes a debug HTML artifact.
-    /// </summary>
-    /// <remarks>
-    /// Use this overload when application configuration controls whether live
-    /// or historical comparison runs should emit a visual debug file.
-    /// </remarks>
-    /// <param name="debugHtml">The optional debug HTML export configuration.</param>
-    /// <returns>A comparison result for the current plan.</returns>
-    public ComparisonResult Run(ComparisonDebugHtmlOptions debugHtml)
-    {
-        ArgumentNullException.ThrowIfNull(debugHtml);
-
-        var result = Run();
-        debugHtml.ExportIfEnabled(result);
-
-        return result;
-    }
-
-    /// <summary>
-    /// Runs the current plan and optionally writes an LLM context artifact.
-    /// </summary>
-    /// <remarks>
-    /// Use this overload when application configuration controls whether live
-    /// or historical comparison runs should emit agent-readable context JSON.
-    /// </remarks>
-    /// <param name="llmContext">The optional LLM context export configuration.</param>
-    /// <returns>A comparison result for the current plan.</returns>
-    public ComparisonResult Run(ComparisonLlmContextOptions llmContext)
-    {
-        ArgumentNullException.ThrowIfNull(llmContext);
-
-        var result = Run();
-        llmContext.ExportIfEnabled(result);
-
-        return result;
-    }
-
-    /// <summary>
     /// Runs the current plan as a live snapshot at an evaluation horizon.
     /// </summary>
     /// <remarks>
@@ -284,51 +230,6 @@ public sealed class WindowComparisonBuilder
     public ComparisonResult RunLive(TemporalPoint evaluationHorizon)
     {
         return ComparisonRuntime.Run(PrepareLive(evaluationHorizon));
-    }
-
-    /// <summary>
-    /// Runs the current plan as a live snapshot and optionally writes a debug HTML artifact.
-    /// </summary>
-    /// <remarks>
-    /// Debug export is useful for incident inspection because live rows may be
-    /// provisional while the final source windows are still open.
-    /// </remarks>
-    /// <param name="evaluationHorizon">The exclusive horizon used to evaluate open windows.</param>
-    /// <param name="debugHtml">The optional debug HTML export configuration.</param>
-    /// <returns>A comparison result with evaluation-horizon and row-finality metadata.</returns>
-    public ComparisonResult RunLive(
-        TemporalPoint evaluationHorizon,
-        ComparisonDebugHtmlOptions debugHtml)
-    {
-        ArgumentNullException.ThrowIfNull(debugHtml);
-
-        var result = RunLive(evaluationHorizon);
-        debugHtml.ExportIfEnabled(result);
-
-        return result;
-    }
-
-    /// <summary>
-    /// Runs the current plan as a live snapshot and optionally writes an LLM context artifact.
-    /// </summary>
-    /// <remarks>
-    /// LLM context export is useful for incident triage because it carries the
-    /// full result data, row-level documents, and finality metadata in one
-    /// deterministic JSON artifact.
-    /// </remarks>
-    /// <param name="evaluationHorizon">The exclusive horizon used to evaluate open windows.</param>
-    /// <param name="llmContext">The optional LLM context export configuration.</param>
-    /// <returns>A comparison result with evaluation-horizon and row-finality metadata.</returns>
-    public ComparisonResult RunLive(
-        TemporalPoint evaluationHorizon,
-        ComparisonLlmContextOptions llmContext)
-    {
-        ArgumentNullException.ThrowIfNull(llmContext);
-
-        var result = RunLive(evaluationHorizon);
-        llmContext.ExportIfEnabled(result);
-
-        return result;
     }
 
     private ComparisonPlan BuildLivePlan(TemporalPoint evaluationHorizon)
@@ -347,7 +248,6 @@ public sealed class WindowComparisonBuilder
             plan.Scope,
             normalization,
             plan.Comparators,
-            plan.Output,
             plan.IsStrict);
     }
 }

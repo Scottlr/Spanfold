@@ -24,21 +24,6 @@ public sealed class ComparisonExportTests
     }
 
     [Fact]
-    public void FluentBuilderConfiguresOutputOptions()
-    {
-        var history = new WindowHistoryFixtureBuilder()
-            .AddClosedWindow("DeviceOffline", "device-1", 1, 2)
-            .Build();
-
-        var plan = history.Compare("Output options QA")
-            .Output(new ComparisonOutputOptions(false, false))
-            .Build();
-
-        Assert.False(plan.Output.IncludeAlignedSegments);
-        Assert.False(plan.Output.IncludeExplainData);
-    }
-
-    [Fact]
     public void ResultExportProducesByteStableJsonWithEmptyCollections()
     {
         var result = new ComparisonResult(CreatePlan(), []);
@@ -91,8 +76,8 @@ public sealed class ComparisonExportTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         var exception = Assert.Throws<ComparisonExportException>(() => plan.ExportJson());
 
@@ -123,7 +108,7 @@ public sealed class ComparisonExportTests
     public void TypedRowsUseTheStoredResultMetadataAssociation()
     {
         var result = CreateResultWithFinality([
-            new ComparisonRowFinality("overlap", "overlap:stored", ComparisonFinality.Provisional, "live", 3, "overlap:prior")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Overlap, "overlap:stored"), ComparisonFinality.Provisional, "live", 3, "overlap:prior")
         ]);
 
         var entry = Assert.Single(result.OverlapRowsWithFinality());
@@ -139,7 +124,7 @@ public sealed class ComparisonExportTests
     public void ResultExportsPreserveStoredIdentityAndFullJsonLinesFinality()
     {
         var result = CreateResultWithFinality([
-            new ComparisonRowFinality("overlap", "overlap:stored", ComparisonFinality.Provisional, "live", 3, "overlap:prior")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Overlap, "overlap:stored"), ComparisonFinality.Provisional, "live", 3, "overlap:prior")
         ]);
 
         using var json = JsonDocument.Parse(result.ExportJson());
@@ -177,7 +162,7 @@ public sealed class ComparisonExportTests
         Assert.Throws<ComparisonRowMetadataException>(() => missing.ExportJson());
 
         var wrongKind = CreateResultWithFinality([
-            new ComparisonRowFinality("residual", "residual:wrong", ComparisonFinality.Final, "closed")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual:wrong"), ComparisonFinality.Final, "closed")
         ]);
         var wrongKindException = Assert.Throws<ComparisonRowMetadataException>(
             () => wrongKind.ExportJsonLines().ToArray());
@@ -391,8 +376,8 @@ public sealed class ComparisonExportTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
     }
 
     private static ComparisonResult CreateResult(params ComparisonPlanDiagnostic[] diagnostics)
@@ -478,7 +463,7 @@ public sealed class ComparisonExportTests
             ],
             rowFinalities: rowFinalities ??
             [
-                new ComparisonRowFinality("overlap", "overlap:stored", ComparisonFinality.Final, "closed")
+                new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Overlap, "overlap:stored"), ComparisonFinality.Final, "closed")
             ]);
     }
 }

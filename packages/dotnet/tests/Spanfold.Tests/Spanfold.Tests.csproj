@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\benchmarks\Spanfold.Benchmarks\Spanfold.Benchmarks.csproj" />
     <ProjectReference Include="..\..\src\Spanfold.Cli\Spanfold.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Spanfold.Artifacts\Spanfold.Artifacts.csproj" />
     <ProjectReference Include="..\..\src\Spanfold\Spanfold.csproj" />
     <ProjectReference Include="..\..\src\Spanfold.Testing\Spanfold.Testing.csproj" />
   </ItemGroup>

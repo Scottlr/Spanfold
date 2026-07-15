@@ -196,7 +196,7 @@ public sealed class SegmentAwareComparisonTests
 
     private static EventPipeline<PriceUpdate> CreateSegmentedPipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", update => update.SelectionId, update => update.HasPrice);

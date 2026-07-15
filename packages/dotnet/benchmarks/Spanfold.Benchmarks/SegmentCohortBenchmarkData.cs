@@ -46,7 +46,7 @@ public sealed class SegmentCohortBenchmarkData
 
     public static EventPipeline<BenchmarkSegmentSignal> CreatePipeline()
     {
-        return global::Spanfold.Spanfold
+        return global::Spanfold.EventPipeline
             .For<BenchmarkSegmentSignal>()
             .RecordWindows()
             .Window("DeviceOffline", window => window

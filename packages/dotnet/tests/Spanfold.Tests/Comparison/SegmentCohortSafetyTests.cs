@@ -7,7 +7,7 @@ public sealed class SegmentCohortSafetyTests
     [Fact]
     public void ClosedPriorSegmentIsFinalWhileCurrentLiveSegmentIsProvisional()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", window => window
@@ -178,12 +178,12 @@ public sealed class SegmentCohortSafetyTests
         var current = RunAtLeastCohortResidual(pipeline, live: false);
         var changes = ComparisonChangelog.Create(previous.RowFinalities, current.RowFinalities);
 
-        Assert.Contains(changes, change => change.Finality == ComparisonFinality.Revised);
+        Assert.Contains(changes, change => change.Kind == ComparisonRevisionKind.Revised);
     }
 
     private static EventPipeline<PriceUpdate> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", update => update.SelectionId, update => update.HasPrice);

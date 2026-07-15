@@ -85,7 +85,7 @@ public sealed class LaneLivenessTrackerTests
     {
         var startedAt = DateTimeOffset.Parse("2026-04-21T10:00:00Z");
         var tracker = LaneLivenessTracker.ForLanes(startedAt, TimeSpan.FromSeconds(30), "lane-a");
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<LaneLivenessSignal>()
             .RecordWindows()
             .WithEventTime(signal => signal.OccurredAt)

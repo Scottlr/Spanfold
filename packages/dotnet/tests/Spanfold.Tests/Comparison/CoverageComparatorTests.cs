@@ -42,8 +42,8 @@ public sealed class CoverageComparatorTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["coverage"],
-            ComparisonOutputOptions.Default);
+            ["coverage"]
+            );
 
         return new PreparedComparison(
             plan,

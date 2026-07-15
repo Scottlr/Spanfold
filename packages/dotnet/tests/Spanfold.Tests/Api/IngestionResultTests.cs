@@ -7,7 +7,7 @@ public sealed class IngestionResultTests
     [Fact]
     public void IngestReturnsEmptyResultWhenNoWindowsEmit()
     {
-        var pipeline = Spanfold.For<PriceTick>().Build();
+        var pipeline = EventPipeline.For<PriceTick>().Build();
 
         var result = pipeline.Ingest(new PriceTick("selection-1", 1.01m));
 
@@ -18,7 +18,7 @@ public sealed class IngestionResultTests
     [Fact]
     public void IngestReturnsResultWithEmissions()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -35,7 +35,7 @@ public sealed class IngestionResultTests
     [Fact]
     public void IngestionResultCanBeDeconstructed()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .TrackWindow(
                 "SelectionSuspension",

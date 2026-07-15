@@ -1,6 +1,6 @@
 using Spanfold.Internal.Comparison;
 
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Provides small query helpers over materialized comparison results.

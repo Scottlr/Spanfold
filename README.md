@@ -18,7 +18,7 @@ Install the current .NET preview from NuGet.org, or use the Rust crate from a
 repository checkout:
 
 ```bash
-dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold --version 0.2.0-preview.1
 cargo add spanfold@0.1.0
 ```
 
@@ -26,7 +26,7 @@ cargo add spanfold@0.1.0
 
 ```csharp
 // 1. Define: what condition are you tracking, and for which key?
-var pipeline = Spanfold.Spanfold
+var pipeline = EventPipeline
     .For<MonitorEvent>()
     .RecordWindows()
     .TrackWindow("Outage",
@@ -201,9 +201,10 @@ The .NET preview includes the C# API, CLI, testing helpers, samples, benchmarks,
 and package documentation. Install the packages and global tool from NuGet.org:
 
 ```bash
-dotnet add package Spanfold --version 0.1.0-preview.2
-dotnet add package Spanfold.Testing --version 0.1.0-preview.2
-dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.2
+dotnet add package Spanfold --version 0.2.0-preview.1
+dotnet add package Spanfold.Artifacts --version 0.2.0-preview.1
+dotnet add package Spanfold.Testing --version 0.2.0-preview.1
+dotnet tool install --global Spanfold.Cli --version 0.2.0-preview.1
 ```
 
 → [.NET package README](packages/dotnet/README.md)

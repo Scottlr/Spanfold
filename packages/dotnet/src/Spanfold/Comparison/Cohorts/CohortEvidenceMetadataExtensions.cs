@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Provides typed access to cohort evidence emitted in comparison metadata.

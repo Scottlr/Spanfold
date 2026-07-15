@@ -1,8 +1,9 @@
 using Spanfold;
+using Spanfold.Comparison;
 
 var start = DateTimeOffset.Parse("2026-04-21T06:00:00Z");
 
-var pipeline = Spanfold.Spanfold
+var pipeline = EventPipeline
     .For<ShipmentTelemetry>()
     .RecordWindows()
     .WithEventTime(update => update.Timestamp)

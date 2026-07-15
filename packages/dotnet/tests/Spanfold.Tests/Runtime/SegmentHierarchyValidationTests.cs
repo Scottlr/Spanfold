@@ -7,7 +7,7 @@ public sealed class SegmentHierarchyValidationTests
     [Fact]
     public void NestedSegmentDefinitionIsValid()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceStateChanged>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", window => window
@@ -38,7 +38,7 @@ public sealed class SegmentHierarchyValidationTests
     public void DuplicateSegmentNameAcrossHierarchyIsRejected()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            Spanfold
+            EventPipeline
                 .For<DeviceStateChanged>()
                 .TrackWindow("DeviceOffline", window => window
                     .Key(update => update.DeviceId)
@@ -54,7 +54,7 @@ public sealed class SegmentHierarchyValidationTests
     public void DuplicateSiblingSegmentNameIsRejected()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            Spanfold
+            EventPipeline
                 .For<DeviceStateChanged>()
                 .TrackWindow("DeviceOffline", window => window
                     .Key(update => update.DeviceId)
@@ -71,7 +71,7 @@ public sealed class SegmentHierarchyValidationTests
     public void ChildSegmentWithoutValueSelectorIsRejected()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            Spanfold
+            EventPipeline
                 .For<DeviceStateChanged>()
                 .TrackWindow("DeviceOffline", window => window
                     .Key(update => update.DeviceId)

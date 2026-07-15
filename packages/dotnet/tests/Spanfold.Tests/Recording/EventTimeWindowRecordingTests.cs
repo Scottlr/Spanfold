@@ -9,7 +9,7 @@ public sealed class EventTimeWindowRecordingTests
     {
         var openedAt = new DateTimeOffset(2026, 4, 12, 10, 0, 0, TimeSpan.Zero);
         var closedAt = new DateTimeOffset(2026, 4, 12, 10, 5, 0, TimeSpan.Zero);
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .WithEventTime(tick => tick.Timestamp)
@@ -32,7 +32,7 @@ public sealed class EventTimeWindowRecordingTests
     [Fact]
     public void WindowTimestampsAreEmptyWhenEventTimeIsNotConfigured()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .Window(
@@ -54,7 +54,7 @@ public sealed class EventTimeWindowRecordingTests
     {
         var openedAt = new DateTimeOffset(2026, 4, 12, 10, 0, 0, TimeSpan.Zero);
         var closedAt = openedAt.AddMinutes(5);
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .WithEventTime(tick => tick.Timestamp, "exchange-clock")
@@ -77,7 +77,7 @@ public sealed class EventTimeWindowRecordingTests
     [Fact]
     public void EventTimeSelectorIsRequired()
     {
-        var builder = Spanfold.For<PriceTick>();
+        var builder = EventPipeline.For<PriceTick>();
 
         Assert.Throws<ArgumentNullException>(() => builder.WithEventTime(null!));
         Assert.Throws<ArgumentException>(() => builder.WithEventTime(tick => tick.Timestamp, " "));

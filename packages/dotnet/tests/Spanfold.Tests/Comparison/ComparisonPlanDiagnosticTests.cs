@@ -13,8 +13,7 @@ public sealed class ComparisonPlanDiagnosticTests
             against: [],
             scope: null,
             normalization: null,
-            comparators: [],
-            output: null);
+            comparators: []);
 
         Assert.All(plan.Validate(), diagnostic =>
             Assert.Equal(ComparisonPlanDiagnosticSeverity.Error, diagnostic.Severity));
@@ -73,7 +72,6 @@ public sealed class ComparisonPlanDiagnosticTests
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
             ["overlap"],
-            ComparisonOutputOptions.Default,
             isStrict);
     }
 }

@@ -18,7 +18,7 @@ public sealed class ComparisonNormalizationPolicyTests
     [Fact]
     public void BuilderCanSelectEventTimeAndMissingTimestampPolicy()
     {
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var plan = history.Compare("Event Time QA")
             .Target("provider-a", s => s.Source("provider-a"))
@@ -36,7 +36,7 @@ public sealed class ComparisonNormalizationPolicyTests
     public void BuilderCanClipOpenWindowsToHorizon()
     {
         var horizon = TemporalPoint.ForPosition(100);
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var plan = history.Compare("Live QA")
             .Target("provider-a", s => s.Source("provider-a"))

@@ -24,8 +24,8 @@ public sealed class ComparisonPlanTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         var diagnostic = Assert.Single(plan.Validate(), d => d.Code == ComparisonPlanValidationCode.MissingTarget);
         Assert.Equal("target", diagnostic.Path);
@@ -137,7 +137,7 @@ public sealed class ComparisonPlanTests
             against ?? [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            comparators ?? ["overlap"],
-            ComparisonOutputOptions.Default);
+            comparators ?? ["overlap"]
+            );
     }
 }

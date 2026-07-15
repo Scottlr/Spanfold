@@ -31,8 +31,8 @@ public sealed class ComparatorRuntimeTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["unknown"],
-            ComparisonOutputOptions.Default);
+            ["unknown"]
+            );
         var prepared = new PreparedComparison(plan, [], [], [], []);
 
         var result = InvokeRuntime(prepared);
@@ -54,7 +54,7 @@ public sealed class ComparatorRuntimeTests
 
     private static WindowHistory BuildHistory()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);

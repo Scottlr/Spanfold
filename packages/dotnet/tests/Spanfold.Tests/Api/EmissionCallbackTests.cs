@@ -8,7 +8,7 @@ public sealed class EmissionCallbackTests
     public void CallbackReceivesOpenAndCloseEmissions()
     {
         var callbackEmissions = new List<WindowEmission<PriceTick>>();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -30,7 +30,7 @@ public sealed class EmissionCallbackTests
     public void CallbackEmissionsMatchReturnedEmissions()
     {
         var callbackEmissions = new List<WindowEmission<PriceTick>>();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .OnEmission(callbackEmissions.Add)
             .Window(
@@ -49,7 +49,7 @@ public sealed class EmissionCallbackTests
     [Fact]
     public void CallbackIsRequired()
     {
-        var builder = Spanfold.For<PriceTick>();
+        var builder = EventPipeline.For<PriceTick>();
 
         Assert.Throws<ArgumentNullException>(() => builder.OnEmission(null!));
     }
@@ -58,7 +58,7 @@ public sealed class EmissionCallbackTests
     public void CallbackFailureReportsCommittedResultAndRunsRemainingCallbacks()
     {
         var callbacks = 0;
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .OnEmission(_ => throw new InvalidOperationException("first"))
             .OnEmission(_ => callbacks++)
@@ -79,7 +79,7 @@ public sealed class EmissionCallbackTests
     public void ReentrantIngestionIsRejected()
     {
         EventPipeline<PriceTick>? pipeline = null;
-        pipeline = Spanfold
+        pipeline = EventPipeline
             .For<PriceTick>()
             .OnEmission(_ => pipeline!.Ingest(new PriceTick("nested", 1m)))
             .Window(

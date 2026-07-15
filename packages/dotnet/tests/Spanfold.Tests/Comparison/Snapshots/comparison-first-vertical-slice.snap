@@ -37,10 +37,6 @@
       "residual",
       "coverage"
     ],
-    "output": {
-      "includeAlignedSegments": true,
-      "includeExplainData": true
-    },
     "diagnostics": [
       {
         "code": "UnknownComparator",
@@ -454,7 +450,6 @@
 - scope: window=DeviceOffline; axis=ProcessingPosition
 - normalization: axis=ProcessingPosition; openPolicy=RequireClosed; horizon=<none>; nullTimestamp=Reject; knownAt=<none>
 - comparators: overlap, residual, coverage
-- output: alignedSegments=true; explainData=true
 - diagnostics: 1
 - diagnostic[0]: Warning UnknownComparator at comparators\[3\]: Comparator 'shape' is not registered.
 

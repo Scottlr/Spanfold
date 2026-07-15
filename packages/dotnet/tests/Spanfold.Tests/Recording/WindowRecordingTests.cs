@@ -38,7 +38,7 @@ public sealed class WindowRecordingTests
     [Fact]
     public void WindowsAreNotRecordedUnlessEnabled()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -68,7 +68,7 @@ public sealed class WindowRecordingTests
 
     private static EventPipeline<PriceTick> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .Window(

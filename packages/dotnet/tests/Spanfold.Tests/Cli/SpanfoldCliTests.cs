@@ -254,22 +254,14 @@ public sealed class SpanfoldCliTests
 
             Assert.Equal(0, exitCode);
             Assert.Equal(string.Empty, error);
-            Assert.True(File.Exists(Path.Combine(directory, "comparison.json")));
-            Assert.True(File.Exists(Path.Combine(directory, "comparison.md")));
-            Assert.True(File.Exists(Path.Combine(directory, "comparison.html")));
-            Assert.True(File.Exists(Path.Combine(directory, "comparison.llm.json")));
+            Assert.True(File.Exists(Path.Combine(directory, "result.json")));
             Assert.True(File.Exists(Path.Combine(directory, "manifest.json")));
-            Assert.Equal(output, File.ReadAllText(Path.Combine(directory, "manifest.json")));
+            Assert.True(AuditBundleReader.Open(directory).Verify().IsValid);
 
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("spanfold.audit.bundle", document.RootElement.GetProperty("schema").GetString());
-            Assert.Equal("audit-bundle", document.RootElement.GetProperty("artifact").GetString());
-            Assert.True(document.RootElement.GetProperty("isValid").GetBoolean());
-            Assert.Equal(1, document.RootElement.GetProperty("rowCounts").GetProperty("overlap").GetInt32());
-            Assert.Equal("comparison.llm.json", document.RootElement
-                .GetProperty("artifacts")
-                .GetProperty("llmContext")
-                .GetString());
+            Assert.Equal("spanfold.audit-bundle.manifest", document.RootElement.GetProperty("schema").GetString());
+            Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal("spanfold.dotnet.comparison-row.v1", document.RootElement.GetProperty("identityDomain").GetString());
         }
         finally
         {
@@ -306,16 +298,82 @@ public sealed class SpanfoldCliTests
 
             Assert.Equal(0, exitCode);
             Assert.Equal(string.Empty, error);
-            Assert.True(File.Exists(Path.Combine(directory, "comparison.llm.json")));
+            Assert.True(File.Exists(Path.Combine(directory, "result.json")));
+            Assert.True(AuditBundleReader.Open(directory).Verify().IsValid);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("spanfold.audit.bundle", document.RootElement.GetProperty("schema").GetString());
-            Assert.Equal("Spanfold Window Audit", document.RootElement.GetProperty("planName").GetString());
-            Assert.Equal(1, document.RootElement.GetProperty("rowCounts").GetProperty("overlap").GetInt32());
-            Assert.Equal(1, document.RootElement.GetProperty("rowCounts").GetProperty("residual").GetInt32());
+            Assert.Equal("spanfold.audit-bundle.manifest", document.RootElement.GetProperty("schema").GetString());
+            var artifact = ComparisonArtifact.Read(Path.Combine(directory, "result.json"));
+            Assert.Equal("Spanfold Window Audit", artifact.Name);
+            Assert.Contains(artifact.Rows, row => row.Kind == ComparisonRowKind.Overlap);
+            Assert.Contains(artifact.Rows, row => row.Kind == ComparisonRowKind.Residual);
         }
         finally
         {
             File.Delete(windowsPath);
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void CheckVerifyAndDiffUsePortableWorkflowContracts()
+    {
+        var specificationPath = TempFixturePath();
+        var suitePath = TempFixturePath();
+        var directory = TempDirectoryPath();
+        try
+        {
+            File.WriteAllText(specificationPath, """
+                {
+                  "schema": "spanfold.assessment-specification",
+                  "schemaVersion": 1,
+                  "name": "final-result",
+                  "rules": [
+                    { "id": "final", "type": "requireFinalRows" }
+                  ]
+                }
+                """);
+
+            var check = Run("check", FixturePath("basic-overlap.json"), "--spec", specificationPath);
+            Assert.Equal(0, check.ExitCode);
+            Assert.Contains("\"passed\": true", check.Output);
+
+            File.WriteAllText(suitePath, """
+                {
+                  "schema": "spanfold.assessment-suite",
+                  "schemaVersion": 1,
+                  "name": "release",
+                  "specifications": [
+                    {
+                      "schema": "spanfold.assessment-specification",
+                      "schemaVersion": 1,
+                      "name": "final-result",
+                      "rules": [
+                        { "id": "final", "type": "requireFinalRows" }
+                      ]
+                    }
+                  ]
+                }
+                """);
+            var suite = Run("suite", FixturePath("basic-overlap.json"), "--suite", suitePath);
+            Assert.Equal(0, suite.ExitCode);
+            Assert.Contains("\"passed\": true", suite.Output);
+
+            Assert.Equal(0, Run("audit", FixturePath("basic-overlap.json"), "--out", directory).ExitCode);
+            var verify = Run("verify-bundle", directory);
+            Assert.Equal(0, verify.ExitCode);
+            Assert.Contains("\"isValid\": true", verify.Output);
+
+            var diff = Run("diff", directory, directory);
+            Assert.Equal(0, diff.ExitCode);
+            Assert.Contains("\"isEmpty\": true", diff.Output);
+        }
+        finally
+        {
+            File.Delete(specificationPath);
+            File.Delete(suitePath);
             if (Directory.Exists(directory))
             {
                 Directory.Delete(directory, recursive: true);

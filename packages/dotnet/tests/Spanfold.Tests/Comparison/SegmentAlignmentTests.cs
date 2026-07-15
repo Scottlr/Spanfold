@@ -87,8 +87,8 @@ public sealed class SegmentAlignmentTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         return new PreparedComparison(
             plan,

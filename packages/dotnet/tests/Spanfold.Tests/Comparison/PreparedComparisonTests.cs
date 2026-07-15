@@ -43,7 +43,7 @@ public sealed class PreparedComparisonTests
     [Fact]
     public void OpenWindowsAreExcludedByDefault()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -65,7 +65,7 @@ public sealed class PreparedComparisonTests
     [Fact]
     public void OpenWindowsCanBeClippedToHorizon()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -109,7 +109,7 @@ public sealed class PreparedComparisonTests
     [Fact]
     public void HorizonBeforeOpenWindowStartIsDiagnosed()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -149,7 +149,7 @@ public sealed class PreparedComparisonTests
 
     private static WindowHistory BuildHistory()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);

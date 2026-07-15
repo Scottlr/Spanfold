@@ -34,9 +34,9 @@ public sealed class VirtualClockLiveTests
 
         var entries = ComparisonChangelog.Create(previous.RowFinalities, current.RowFinalities);
         Assert.Equal(2, entries.Count);
-        Assert.Contains(entries, entry => entry.Finality == ComparisonFinality.Retracted);
-        Assert.Contains(entries, entry => entry.Finality == ComparisonFinality.Final);
-        Assert.All(entries, entry => Assert.StartsWith("residual:", entry.RowId));
+        Assert.Contains(entries, entry => entry.Kind == ComparisonRevisionKind.Retracted);
+        Assert.Contains(entries, entry => entry.CurrentFinality == ComparisonFinality.Final);
+        Assert.All(entries, entry => Assert.StartsWith("residual:", entry.Row.RowId));
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class VirtualClockLiveTests
 
     private static EventPipeline<DeviceSignal> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);

@@ -7,7 +7,7 @@ public sealed class MultipleIndependentWindowsTests
     [Fact]
     public void IngestProcessesIndependentWindowsInDefinitionOrder()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -42,7 +42,7 @@ public sealed class MultipleIndependentWindowsTests
     [Fact]
     public void IndependentWindowsKeepSeparateState()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

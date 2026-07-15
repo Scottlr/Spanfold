@@ -1,8 +1,10 @@
 using Spanfold;
+using Spanfold.Artifacts;
+using Spanfold.Comparison;
 
 var start = DateTimeOffset.Parse("2026-04-19T12:00:00Z");
 
-var pipeline = Spanfold.Spanfold
+var pipeline = EventPipeline
     .For<ServiceHealthSignal>()
     .RecordWindows()
     .WithEventTime(signal => signal.Timestamp)

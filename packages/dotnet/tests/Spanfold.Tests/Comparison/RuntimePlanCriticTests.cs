@@ -61,8 +61,8 @@ public sealed class RuntimePlanCriticTests
                 OpenWindowPolicy = ComparisonOpenWindowPolicy.ClipToHorizon,
                 OpenWindowHorizon = null
             },
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
         var result = InvokeRuntime(new PreparedComparison(plan, [], [], [], []));
 
         Assert.Contains(result.Diagnostics, diagnostic =>
@@ -72,7 +72,7 @@ public sealed class RuntimePlanCriticTests
     [Fact]
     public void UnboundedOpenDurationsAreCriticized()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -104,8 +104,8 @@ public sealed class RuntimePlanCriticTests
                 OpenWindowHorizon = TemporalPoint.ForTimestamp(DateTimeOffset.UnixEpoch, "provider"),
                 KnownAt = TemporalPoint.ForTimestamp(DateTimeOffset.UnixEpoch, "received")
             },
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
         var result = InvokeRuntime(new PreparedComparison(plan, [], [], [], []));
 
         Assert.Contains(result.Diagnostics, diagnostic =>
@@ -155,7 +155,7 @@ public sealed class RuntimePlanCriticTests
 
     private static WindowHistory BuildHistory()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);

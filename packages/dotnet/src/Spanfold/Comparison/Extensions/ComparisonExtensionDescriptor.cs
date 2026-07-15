@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Describes the selectors, comparator declarations, and metadata keys exposed by an extension package.

@@ -74,7 +74,7 @@ public sealed class GapSymmetricDifferenceComparatorTests
     [Fact]
     public void BuilderAddsGapAndSymmetricDifferenceComparators()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<NormalizedInput>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", input => input.Key, static _ => true);
@@ -97,8 +97,8 @@ public sealed class GapSymmetricDifferenceComparatorTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            [comparator],
-            ComparisonOutputOptions.Default);
+            [comparator]
+            );
         var selected = new List<WindowRecord>(inputs.Length);
         var normalized = new List<NormalizedWindowRecord>(inputs.Length);
 

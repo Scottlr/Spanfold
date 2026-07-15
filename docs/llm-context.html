@@ -245,22 +245,21 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
         <p class="eyebrow">Configuration and CLI</p>
         <h2>Emit context from runs or fixtures.</h2>
         <p>
-          Use options when runtime configuration decides whether to write an
-          artifact. Use the CLI when a fixture should become an agent-readable
+          Export after comparison execution when runtime configuration decides
+          to write an artifact. Use the CLI when a fixture should become an agent-readable
           report without writing a custom host application.
         </p>
       </div>
       <div>
-        <pre><code>var context = ComparisonLlmContextOptions
-    .ToFile("artifacts/provider-qa.llm.json");
-
-var result = pipeline.History
+        <pre><code>var result = pipeline.History
     .Compare("Provider QA")
     .Target("provider-a", s =&gt; s.Source("provider-a"))
     .Against("provider-b", s =&gt; s.Source("provider-b"))
     .Within(scope =&gt; scope.Window("DeviceOffline"))
     .Using(c =&gt; c.Overlap().Residual())
-    .Run(context);</code></pre>
+    .Run();
+
+result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
         <pre class="stacked-code"><code>dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- \
   compare fixture.json --format llm-context</code></pre>
       </div>

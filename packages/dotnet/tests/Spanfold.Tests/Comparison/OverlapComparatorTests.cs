@@ -32,8 +32,8 @@ public sealed class OverlapComparatorTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
         var prepared = new PreparedComparison(
             plan,
             [],
@@ -68,8 +68,8 @@ public sealed class OverlapComparatorTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         return new PreparedComparison(
             plan,

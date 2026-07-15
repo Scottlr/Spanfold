@@ -49,7 +49,7 @@ public sealed class PartitionAwareRuntimeTests
 
     private static EventPipeline<PriceTick> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

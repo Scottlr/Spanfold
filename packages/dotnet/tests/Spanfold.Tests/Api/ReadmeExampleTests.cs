@@ -7,7 +7,7 @@ public sealed class ReadmeExampleTests
     [Fact]
     public void ReadmeDeviceToZoneExampleCompilesAndRuns()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .Window(
@@ -31,7 +31,7 @@ public sealed class ReadmeExampleTests
     [Fact]
     public void ReadmeComparisonQuickstartCompilesAndRuns()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<ComparisonDeviceSignal>()
             .RecordWindows()
             .TrackWindow(

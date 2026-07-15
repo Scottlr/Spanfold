@@ -42,8 +42,8 @@ public sealed class ResidualMissingComparatorTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            [comparator],
-            ComparisonOutputOptions.Default);
+            [comparator]
+            );
 
         return new PreparedComparison(
             plan,

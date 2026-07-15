@@ -1,6 +1,6 @@
 using Spanfold.Internal.Comparison;
 
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Represents the current prepared comparison state.

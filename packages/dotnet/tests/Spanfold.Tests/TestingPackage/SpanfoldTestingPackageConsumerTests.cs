@@ -21,7 +21,7 @@ public sealed class SpanfoldTestingPackageConsumerTests
 
         SpanfoldAssert.IsValid(result);
         SpanfoldAssert.HasNoDiagnostics(result);
-        SpanfoldAssert.HasRowCount(result, "overlap", 1);
+        SpanfoldAssert.HasRowCount(result, ComparisonRowKind.Overlap, 1);
     }
 
     [Fact]
@@ -191,8 +191,8 @@ public sealed class SpanfoldTestingPackageConsumerTests
                 [ComparisonSelector.ForSource("provider-b")],
                 ComparisonScope.Window("DeviceOffline"),
                 ComparisonNormalizationPolicy.Default,
-                ["overlap"],
-                ComparisonOutputOptions.Default),
+                ["overlap"]
+                ),
             [new ComparisonPlanDiagnostic(
                 ComparisonPlanValidationCode.Unknown,
                 "Invalid",

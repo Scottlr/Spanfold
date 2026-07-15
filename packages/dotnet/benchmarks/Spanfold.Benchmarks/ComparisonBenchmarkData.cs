@@ -45,7 +45,7 @@ public sealed class ComparisonBenchmarkData
 
     public static EventPipeline<BenchmarkDeviceSignal> CreatePipeline()
     {
-        return global::Spanfold.Spanfold
+        return global::Spanfold.EventPipeline
             .For<BenchmarkDeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);

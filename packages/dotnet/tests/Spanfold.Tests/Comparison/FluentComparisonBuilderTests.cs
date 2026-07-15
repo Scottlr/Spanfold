@@ -7,7 +7,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void ProviderQaExampleBuildsPlan()
     {
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var plan = history.Compare("Provider QA")
             .Target("provider-a", s => s.Source("provider-a"))
@@ -26,7 +26,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void MissingStagesProduceDiagnostics()
     {
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var diagnostics = history.Compare("Provider QA").Validate();
 
@@ -39,7 +39,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void MultipleAgainstSelectorsAreSupported()
     {
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var plan = history.Compare("Provider QA")
             .Target("provider-a", s => s.Source("provider-a"))
@@ -55,7 +55,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void ComparatorDeclarationsCanBePassedThrough()
     {
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var plan = history.Compare("Extension QA")
             .Target("provider-a", s => s.Source("provider-a"))
@@ -78,7 +78,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void BuildDoesNotExecuteOrMutateHistory()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -99,7 +99,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void PrepareAndRunReturnValidationArtifacts()
     {
-        var history = Spanfold.For<DeviceSignal>().RecordWindows().Build().History;
+        var history = EventPipeline.For<DeviceSignal>().RecordWindows().Build().History;
 
         var builder = history.Compare("Provider QA")
             .Target("provider-a", s => s.Source("provider-a"))
@@ -118,7 +118,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void RunCanWriteDebugHtmlWhenConfigured()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -138,7 +138,8 @@ public sealed class FluentComparisonBuilderTests
                 .Against("provider-b", selector => selector.Source("provider-b"))
                 .Within(scope => scope.Window("DeviceOffline"))
                 .Using(comparators => comparators.Overlap().Residual())
-                .Run(ComparisonDebugHtmlOptions.ToFile(path));
+                .Run();
+            result.ExportDebugHtml(path);
 
             Assert.True(result.IsValid);
             Assert.True(File.Exists(path));
@@ -156,7 +157,7 @@ public sealed class FluentComparisonBuilderTests
     [Fact]
     public void RunCanWriteLlmContextWhenConfigured()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", signal => signal.DeviceId, signal => !signal.IsOnline);
@@ -176,7 +177,8 @@ public sealed class FluentComparisonBuilderTests
                 .Against("provider-b", selector => selector.Source("provider-b"))
                 .Within(scope => scope.Window("DeviceOffline"))
                 .Using(comparators => comparators.Overlap().Residual())
-                .Run(ComparisonLlmContextOptions.ToFile(path));
+                .Run();
+            result.ExportLlmContext(path);
 
             Assert.True(result.IsValid);
             Assert.True(File.Exists(path));

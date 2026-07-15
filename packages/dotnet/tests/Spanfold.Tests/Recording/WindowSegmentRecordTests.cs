@@ -70,7 +70,7 @@ public sealed class WindowSegmentRecordTests
     [Fact]
     public void RecordedWindowsCarryEmissionSegments()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", update => update.SelectionId, update => update.HasPrice);

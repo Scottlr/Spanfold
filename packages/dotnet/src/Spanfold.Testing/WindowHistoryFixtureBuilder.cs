@@ -145,6 +145,6 @@ public sealed class WindowHistoryFixtureBuilder
     /// <returns>A window history fixture.</returns>
     public WindowHistory Build()
     {
-        return WindowHistory.CreateFixture(this.closedWindows, this.openWindows);
+        return WindowHistory.FromRecords(this.closedWindows, this.openWindows);
     }
 }

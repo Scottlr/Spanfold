@@ -7,7 +7,7 @@ public sealed class MetadataTests
     [Fact]
     public void MetadataExposesEventTypeAndWindowNames()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -22,7 +22,7 @@ public sealed class MetadataTests
     [Fact]
     public void MetadataExposesRollUpHierarchy()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

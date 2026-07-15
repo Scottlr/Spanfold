@@ -105,7 +105,7 @@ public sealed class WindowRecordIdTests
 
     private static WindowHistory BuildOfflineHistory()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow(

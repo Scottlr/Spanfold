@@ -7,7 +7,7 @@ public sealed class SegmentBoundaryRuntimeTests
     [Fact]
     public void SegmentValueChangeClosesAndReopensActiveWindow()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", window => window
@@ -37,7 +37,7 @@ public sealed class SegmentBoundaryRuntimeTests
     [Fact]
     public void ActivePredicateCloseRecordsPredicateEndedBoundaryReason()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", window => window
@@ -56,7 +56,7 @@ public sealed class SegmentBoundaryRuntimeTests
     [Fact]
     public void NestedSegmentChangeSplitsCurrentWindow()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", window => window
@@ -79,7 +79,7 @@ public sealed class SegmentBoundaryRuntimeTests
     [Fact]
     public void SameSegmentWhileActiveDoesNotEmitTransition()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", window => window
@@ -98,7 +98,7 @@ public sealed class SegmentBoundaryRuntimeTests
     [Fact]
     public void TagChangesDoNotSplitActiveWindow()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<TaggedPriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", window => window
@@ -119,7 +119,7 @@ public sealed class SegmentBoundaryRuntimeTests
     public void MissingSegmentValueSelectorIsRejected()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            Spanfold
+            EventPipeline
                 .For<PriceUpdate>()
                 .TrackWindow("SelectionPriced", window => window
                     .Key(update => update.SelectionId)
@@ -133,7 +133,7 @@ public sealed class SegmentBoundaryRuntimeTests
     public void DuplicateSegmentNamesAreRejected()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            Spanfold
+            EventPipeline
                 .For<PriceUpdate>()
                 .TrackWindow("SelectionPriced", window => window
                     .Key(update => update.SelectionId)

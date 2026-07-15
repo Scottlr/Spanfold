@@ -7,7 +7,7 @@ public sealed class RollUpDefinitionApiTests
     [Fact]
     public void RollUpCanBeDefinedAfterWindow()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -59,7 +59,7 @@ public sealed class RollUpDefinitionApiTests
 
     private static WindowPipelineBuilder<PriceTick> CreateWindowBuilder()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

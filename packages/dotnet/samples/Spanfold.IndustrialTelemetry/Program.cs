@@ -1,8 +1,10 @@
 using Spanfold;
+using Spanfold.Comparison;
+using Spanfold.Liveness;
 
 var start = DateTimeOffset.Parse("2026-04-21T08:00:00Z");
 
-var processPipeline = Spanfold.Spanfold
+var processPipeline = EventPipeline
     .For<PumpTelemetry>()
     .RecordWindows()
     .WithEventTime(update => update.Timestamp)
@@ -13,7 +15,7 @@ var processPipeline = Spanfold.Spanfold
         .Tag("line", update => update.LineId))
     .Build();
 
-var livenessPipeline = Spanfold.Spanfold
+var livenessPipeline = EventPipeline
     .For<LaneLivenessSignal>()
     .RecordWindows()
     .WithEventTime(signal => signal.OccurredAt)
