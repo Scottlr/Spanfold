@@ -23,4 +23,15 @@ public sealed class ComparisonScopeBuilder
     {
         return ComparisonScope.Window(windowName);
     }
+
+    /// <summary>
+    /// Restricts the comparison to one configured window on the supplied temporal axis.
+    /// </summary>
+    /// <param name="windowName">The configured window name.</param>
+    /// <param name="timeAxis">The temporal axis used by the comparison.</param>
+    /// <returns>A window-name comparison scope on the supplied axis.</returns>
+    public ComparisonScope Window(string windowName, TemporalAxis timeAxis)
+    {
+        return ComparisonScope.Window(windowName, timeAxis);
+    }
 }
