@@ -60,7 +60,7 @@
     <section class="page-hero compact">
       <h1>Interval use cases.</h1>
       <p class="lead">
-        Seven scenarios where latest-state is not enough — where the shape of
+        Eleven scenarios where latest-state is not enough — where the shape of
         state over time (sources, keys, phases, thresholds, and known-at
         boundaries) is the evidence you actually need.
       </p>
@@ -156,6 +156,61 @@
           </p>
         </div>
         <div data-fig="UC_Pipelines"></div>
+      </article>
+
+      <article id="episode-provider-evaluation">
+        <div>
+          <p class="eyebrow">Episode analytics · provider evaluation</p>
+          <h2>Did both providers observe the same outages?</h2>
+          <p>
+            Stitch short reporting gaps within each provider, then classify
+            shared, split, merged, complex, and unmatched outage occurrences.
+            Keep exact comparison beside it to measure late starts, early
+            recoveries, and inactive gaps.
+          </p>
+        </div>
+        <div><p><strong>Analyst question:</strong> Is disagreement caused by missed incidents, fragmented reporting, or timing coverage?</p></div>
+      </article>
+
+      <article id="episode-detector-evaluation">
+        <div>
+          <p class="eyebrow">Episode analytics · detector evaluation</p>
+          <h2>Does a detector find the reference occurrences?</h2>
+          <p>
+            Treat the labelled or reviewed side as an explicit reference and
+            use <code>AsReference()</code> for recall and precision. Neutral
+            target/against summaries remain available when neither side is
+            authoritative.
+          </p>
+        </div>
+        <div><p><strong>Analyst question:</strong> Which reference episodes were unmatched, and which detector episodes had no reference relation?</p></div>
+      </article>
+
+      <article id="episode-machine-downtime">
+        <div>
+          <p class="eyebrow">Episode analytics · industrial operations</p>
+          <h2>Was fragmented sensor evidence one downtime event?</h2>
+          <p>
+            Preserve every active sensor fragment while stitching brief
+            telemetry gaps into an occurrence envelope. Compare machine,
+            controller, and maintenance lanes without pretending the gaps were
+            active time.
+          </p>
+        </div>
+        <div><p><strong>Analyst question:</strong> How many downtime occurrences happened, how long did they span, and how much active evidence supported them?</p></div>
+      </article>
+
+      <article id="episode-sessions">
+        <div>
+          <p class="eyebrow">Episode analytics · recorded sessions</p>
+          <h2>Which recorded activity windows belong to one session?</h2>
+          <p>
+            Apply an inactivity tolerance to already-recorded windows to form
+            session-like episodes, retain their fragments, and compare session
+            occurrence shapes across lanes or definitions.
+          </p>
+        </div>
+        <div><p><strong>Boundary:</strong> This analyzes recorded window history; it is not a general event-query or product-analytics session engine.</p></div>
       </article>
     </section>
   </main>

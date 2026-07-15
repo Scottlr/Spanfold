@@ -145,6 +145,64 @@
 
     <section class="doc-section">
       <div class="section-heading">
+        <p class="eyebrow">Episode analytics · .NET preview</p>
+        <h2>Move from exact spans to occurrence structure.</h2>
+        <p>
+          Episode analysis layers on recorded windows when the analytical unit
+          is an outage, downtime event, detection, or session-like occurrence.
+          The API is currently available in <code>Spanfold.Episodes</code> for
+          .NET and is not part of the Rust package.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article>
+          <h3>1. Form within each side</h3>
+          <p><code>StitchGapsUpTo</code> joins nearby windows into an episode while retaining every source fragment. It changes episode counts, not active coverage.</p>
+        </article>
+        <article>
+          <h3>2. Relate across sides</h3>
+          <p><code>RelateWithin</code> connects already-formed target and against episodes. Complete connected components classify as one-to-one, split, merge, complex, or unmatched; evidence is not reduced to nearest pairs.</p>
+        </article>
+        <article>
+          <h3>3. Measure fragments and envelopes</h3>
+          <p>Fragments are authoritative for active magnitude. The envelope measures elapsed extent from the earliest fragment start to the latest fragment end, so inactive gaps are never counted as active evidence.</p>
+        </article>
+        <article>
+          <h3>4. Read neutral summaries</h3>
+          <p>Episode-set summaries describe counts, fragmentation, active magnitude, and elapsed extent. Comparison summaries use target/against terminology without assuming either side is correct.</p>
+        </article>
+        <article>
+          <h3>5. Opt into reference metrics</h3>
+          <p>When the target is intentionally authoritative, <code>AsReference()</code> adds recall and precision. That interpretation is explicit rather than silently labelling neutral unmatched episodes as errors.</p>
+        </article>
+        <article>
+          <h3>6. Settle live results at a horizon</h3>
+          <p><code>RunLive(horizon)</code> preserves provisional finality for horizon-dependent episodes and relations. It makes no watermark or late-record completeness promise.</p>
+        </article>
+      </div>
+      <pre><code>using Spanfold.Episodes;
+
+var episodes = pipeline.History
+    .CompareEpisodes("Provider QA")
+    .Target("reference", s =&gt; s.Source("provider-a"))
+    .Against("detector", s =&gt; s.Source("provider-b"))
+    .Within(scope =&gt; scope.Window("DeviceOffline", TemporalAxis.Timestamp))
+    .Normalize(n =&gt; n.OnEventTime())
+    .StitchGapsUpTo(TimeSpan.FromMinutes(2))
+    .RelateWithin(TimeSpan.FromSeconds(30))
+    .Run();</code></pre>
+      <p>
+        For a reference outage <code>[10:00, 10:30)</code> and detector windows
+        <code>[10:02, 10:10)</code> and <code>[10:12, 10:28)</code>, a two-minute
+        stitch forms one multi-fragment detector episode. Exact comparison still
+        exposes the coverage differences; the episode view says the detector saw
+        the same occurrence. A stitch tolerance below the two-minute gap forms
+        two detector episodes and produces a split relation.
+      </p>
+    </section>
+
+    <section class="doc-section">
+      <div class="section-heading">
         <p class="eyebrow">Hard examples</p>
         <h2>Four real audits that combine several concepts.</h2>
         <p>

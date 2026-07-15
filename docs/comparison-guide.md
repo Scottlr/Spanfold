@@ -26,6 +26,35 @@ reviewed by tooling. Runtime selectors are useful locally, but deterministic
 JSON export rejects them because a delegate cannot be represented as portable
 data.
 
+## Exact Spans or Episodes?
+
+Use an exact window comparison when the decision depends on active coverage:
+the precise overlap, missed interval, residual duration, or transition drift.
+Use episode analysis when the decision depends on occurrences: whether two
+sources saw the same outage, whether one occurrence was fragmented, or whether
+several occurrences were merged.
+
+The two views are complementary. For a reference outage `[10:00, 10:30)` and
+detector fragments `[10:02, 10:10)` and `[10:12, 10:28)`, exact comparison
+preserves the late start, early recovery, and inactive gap. With
+`StitchGapsUpTo(TimeSpan.FromMinutes(2))`, episode analysis retains those two
+fragments but treats them as one multi-fragment occurrence. Lowering the stitch
+tolerance below two minutes forms two detector episodes and can classify the
+reference occurrence as `Split`.
+
+Stitch tolerance works within a side and changes episode formation. Relation
+tolerance works across the formed target and against episode sets; it connects
+nearby occurrences without changing their active coverage. Relations are
+classified from complete connected components as `OneToOne`, `Split`, `Merge`,
+`Complex`, `UnmatchedTarget`, or `UnmatchedAgainst`, rather than by selecting a
+nearest pair.
+
+Fragments are authoritative for active magnitude. The envelope spans elapsed
+time from the earliest fragment start to the latest fragment end. Neutral
+episode summaries keep target/against language; use `AsReference()` only when
+the target side is deliberately the reference. The episode API is a .NET
+preview surface and is not currently available in Rust.
+
 ## Temporal Model
 
 Processing-position comparisons are the default. Positions are assigned during

@@ -166,6 +166,73 @@ The debug HTML file is useful when you need to see why a comparison produced a
 row: which source window was active, where the overlap started, where a gap
 appeared, and whether live rows are still provisional.
 
+## Compare Occurrences as Episodes
+
+Exact comparison answers where active coverage differed. Episode analysis adds
+an occurrence-level question: did both sides observe the same incident, even
+when one side reported it as several fragments? The episode API is currently a
+.NET preview surface in `Spanfold.Episodes`; it is not available in the Rust
+package.
+
+```csharp
+using Spanfold.Episodes;
+
+var result = pipeline.History
+    .CompareEpisodes("Provider QA")
+    .Target("reference", selector => selector.Source("provider-a"))
+    .Against("detector", selector => selector.Source("provider-b"))
+    .Within(scope => scope.Window("DeviceOffline", TemporalAxis.Timestamp))
+    .Normalize(normalization => normalization.OnEventTime())
+    .StitchGapsUpTo(TimeSpan.FromMinutes(2))
+    .RelateWithin(TimeSpan.FromSeconds(30))
+    .Run();
+
+Console.WriteLine(result.Summary.TargetMatchRate);
+Console.WriteLine(result.AgainstEpisodes.Summary.MultiFragmentEpisodeRate);
+Console.WriteLine(result.Summary.SplitTargetRate);
+
+var scorecard = result.AsReference();
+Console.WriteLine(scorecard.Recall);
+Console.WriteLine(scorecard.Precision);
+```
+
+Suppose the reference outage is `[10:00, 10:30)` and the detector reports
+`[10:02, 10:10)` and `[10:12, 10:28)`. A two-minute stitch tolerance forms one
+multi-fragment detector episode, so the occurrence is not classified as a
+split. Exact comparison still shows the late start, early recovery, and
+two-minute inactive gap; episode analysis says the detector saw the same
+occurrence and retains both source fragments as evidence. Lower the stitch
+tolerance below the two-minute gap and the detector forms two episodes, making
+the reference occurrence a `Split` relation.
+
+The tolerances answer different questions. `StitchGapsUpTo` operates within
+each side and changes episode formation and counts. `RelateWithin` operates
+across already-formed episodes and only decides which occurrences are related;
+neither tolerance changes the underlying active coverage.
+
+Relations are computed from the complete bipartite component graph, not by
+reducing evidence to nearest pairs:
+
+| Relation | Meaning |
+| --- | --- |
+| `OneToOne` | One target episode relates to one against episode. |
+| `Split` | One target episode relates to multiple against episodes. |
+| `Merge` | Multiple target episodes relate to one against episode. |
+| `Complex` | Multiple episodes on both sides belong to one component. |
+| `UnmatchedTarget` | A target episode has no related against episode. |
+| `UnmatchedAgainst` | An against episode has no related target episode. |
+
+Fragments are the authoritative active evidence. An episode envelope measures
+elapsed extent from the first fragment start to the last fragment end, while
+active magnitude is the union of fragment ranges. For live analysis,
+`RunLive(horizon)` marks horizon-dependent episodes and relations provisional
+until they can settle relative to that horizon. It does not claim watermark or
+late-record completeness.
+
+`EpisodeComparisonResult.Summary` uses neutral target/against terminology.
+Call `AsReference()` only when the target side is intentionally authoritative;
+that explicit interpretation provides recall and precision.
+
 ## Assess, Trace, Revise, and Audit
 
 `Spanfold.Assessment` turns acceptance criteria into named, portable rules:

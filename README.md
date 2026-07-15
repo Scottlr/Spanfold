@@ -175,6 +175,8 @@ Auditing a past decision means using only what was knowable at the time — not 
 
 **Comparisons** — a staged plan: target side, comparison side, scope, normalization, and comparator families. Produces structured temporal evidence.
 
+**Episodes (.NET preview)** — stitch nearby windows on each side into occurrences, then classify the complete relation graph as one-to-one, split, merge, complex, or unmatched. Fragments remain the active evidence; episode envelopes describe elapsed occurrence extent. This layer is currently .NET-only and is not part of the Rust package.
+
 **Known-at safety** — separates when a state happened from when it was observable. Prevents future leakage in backtests and replays.
 
 **Live horizons** — an explicit cutoff for evaluating still-open windows. Preserves provisional row metadata so live and final rows are distinguishable.
@@ -208,6 +210,24 @@ dotnet tool install --global Spanfold.Cli --version 0.2.0-preview.1
 ```
 
 → [.NET package README](packages/dotnet/README.md)
+
+Episode analysis can sit on top of the same recorded history when analysts care
+about occurrences as well as exact coverage:
+
+```csharp
+using Spanfold.Episodes;
+
+var episodes = pipeline.History
+    .CompareEpisodes("Provider QA")
+    .Target("reference", selector => selector.Source("provider-a"))
+    .Against("detector", selector => selector.Source("provider-b"))
+    .Within(scope => scope.Window("DeviceOffline"))
+    .StitchGapsUpTo(2L)
+    .RelateWithin(1L)
+    .Run();
+```
+
+→ [Episode workflow and interpretation](packages/dotnet/README.md#compare-occurrences-as-episodes)
 
 ## Rust Package
 

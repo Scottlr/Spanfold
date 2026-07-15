@@ -178,6 +178,18 @@ cargo run -p spanfold-cli -- --help</code></pre>
           <a class="member-link" href="#ComparisonResult">Aligned</a>
           <a class="member-link" href="#ComparisonResult">Rows</a>
         </details>
+        <details open>
+          <summary>Spanfold.Episodes (.NET preview)</summary>
+          <a class="type-link" href="#EpisodeBuilders">Episode builders and extensions</a>
+          <a class="member-link" href="#EpisodeBuilders">FormEpisodes(...)</a>
+          <a class="member-link" href="#EpisodeBuilders">CompareEpisodes(...)</a>
+          <a class="member-link" href="#EpisodeBuilders">StitchGapsUpTo(...)</a>
+          <a class="member-link" href="#EpisodeBuilders">RelateWithin(...)</a>
+          <a class="type-link" href="#EpisodePlans">Episode plans and policies</a>
+          <a class="type-link" href="#EpisodeDomain">Episode domain and relations</a>
+          <a class="type-link" href="#EpisodeSummaries">Episode summaries and reference scorecard</a>
+          <a class="member-link" href="#EpisodeSummaries">AsReference()</a>
+        </details>
         <details>
           <summary>Exports, Temporal, Liveness</summary>
           <a class="type-link" href="#ComparisonExportExtensions">ComparisonExportExtensions</a>
@@ -535,6 +547,80 @@ let result = history
             <tr><td><code>RowFinalities</code></td><td>Final or provisional status for live rows.</td></tr>
             <tr><td><code>IsValid</code></td><td>True when no error diagnostics are present.</td></tr>
           </table>
+        </section>
+
+        <section class="api-member" id="EpisodeBuilders">
+          <p class="member-kind">Spanfold.Episodes · .NET preview</p>
+          <h2>Episode builders and extensions</h2>
+          <p>
+            Forms occurrence sets from recorded windows or compares two formed
+            sets. This namespace is currently .NET-only and is not exposed by
+            the Rust package.
+          </p>
+          <table class="member-table">
+            <tr><th>Public type or member</th><th>Purpose</th></tr>
+            <tr><td><code>WindowHistoryEpisodeExtensions.FormEpisodes(WindowHistory, string)</code></td><td>Starts an <code>EpisodeFormationBuilder</code>.</td></tr>
+            <tr><td><code>WindowHistoryEpisodeExtensions.CompareEpisodes(WindowHistory, string)</code></td><td>Starts an <code>EpisodeComparisonBuilder</code>.</td></tr>
+            <tr><td><code>EpisodeFormationBuilder.From(Func&lt;ComparisonSelectorBuilder, ComparisonSelector&gt;)</code></td><td>Selects source windows for one episode set.</td></tr>
+            <tr><td><code>EpisodeFormationBuilder.Within(Func&lt;ComparisonScopeBuilder, ComparisonScope&gt;)</code></td><td>Sets the named window scope and temporal axis.</td></tr>
+            <tr><td><code>EpisodeFormationBuilder.Normalize(Func&lt;ComparisonNormalizationBuilder, ComparisonNormalizationBuilder&gt;)</code></td><td>Sets temporal normalization before stitching.</td></tr>
+            <tr><td><code>EpisodeFormationBuilder.StitchGapsUpTo(long)</code> / <code>StitchGapsUpTo(TimeSpan)</code></td><td>Sets side-local processing-position or timestamp stitching.</td></tr>
+            <tr><td><code>EpisodeFormationBuilder.Build()</code>, <code>Run()</code>, <code>RunLive(TemporalPoint)</code></td><td>Builds a plan or materializes an <code>EpisodeSet</code>.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.Target(string, Func&lt;ComparisonSelectorBuilder, ComparisonSelector&gt;)</code></td><td>Selects and names the target side.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.Against(string, Func&lt;ComparisonSelectorBuilder, ComparisonSelector&gt;)</code></td><td>Selects and names the against side.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.Within(Func&lt;ComparisonScopeBuilder, ComparisonScope&gt;)</code></td><td>Applies one scope to both sides.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.Normalize(Func&lt;ComparisonNormalizationBuilder, ComparisonNormalizationBuilder&gt;)</code></td><td>Applies one normalization policy to both sides.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.StitchGapsUpTo(long)</code> / <code>StitchGapsUpTo(TimeSpan)</code></td><td>Sets the shared side-local formation tolerance.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.RelateWithin(long)</code> / <code>RelateWithin(TimeSpan)</code></td><td>Sets the cross-side relation tolerance.</td></tr>
+            <tr><td><code>EpisodeComparisonBuilder.Build()</code>, <code>Run()</code>, <code>RunLive(TemporalPoint)</code></td><td>Builds a plan or materializes an <code>EpisodeComparisonResult</code>.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="EpisodePlans">
+          <p class="member-kind">Spanfold.Episodes</p>
+          <h2>Episode plans and policies</h2>
+          <table class="member-table">
+            <tr><th>Public type</th><th>Public contract</th></tr>
+            <tr><td><code>EpisodeFormationPlan</code></td><td><code>Name</code>, <code>Selector</code>, <code>Scope</code>, <code>Normalization</code>, and <code>Formation</code>.</td></tr>
+            <tr><td><code>EpisodeFormationPolicy</code></td><td>Construct with <code>(TemporalAxis, long stitchToleranceMagnitude)</code>; exposes <code>TimeAxis</code> and <code>StitchToleranceMagnitude</code>.</td></tr>
+            <tr><td><code>EpisodeComparisonPlan</code></td><td><code>Name</code>, side names and selectors, <code>Scope</code>, <code>Normalization</code>, <code>Formation</code>, and <code>Relation</code>.</td></tr>
+            <tr><td><code>EpisodeRelationPolicy</code></td><td>Construct with <code>(TemporalAxis, long toleranceMagnitude)</code>; exposes <code>TimeAxis</code> and <code>ToleranceMagnitude</code>.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="EpisodeDomain">
+          <p class="member-kind">Spanfold.Episodes</p>
+          <h2>Episode domain and relation graph</h2>
+          <table class="member-table">
+            <tr><th>Public type</th><th>Public contract</th></tr>
+            <tr><td><code>EpisodeId</code></td><td>Deterministic episode identifier with <code>Value</code>.</td></tr>
+            <tr><td><code>EpisodeFragment</code></td><td><code>Window</code>, normalized <code>Range</code>, <code>Finality</code>, and <code>RecordId</code>.</td></tr>
+            <tr><td><code>Episode</code></td><td><code>Id</code>, identity fields, <code>TimeAxis</code>, authoritative <code>Fragments</code>, <code>Envelope</code>, <code>Finality</code>, and active, elapsed, and internal-gap magnitudes.</td></tr>
+            <tr><td><code>EpisodeSet</code></td><td><code>Name</code>, <code>Plan</code>, ordered <code>Episodes</code>, <code>Summary</code>, and optional <code>EvaluationHorizon</code>.</td></tr>
+            <tr><td><code>EpisodeRelationKind</code></td><td><code>OneToOne</code>, <code>Split</code>, <code>Merge</code>, <code>Complex</code>, <code>UnmatchedTarget</code>, and <code>UnmatchedAgainst</code>.</td></tr>
+            <tr><td><code>EpisodeRelationMetrics</code></td><td>Active magnitudes, overlap and coverage ratios, intersection-over-union, minimum gap, and directional timing and magnitude deltas.</td></tr>
+            <tr><td><code>EpisodeRelation</code></td><td><code>Kind</code>, complete target and against episode lists, <code>Metrics</code>, and <code>Finality</code>.</td></tr>
+            <tr><td><code>EpisodeComparisonResult</code></td><td><code>Name</code>, <code>Plan</code>, both episode sets, exhaustive <code>Relations</code>, neutral <code>Summary</code>, and optional <code>EvaluationHorizon</code>.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="EpisodeSummaries">
+          <p class="member-kind">Spanfold.Episodes</p>
+          <h2>Episode summaries and analysis extensions</h2>
+          <table class="member-table">
+            <tr><th>Public type or member</th><th>Purpose</th></tr>
+            <tr><td><code>EpisodeDistributionSummary</code></td><td>Count, minimum, mean, median, nearest-rank 95th percentile, and maximum.</td></tr>
+            <tr><td><code>EpisodeSetSummary</code></td><td>Episode and fragment counts, finality, fragmentation rates, and active, elapsed, and internal-gap distributions.</td></tr>
+            <tr><td><code>EpisodeComparisonSummary</code></td><td>Neutral target/against match, relation, bias, coverage, overlap, and one-to-one delta metrics.</td></tr>
+            <tr><td><code>EpisodeReferenceScorecard</code></td><td>Explicit reference/detection counts plus recall, precision, and F1.</td></tr>
+            <tr><td><code>EpisodeAnalysisExtensions.RelationsOfKind(EpisodeComparisonResult, EpisodeRelationKind)</code></td><td>Returns relation components with one classification.</td></tr>
+            <tr><td><code>UnmatchedTargetEpisodes(EpisodeComparisonResult)</code>, <code>UnmatchedAgainstEpisodes(EpisodeComparisonResult)</code></td><td>Returns the unmatched episodes for one side.</td></tr>
+            <tr><td><code>AsReference(EpisodeComparisonResult)</code></td><td>Interprets target episodes as references and against episodes as detections.</td></tr>
+          </table>
+          <p>
+            Live finality is relative to the explicit evaluation horizon. It
+            does not imply watermark or late-record completeness.
+          </p>
         </section>
 
         <section class="api-member" id="ComparisonExportExtensions">
