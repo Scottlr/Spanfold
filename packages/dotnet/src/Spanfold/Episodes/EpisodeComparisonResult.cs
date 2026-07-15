@@ -10,12 +10,14 @@ public sealed record EpisodeComparisonResult
         EpisodeSet targetEpisodes,
         EpisodeSet againstEpisodes,
         IReadOnlyList<EpisodeRelation> relations,
+        EpisodeComparisonSummary summary,
         TemporalPoint? evaluationHorizon)
     {
         Plan = plan;
         TargetEpisodes = targetEpisodes;
         AgainstEpisodes = againstEpisodes;
         Relations = Array.AsReadOnly(relations.ToArray());
+        Summary = summary;
         EvaluationHorizon = evaluationHorizon;
     }
 
@@ -33,6 +35,9 @@ public sealed record EpisodeComparisonResult
 
     /// <summary>Gets the deterministic, exhaustive relation components.</summary>
     public IReadOnlyList<EpisodeRelation> Relations { get; }
+
+    /// <summary>Gets the materialized neutral relationship summary.</summary>
+    public EpisodeComparisonSummary Summary { get; }
 
     /// <summary>Gets the live or known-at evaluation horizon, when present.</summary>
     public TemporalPoint? EvaluationHorizon { get; }

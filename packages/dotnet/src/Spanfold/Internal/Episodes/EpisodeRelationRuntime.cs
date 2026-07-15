@@ -58,12 +58,18 @@ internal static class EpisodeRelationRuntime
             plan.Relation,
             evaluationHorizon);
         relations.Sort(CompareRelations);
+        var materializedRelations = relations.ToArray();
+        var summary = EpisodeSummaryRuntime.Summarize(
+            targetSet,
+            againstSet,
+            materializedRelations);
 
         return new EpisodeComparisonResult(
             plan,
             targetSet,
             againstSet,
-            relations,
+            materializedRelations,
+            summary,
             evaluationHorizon);
     }
 

@@ -52,7 +52,14 @@ internal static class EpisodeFormationRuntime
             AddEpisodes(groups[i], plan, evaluationHorizon, episodes);
         }
 
-        return new EpisodeSet(plan, episodes, evaluationHorizon, history.KeyComparers);
+        var materializedEpisodes = episodes.ToArray();
+        var summary = EpisodeSummaryRuntime.Summarize(plan, materializedEpisodes);
+        return new EpisodeSet(
+            plan,
+            materializedEpisodes,
+            summary,
+            evaluationHorizon,
+            history.KeyComparers);
     }
 
     private static TemporalPoint? GetEvaluationHorizon(ComparisonNormalizationPolicy normalization)
