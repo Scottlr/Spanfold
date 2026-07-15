@@ -34,8 +34,8 @@ public sealed class ComparisonResultQueryExtensionTests
             [],
             rowFinalities:
             [
-                new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Provisional, "open"),
-                new ComparisonRowFinality("overlap", "overlap[0]", ComparisonFinality.Final, "closed")
+                new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Provisional, "open"),
+                new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Overlap, "overlap[0]"), ComparisonFinality.Final, "closed")
             ]);
 
         Assert.True(result.HasProvisionalRows());
@@ -51,7 +51,7 @@ public sealed class ComparisonResultQueryExtensionTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
     }
 }

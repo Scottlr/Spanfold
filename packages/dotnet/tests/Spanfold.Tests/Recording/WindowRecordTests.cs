@@ -34,7 +34,7 @@ public sealed class WindowRecordTests
     [Fact]
     public void HistoryExposesOpenAndClosedWindowsTogether()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow(

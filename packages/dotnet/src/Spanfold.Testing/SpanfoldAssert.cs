@@ -64,19 +64,70 @@ public static class SpanfoldAssert
     }
 
     /// <summary>
+    /// Asserts that a comparison satisfies an assessment specification.
+    /// </summary>
+    public static void Meets(ComparisonResult result, AssessmentSpecification specification)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(specification);
+        Passes(result.Assess(specification));
+    }
+
+    /// <summary>
+    /// Asserts that a comparison assessment passed.
+    /// </summary>
+    public static void Passes(ComparisonAssessment assessment)
+    {
+        ArgumentNullException.ThrowIfNull(assessment);
+        if (assessment.Passed)
+        {
+            return;
+        }
+
+        var first = assessment.Violations[0];
+        throw new SpanfoldAssertionException(
+            "Expected assessment '"
+            + assessment.Specification.Name
+            + "' to pass, but "
+            + assessment.Violations.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + " violation(s) were produced. First violation: "
+            + first.Code
+            + ".");
+    }
+
+    /// <summary>
+    /// Asserts that every assessment in a suite passed.
+    /// </summary>
+    public static void Passes(AssessmentSuiteResult suite)
+    {
+        ArgumentNullException.ThrowIfNull(suite);
+        if (suite.Passed)
+        {
+            return;
+        }
+
+        var failed = suite.Assessments.First(static assessment => !assessment.Passed);
+        throw new SpanfoldAssertionException(
+            "Expected assessment suite '"
+            + suite.Suite.Name
+            + "' to pass, but specification '"
+            + failed.Specification.Name
+            + "' failed.");
+    }
+
+    /// <summary>
     /// Asserts that a named row collection contains an expected number of rows.
     /// </summary>
     /// <param name="result">The result to inspect.</param>
-    /// <param name="rowType">The row family, such as overlap, residual, missing, or coverage.</param>
+    /// <param name="rowKind">The closed comparison row family.</param>
     /// <param name="expectedCount">The expected row count.</param>
     /// <exception cref="SpanfoldAssertionException">Thrown when the row count differs.</exception>
-    public static void HasRowCount(ComparisonResult result, string rowType, int expectedCount)
+    public static void HasRowCount(ComparisonResult result, ComparisonRowKind rowKind, int expectedCount)
     {
         ArgumentNullException.ThrowIfNull(result);
-        ArgumentException.ThrowIfNullOrWhiteSpace(rowType);
         ArgumentOutOfRangeException.ThrowIfNegative(expectedCount);
 
-        var actualCount = GetRowCount(result, rowType);
+        var actualCount = GetRowCount(result, rowKind);
         if (actualCount == expectedCount)
         {
             return;
@@ -86,26 +137,26 @@ public static class SpanfoldAssert
             "Expected "
             + expectedCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
             + " "
-            + rowType
+            + rowKind.ToArtifactLabel()
             + " rows, but found "
             + actualCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
             + ".");
     }
 
-    private static int GetRowCount(ComparisonResult result, string rowType)
+    private static int GetRowCount(ComparisonResult result, ComparisonRowKind rowKind)
     {
-        return rowType switch
+        return rowKind switch
         {
-            "overlap" => result.OverlapRows.Count,
-            "residual" => result.ResidualRows.Count,
-            "missing" => result.MissingRows.Count,
-            "coverage" => result.CoverageRows.Count,
-            "gap" => result.GapRows.Count,
-            "symmetricDifference" => result.SymmetricDifferenceRows.Count,
-            "containment" => result.ContainmentRows.Count,
-            "leadLag" => result.LeadLagRows.Count,
-            "asOf" => result.AsOfRows.Count,
-            _ => throw new ArgumentException("Unknown Spanfold row type: " + rowType, nameof(rowType))
+            ComparisonRowKind.Overlap => result.OverlapRows.Count,
+            ComparisonRowKind.Residual => result.ResidualRows.Count,
+            ComparisonRowKind.Missing => result.MissingRows.Count,
+            ComparisonRowKind.Coverage => result.CoverageRows.Count,
+            ComparisonRowKind.Gap => result.GapRows.Count,
+            ComparisonRowKind.SymmetricDifference => result.SymmetricDifferenceRows.Count,
+            ComparisonRowKind.Containment => result.ContainmentRows.Count,
+            ComparisonRowKind.LeadLag => result.LeadLagRows.Count,
+            ComparisonRowKind.AsOf => result.AsOfRows.Count,
+            _ => throw new ArgumentOutOfRangeException(nameof(rowKind), rowKind, "Unknown Spanfold row kind.")
         };
     }
 }

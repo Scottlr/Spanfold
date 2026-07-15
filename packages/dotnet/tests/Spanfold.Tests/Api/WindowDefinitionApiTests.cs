@@ -7,7 +7,7 @@ public sealed class WindowDefinitionApiTests
     [Fact]
     public void WindowDefinesStateDrivenWindow()
     {
-        var builder = Spanfold
+        var builder = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -20,7 +20,7 @@ public sealed class WindowDefinitionApiTests
     [Fact]
     public void WindowRequiresName()
     {
-        var builder = Spanfold.For<PriceTick>();
+        var builder = EventPipeline.For<PriceTick>();
 
         Assert.Throws<ArgumentException>(() => builder.Window(
             "",
@@ -31,7 +31,7 @@ public sealed class WindowDefinitionApiTests
     [Fact]
     public void WindowRequiresKeySelector()
     {
-        var builder = Spanfold.For<PriceTick>();
+        var builder = EventPipeline.For<PriceTick>();
 
         Assert.Throws<ArgumentNullException>(() => builder.Window<string>(
             "SelectionSuspension",
@@ -42,7 +42,7 @@ public sealed class WindowDefinitionApiTests
     [Fact]
     public void WindowRequiresActiveSelector()
     {
-        var builder = Spanfold.For<PriceTick>();
+        var builder = EventPipeline.For<PriceTick>();
 
         Assert.Throws<ArgumentNullException>(() => builder.Window(
             "SelectionSuspension",

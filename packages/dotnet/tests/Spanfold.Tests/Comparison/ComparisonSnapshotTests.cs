@@ -42,8 +42,8 @@ public sealed class ComparisonSnapshotTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap", "residual", "coverage"],
-            ComparisonOutputOptions.Default);
+            ["overlap", "residual", "coverage"]
+            );
         var diagnostics = new[]
         {
             new ComparisonPlanDiagnostic(
@@ -114,19 +114,22 @@ public sealed class ComparisonSnapshotTests
         var rowFinalities = new List<ComparisonRowFinality>
         {
             new(
-                "overlap",
-                ComparisonRowIdentity.Create(ComparisonRowKind.Overlap, overlapRow),
+                new ComparisonRowReference(
+                    ComparisonRowKind.Overlap,
+                    ComparisonRowIdentity.Create(ComparisonRowKind.Overlap, overlapRow)),
                 ComparisonFinality.Final,
                 "closed"),
             new(
-                "residual",
-                ComparisonRowIdentity.Create(ComparisonRowKind.Residual, residualRow),
+                new ComparisonRowReference(
+                    ComparisonRowKind.Residual,
+                    ComparisonRowIdentity.Create(ComparisonRowKind.Residual, residualRow)),
                 ComparisonFinality.Final,
                 "closed")
         };
         rowFinalities.AddRange(coverageRows.Select(static row => new ComparisonRowFinality(
-            "coverage",
-            ComparisonRowIdentity.Create(ComparisonRowKind.Coverage, row),
+            new ComparisonRowReference(
+                ComparisonRowKind.Coverage,
+                ComparisonRowIdentity.Create(ComparisonRowKind.Coverage, row)),
             ComparisonFinality.Final,
             "closed")));
 

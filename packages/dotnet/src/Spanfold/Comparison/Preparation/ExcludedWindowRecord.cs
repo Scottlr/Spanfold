@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Describes a recorded window excluded during comparison preparation.

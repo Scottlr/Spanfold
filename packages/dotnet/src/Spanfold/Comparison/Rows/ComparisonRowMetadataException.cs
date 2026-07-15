@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Indicates that result rows and row-finality metadata do not share the

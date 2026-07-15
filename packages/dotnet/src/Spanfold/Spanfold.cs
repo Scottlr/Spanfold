@@ -3,6 +3,7 @@ namespace Spanfold;
 /// <summary>
 /// Entry point for creating Spanfold event pipelines.
 /// </summary>
+[Obsolete("Use EventPipeline.For<TEvent>() instead.")]
 public static class Spanfold
 {
     /// <summary>
@@ -12,6 +13,6 @@ public static class Spanfold
     /// <returns>A builder for configuring state windows over the event type.</returns>
     public static EventPipelineBuilder<TEvent> For<TEvent>()
     {
-        return new EventPipelineBuilder<TEvent>();
+        return EventPipeline.For<TEvent>();
     }
 }

@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Preserves source metadata needed to interpret comparison record IDs.

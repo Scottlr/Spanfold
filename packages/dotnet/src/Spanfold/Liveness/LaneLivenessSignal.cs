@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Liveness;
 
 /// <summary>
 /// Describes a lane liveness state change emitted by <see cref="LaneLivenessTracker" />.

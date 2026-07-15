@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Describes a comparator declaration provided by an extension package.

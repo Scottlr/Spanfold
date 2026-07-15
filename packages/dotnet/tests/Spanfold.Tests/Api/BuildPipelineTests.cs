@@ -7,7 +7,7 @@ public sealed class BuildPipelineTests
     [Fact]
     public void BuildCreatesEmptyPipeline()
     {
-        var pipeline = Spanfold.For<PriceTick>().Build();
+        var pipeline = EventPipeline.For<PriceTick>().Build();
 
         Assert.Empty(pipeline.Windows);
     }
@@ -15,7 +15,7 @@ public sealed class BuildPipelineTests
     [Fact]
     public void BuildPreservesConfiguredWindowDefinitions()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

@@ -7,7 +7,7 @@ public sealed class ValidationTests
     [Fact]
     public void WindowNamesMustBeUnique()
     {
-        var builder = Spanfold
+        var builder = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -25,7 +25,7 @@ public sealed class ValidationTests
     [Fact]
     public void RollUpNameCannotDuplicateWindowName()
     {
-        var builder = Spanfold
+        var builder = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -41,7 +41,7 @@ public sealed class ValidationTests
     [Fact]
     public void WindowKeyCannotBeNull()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<NullableKeyTick>()
             .Window(
                 "SelectionSuspension",
@@ -58,7 +58,7 @@ public sealed class ValidationTests
     [Fact]
     public void RollUpKeyCannotBeNull()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<NullableKeyTick>()
             .Window(
                 "SelectionSuspension",

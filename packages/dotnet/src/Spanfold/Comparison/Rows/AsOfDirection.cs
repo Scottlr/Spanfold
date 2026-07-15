@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Describes which comparison transition is eligible for an as-of lookup.

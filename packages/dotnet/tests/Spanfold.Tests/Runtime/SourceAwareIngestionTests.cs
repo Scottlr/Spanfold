@@ -7,7 +7,7 @@ public sealed class SourceAwareIngestionTests
     [Fact]
     public void IngestCanAttachSourceToEmissions()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -24,7 +24,7 @@ public sealed class SourceAwareIngestionTests
     [Fact]
     public void IngestWithoutSourceLeavesEmissionSourceEmpty()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -41,7 +41,7 @@ public sealed class SourceAwareIngestionTests
     [Fact]
     public void SourceContextOwnsIndependentRuntimeState()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .TrackWindow(

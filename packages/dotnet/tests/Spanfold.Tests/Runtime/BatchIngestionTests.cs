@@ -7,7 +7,7 @@ public sealed class BatchIngestionTests
     [Fact]
     public void IngestManyProcessesEventsInSourceOrder()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -44,7 +44,7 @@ public sealed class BatchIngestionTests
     [Fact]
     public void IngestManyRequiresEvents()
     {
-        var pipeline = Spanfold.For<PriceTick>().Build();
+        var pipeline = EventPipeline.For<PriceTick>().Build();
 
         Assert.Throws<ArgumentNullException>(() => pipeline.IngestMany(null!));
     }

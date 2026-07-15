@@ -348,7 +348,7 @@ public sealed class CohortComparisonTests
 
     private static EventPipeline<PriceUpdate> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .TrackWindow("SelectionPriced", update => update.SelectionId, update => update.HasPrice);

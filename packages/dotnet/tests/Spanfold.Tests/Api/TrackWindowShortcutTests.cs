@@ -7,7 +7,7 @@ public sealed class TrackWindowShortcutTests
     [Fact]
     public void TrackWindowBuildsSingleWindowPipeline()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .TrackWindow(
                 "DeviceOffline",

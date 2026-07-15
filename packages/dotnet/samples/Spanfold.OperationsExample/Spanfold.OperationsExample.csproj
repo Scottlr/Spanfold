@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Spanfold/Spanfold.csproj" />
+    <ProjectReference Include="../../src/Spanfold.Artifacts/Spanfold.Artifacts.csproj" />
   </ItemGroup>
 
 </Project>

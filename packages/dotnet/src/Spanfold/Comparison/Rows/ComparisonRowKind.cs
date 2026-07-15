@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Identifies one of the closed comparison-result row families.
@@ -103,6 +103,7 @@ public static class ComparisonRowKindExtensions
     public static bool TryGetRowKind(this ComparisonRowFinality metadata, out ComparisonRowKind kind)
     {
         ArgumentNullException.ThrowIfNull(metadata);
-        return TryParseArtifactLabel(metadata.RowType, out kind);
+        kind = metadata.Reference.Kind;
+        return Enum.IsDefined(kind);
     }
 }

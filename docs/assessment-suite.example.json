@@ -1,0 +1,19 @@
+{
+  "schema": "spanfold.assessment-suite",
+  "schemaVersion": 1,
+  "name": "release-gates",
+  "specifications": [
+    {
+      "schema": "spanfold.assessment-specification",
+      "schemaVersion": 1,
+      "name": "provider-release-gate",
+      "rules": [
+        {
+          "id": "coverage",
+          "type": "minimumCoverage",
+          "minimumRatio": 0.99
+        }
+      ]
+    }
+  ]
+}

@@ -80,7 +80,7 @@ public sealed class HierarchyComparisonTests
     [Fact]
     public void MultiLevelRollupPathRemainsDeterministic()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .Window(
@@ -141,7 +141,7 @@ public sealed class HierarchyComparisonTests
     {
         var parent = new OpenWindow("Parent", "parent-1", 1, Source: "source-a");
         var child = new OpenWindow("Child", "child-1", 1, Source: "source-a");
-        return WindowHistory.CreateFixture([], [parent, child]);
+        return WindowHistory.FromRecords([], [parent, child]);
     }
 
     private sealed record WindowInput(string WindowName, string Key, long Start, long End);

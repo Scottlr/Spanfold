@@ -138,7 +138,7 @@ public sealed class WindowAnnotationTests
 
     private static EventPipeline<DeviceSignal> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<DeviceSignal>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", window => window

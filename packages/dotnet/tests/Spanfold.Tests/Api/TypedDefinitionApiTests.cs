@@ -7,7 +7,7 @@ public sealed class TypedDefinitionApiTests
     [Fact]
     public void WindowCanBeDefinedByType()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .Window<DeviceOffline>()
             .Build();
@@ -23,7 +23,7 @@ public sealed class TypedDefinitionApiTests
     [Fact]
     public void TrackWindowCanBeDefinedByType()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .TrackWindow<DeviceOffline>();
 
@@ -36,7 +36,7 @@ public sealed class TypedDefinitionApiTests
     [Fact]
     public void RollUpCanBeDefinedByType()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .Window<DeviceOffline>()
             .RollUp<ZoneOutage>()
@@ -58,7 +58,7 @@ public sealed class TypedDefinitionApiTests
     public void TypedDefinitionCanOverrideNameAndRegisterCallbacks()
     {
         CallbackDeviceOffline.Opened.Clear();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .TrackWindow<CallbackDeviceOffline>();
 
@@ -71,7 +71,7 @@ public sealed class TypedDefinitionApiTests
     [Fact]
     public void TypedWindowDefinitionMustConfigureKey()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => Spanfold
+        var exception = Assert.Throws<InvalidOperationException>(() => EventPipeline
             .For<DeviceSignal>()
             .Window<MissingKeyWindow>());
 
@@ -81,7 +81,7 @@ public sealed class TypedDefinitionApiTests
     [Fact]
     public void TypedRollUpDefinitionMustConfigureActiveState()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => Spanfold
+        var exception = Assert.Throws<InvalidOperationException>(() => EventPipeline
             .For<DeviceSignal>()
             .Window<DeviceOffline>()
             .RollUp<MissingActiveRollUp>());

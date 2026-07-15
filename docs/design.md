@@ -11,7 +11,7 @@ the necessary state tracking.
 
 The builder surface is intentionally narrow:
 
-- `Spanfold.For<TEvent>()`
+- `EventPipeline.For<TEvent>()`
 - `Window(...)`
 - `RollUp(...)`
 - `Build()`

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Spanfold/Spanfold.csproj" />
+    <Project Path="src/Spanfold.Artifacts/Spanfold.Artifacts.csproj" />
     <Project Path="src/Spanfold.Cli/Spanfold.Cli.csproj" />
     <Project Path="src/Spanfold.Testing/Spanfold.Testing.csproj" />
   </Folder>

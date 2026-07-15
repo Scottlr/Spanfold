@@ -40,8 +40,8 @@ public sealed class ComparisonExtensionTests
                 [ComparisonSelector.ForSource("provider-b")],
                 ComparisonScope.Window("DeviceOffline"),
                 ComparisonNormalizationPolicy.Default,
-                ["overlap"],
-                ComparisonOutputOptions.Default),
+                ["overlap"]
+                ),
             [],
             extensionMetadata:
             [

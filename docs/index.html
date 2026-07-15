@@ -302,7 +302,7 @@ cargo test --workspace</code></pre>
           <div class="language-panel" data-language="csharp">
             <pre><code>using Spanfold;
 
-var pipeline = Spanfold.Spanfold
+var pipeline = EventPipeline
     .For&lt;DeviceSignal&gt;()
     .RecordWindows()
     .TrackWindow(

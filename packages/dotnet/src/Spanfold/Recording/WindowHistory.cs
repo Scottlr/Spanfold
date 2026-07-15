@@ -37,18 +37,22 @@ public sealed class WindowHistory
         this.annotations = [];
     }
 
-    internal static WindowHistory CreateFixture(
-        IReadOnlyList<ClosedWindow> closedWindows,
-        IReadOnlyList<OpenWindow> openWindows)
+    /// <summary>Creates an immutable history snapshot from materialized window records.</summary>
+    /// <remarks>
+    /// This import boundary is intended for persisted history, tools, and test
+    /// fixtures. Normal applications should prefer pipeline-owned recording.
+    /// </remarks>
+    public static WindowHistory FromRecords(
+        IEnumerable<ClosedWindow> closedWindows,
+        IEnumerable<OpenWindow> openWindows)
     {
         ArgumentNullException.ThrowIfNull(closedWindows);
         ArgumentNullException.ThrowIfNull(openWindows);
 
         var history = new WindowHistory(enabled: true);
         history.closedWindows.AddRange(closedWindows);
-        for (var i = 0; i < openWindows.Count; i++)
+        foreach (var window in openWindows)
         {
-            var window = openWindows[i];
             history.openWindows.Add(
                 new WindowRecordingKey(
                     window.WindowName,
@@ -139,21 +143,6 @@ public sealed class WindowHistory
             window => window.EndPosition.HasValue
                 && window.EndPosition.Value <= endPositionExclusive);
         return removed;
-    }
-
-    /// <summary>
-    /// Starts a staged comparison over this recorded window history.
-    /// </summary>
-    /// <param name="name">A human-readable name for the comparison.</param>
-    /// <returns>A comparison builder for the recorded history.</returns>
-    /// <exception cref="ArgumentException">
-    /// Thrown when <paramref name="name" /> is empty or only whitespace.
-    /// </exception>
-    public WindowComparisonBuilder Compare(string name)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-
-        return new WindowComparisonBuilder(this, name);
     }
 
     /// <summary>
@@ -389,173 +378,6 @@ public sealed class WindowHistory
     }
 
     /// <summary>
-    /// Builds a directional source matrix for one recorded window name.
-    /// </summary>
-    /// <remarks>
-    /// Cells are emitted in row-major source order. Each non-diagonal cell
-    /// treats the row source as target and the column source as comparison.
-    /// Diagonal cells are identity rows and do not run pairwise comparators.
-    /// </remarks>
-    /// <param name="name">A human-readable matrix name.</param>
-    /// <param name="windowName">The recorded window name to compare.</param>
-    /// <param name="sources">The sources to include, in row and column order.</param>
-    /// <returns>A directional source matrix.</returns>
-    public SourceMatrixResult CompareSources(
-        string name,
-        string windowName,
-        IEnumerable<object> sources)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(windowName);
-        ArgumentNullException.ThrowIfNull(sources);
-
-        var orderedSources = sources as object[] ?? sources.ToArray();
-        var cells = new List<SourceMatrixCell>(orderedSources.Length * orderedSources.Length);
-        var sourceHasWindows = new Dictionary<object, bool>();
-        var uniqueSources = new HashSet<object>();
-        var matrixWindows = this.Windows
-            .Where(window => string.Equals(window.WindowName, windowName, StringComparison.Ordinal))
-            .ToArray();
-
-        for (var i = 0; i < orderedSources.Length; i++)
-        {
-            var source = orderedSources[i];
-            ArgumentNullException.ThrowIfNull(source);
-            if (!uniqueSources.Add(source))
-            {
-                throw new ArgumentException("Source matrix identities must be unique.", nameof(sources));
-            }
-
-            sourceHasWindows[source] = matrixWindows.Any(window =>
-                EqualityComparer<object?>.Default.Equals(window.Source, source));
-        }
-
-        for (var targetIndex = 0; targetIndex < orderedSources.Length; targetIndex++)
-        {
-            var targetSource = orderedSources[targetIndex];
-            for (var againstIndex = 0; againstIndex < orderedSources.Length; againstIndex++)
-            {
-                var againstSource = orderedSources[againstIndex];
-                var targetHasWindows = sourceHasWindows[targetSource];
-                var againstHasWindows = sourceHasWindows[againstSource];
-
-                if (targetIndex == againstIndex)
-                {
-                    cells.Add(new SourceMatrixCell(
-                        targetSource,
-                        againstSource,
-                        IsDiagonal: true,
-                        targetHasWindows,
-                        againstHasWindows,
-                        OverlapRowCount: 0,
-                        ResidualRowCount: 0,
-                        MissingRowCount: 0,
-                        CoverageRowCount: 0,
-                        CoverageRatio: targetHasWindows ? 1d : null));
-                    continue;
-                }
-
-                var result = Compare(name + " " + targetSource + " vs " + againstSource)
-                    .Target(targetSource.ToString() ?? "target", selector => selector.Source(targetSource))
-                    .Against(againstSource.ToString() ?? "against", selector => selector.Source(againstSource))
-                    .Within(scope => scope.Window(windowName))
-                    .Using(comparators => comparators.Overlap().Residual().Missing().Coverage())
-                    .Run();
-
-                cells.Add(new SourceMatrixCell(
-                    targetSource,
-                    againstSource,
-                    IsDiagonal: false,
-                    targetHasWindows,
-                    againstHasWindows,
-                    result.OverlapRows.Count,
-                    result.ResidualRows.Count,
-                    result.MissingRows.Count,
-                    result.CoverageRows.Count,
-                    GetCoverageRatio(result.CoverageSummaries)));
-            }
-        }
-
-        return new SourceMatrixResult(name, windowName, orderedSources, cells.ToArray());
-    }
-
-    /// <summary>
-    /// Compares parent windows against child contribution windows using temporal co-activity.
-    /// </summary>
-    /// <remarks>
-    /// This comparison does not infer semantic parent/child lineage. It groups
-    /// windows by source and partition and reports whether they are temporally
-    /// co-active. Parent and child keys may differ because rollups often
-    /// aggregate several child keys into one parent key. Open windows are not
-    /// assigned an end boundary; callers must provide a bounded recording
-    /// horizon before treating the result as complete.
-    /// </remarks>
-    /// <param name="name">A human-readable comparison name.</param>
-    /// <param name="parentWindowName">The parent recorded window name.</param>
-    /// <param name="childWindowName">The child contribution window name.</param>
-    /// <returns>A hierarchy comparison result.</returns>
-    public HierarchyComparisonResult CompareHierarchy(
-        string name,
-        string parentWindowName,
-        string childWindowName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(parentWindowName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(childWindowName);
-
-        var parents = WindowsForName(parentWindowName);
-        var children = WindowsForName(childWindowName);
-        var diagnostics = new List<ComparisonPlanDiagnostic>();
-
-        if (parents.Count == 0)
-        {
-            diagnostics.Add(new ComparisonPlanDiagnostic(
-                ComparisonPlanValidationCode.MissingLineage,
-                "Hierarchy comparison found no parent windows.",
-                "parentWindowName",
-                ComparisonPlanDiagnosticSeverity.Warning));
-        }
-
-        if (children.Count == 0)
-        {
-            diagnostics.Add(new ComparisonPlanDiagnostic(
-                ComparisonPlanValidationCode.MissingLineage,
-                "Hierarchy comparison found no child contribution windows.",
-                "childWindowName",
-                ComparisonPlanDiagnosticSeverity.Warning));
-        }
-
-        if (ContainsOpenWindow(parents) || ContainsOpenWindow(children))
-        {
-            diagnostics.Add(new ComparisonPlanDiagnostic(
-                ComparisonPlanValidationCode.HierarchyOpenWindowsWithoutHorizon,
-                "Hierarchy co-activity excludes open-window duration because no evaluation horizon was supplied.",
-                "windowNames",
-                ComparisonPlanDiagnosticSeverity.Warning));
-        }
-
-        var rows = new List<HierarchyComparisonRow>();
-        var scopes = BuildHierarchyScopes(parents, children);
-
-        foreach (var scope in scopes)
-        {
-            AddHierarchyRows(
-                scope.Source,
-                scope.Partition,
-                parents,
-                children,
-                rows);
-        }
-
-        return new HierarchyComparisonResult(
-            name,
-            parentWindowName,
-            childWindowName,
-            rows.ToArray(),
-            diagnostics.ToArray());
-    }
-
-    /// <summary>
     /// Finds overlapping closed windows within the same window scope.
     /// </summary>
     /// <returns>The overlapping window pairs.</returns>
@@ -712,212 +534,6 @@ public sealed class WindowHistory
         return false;
     }
 
-    private List<WindowRecord> WindowsForName(string windowName)
-    {
-        var matches = new List<WindowRecord>();
-
-        foreach (var window in Windows)
-        {
-            if (string.Equals(window.WindowName, windowName, StringComparison.Ordinal))
-            {
-                matches.Add(window);
-            }
-        }
-
-        return matches;
-    }
-
-    private static List<HierarchyScope> BuildHierarchyScopes(
-        List<WindowRecord> parents,
-        List<WindowRecord> children)
-    {
-        var scopes = new List<HierarchyScope>();
-
-        AddScopes(parents, scopes);
-        AddScopes(children, scopes);
-        scopes.Sort(static (left, right) =>
-        {
-            var source = StableObjectValue(left.Source).CompareTo(StableObjectValue(right.Source));
-            if (source != 0)
-            {
-                return source;
-            }
-
-            return StableObjectValue(left.Partition).CompareTo(StableObjectValue(right.Partition));
-        });
-
-        return scopes;
-    }
-
-    private static void AddScopes(List<WindowRecord> windows, List<HierarchyScope> scopes)
-    {
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var scope = new HierarchyScope(windows[i].Source, windows[i].Partition);
-            if (!scopes.Contains(scope))
-            {
-                scopes.Add(scope);
-            }
-        }
-    }
-
-    private static void AddHierarchyRows(
-        object? source,
-        object? partition,
-        List<WindowRecord> parents,
-        List<WindowRecord> children,
-        List<HierarchyComparisonRow> rows)
-    {
-        var scopedParents = FilterHierarchyScope(parents, source, partition);
-        var scopedChildren = FilterHierarchyScope(children, source, partition);
-        var boundaries = new List<TemporalPoint>((scopedParents.Count + scopedChildren.Count) * 2);
-
-        AddBoundaries(scopedParents, boundaries);
-        AddBoundaries(scopedChildren, boundaries);
-        boundaries.Sort(static (left, right) => left.CompareTo(right));
-
-        var unique = new List<TemporalPoint>(boundaries.Count);
-        for (var i = 0; i < boundaries.Count; i++)
-        {
-            if (unique.Count == 0 || boundaries[i].CompareTo(unique[^1]) != 0)
-            {
-                unique.Add(boundaries[i]);
-            }
-        }
-
-        for (var i = 0; i < unique.Count - 1; i++)
-        {
-            var start = unique[i];
-            var end = unique[i + 1];
-            if (start.CompareTo(end) >= 0)
-            {
-                continue;
-            }
-
-            var parentIds = ActiveIds(scopedParents, start, end);
-            var childIds = ActiveIds(scopedChildren, start, end);
-            if (parentIds.Count == 0 && childIds.Count == 0)
-            {
-                continue;
-            }
-
-            rows.Add(new HierarchyComparisonRow(
-                GetHierarchyKind(parentIds.Count, childIds.Count),
-                source,
-                partition,
-                TemporalRange.Closed(start, end),
-                parentIds,
-                childIds));
-        }
-    }
-
-    private static List<WindowRecord> FilterHierarchyScope(
-        List<WindowRecord> windows,
-        object? source,
-        object? partition)
-    {
-        var matches = new List<WindowRecord>();
-
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var window = windows[i];
-            if (EqualityComparer<object?>.Default.Equals(window.Source, source)
-                && EqualityComparer<object?>.Default.Equals(window.Partition, partition))
-            {
-                matches.Add(window);
-            }
-        }
-
-        return matches;
-    }
-
-    private static void AddBoundaries(List<WindowRecord> windows, List<TemporalPoint> boundaries)
-    {
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var window = windows[i];
-            if (!window.EndPosition.HasValue)
-            {
-                continue;
-            }
-
-            boundaries.Add(TemporalPoint.ForPosition(window.StartPosition));
-            boundaries.Add(TemporalPoint.ForPosition(window.EndPosition.Value));
-        }
-    }
-
-    private static bool ContainsOpenWindow(List<WindowRecord> windows)
-    {
-        for (var i = 0; i < windows.Count; i++)
-        {
-            if (!windows[i].EndPosition.HasValue)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static IReadOnlyList<WindowRecordId> ActiveIds(
-        List<WindowRecord> windows,
-        TemporalPoint start,
-        TemporalPoint end)
-    {
-        var ids = new List<WindowRecordId>();
-
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var window = windows[i];
-            if (!window.EndPosition.HasValue)
-            {
-                continue;
-            }
-
-            var range = TemporalRange.Closed(
-                TemporalPoint.ForPosition(window.StartPosition),
-                TemporalPoint.ForPosition(window.EndPosition.Value));
-            if (range.Start.CompareTo(start) <= 0 && end.CompareTo(range.End!.Value) <= 0)
-            {
-                ids.Add(window.Id);
-            }
-        }
-
-        ids.Sort(static (left, right) => string.CompareOrdinal(left.Value, right.Value));
-        return ids.ToArray();
-    }
-
-    private static HierarchyComparisonRowKind GetHierarchyKind(int parentCount, int childCount)
-    {
-        if (parentCount > 0 && childCount > 0)
-        {
-            return HierarchyComparisonRowKind.ParentExplained;
-        }
-
-        return parentCount > 0
-            ? HierarchyComparisonRowKind.UnexplainedParent
-            : HierarchyComparisonRowKind.OrphanChild;
-    }
-
-    private static double? GetCoverageRatio(IReadOnlyList<CoverageSummary> summaries)
-    {
-        var target = 0d;
-        var covered = 0d;
-
-        for (var i = 0; i < summaries.Count; i++)
-        {
-            target += summaries[i].TargetMagnitude;
-            covered += summaries[i].CoveredMagnitude;
-        }
-
-        return target == 0d ? null : covered / target;
-    }
-
-    private static string StableObjectValue(object? value)
-    {
-        return CanonicalValueFormatter.Format(value);
-    }
-
     private static bool HasSegment(WindowRecord window, string name, object? value)
     {
         for (var i = 0; i < window.Segments.Count; i++)
@@ -948,5 +564,4 @@ public sealed class WindowHistory
         return false;
     }
 
-    private sealed record HierarchyScope(object? Source, object? Partition);
 }

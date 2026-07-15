@@ -172,7 +172,6 @@ public sealed class ContractFixtureTests
             scope,
             ComparisonNormalizationPolicy.Default,
             plan.GetProperty("comparators").EnumerateArray().Select(static comparator => comparator.GetString()!),
-            ComparisonOutputOptions.Default,
             plan.GetProperty("strict").GetBoolean());
     }
 

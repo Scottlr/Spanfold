@@ -7,7 +7,7 @@ public sealed class PublicEntryPointTests
     [Fact]
     public void ForReturnsBuilderForEventType()
     {
-        var builder = Spanfold.For<SampleEvent>();
+        var builder = EventPipeline.For<SampleEvent>();
 
         Assert.IsType<EventPipelineBuilder<SampleEvent>>(builder);
     }

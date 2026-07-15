@@ -9,7 +9,7 @@ public sealed class WindowOptionsCallbackTests
     {
         var opened = new List<WindowEmission<DeviceSignal>>();
         var closed = new List<WindowEmission<DeviceSignal>>();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .TrackWindow(
                 "DeviceOffline",
@@ -31,7 +31,7 @@ public sealed class WindowOptionsCallbackTests
     {
         var offlineOpened = new List<WindowEmission<DeviceSignal>>();
         var maintenanceOpened = new List<WindowEmission<DeviceSignal>>();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .Window(
                 "DeviceOffline",
@@ -59,7 +59,7 @@ public sealed class WindowOptionsCallbackTests
     public void WindowOptionCallbacksRunBeforeGlobalCallbacks()
     {
         var calls = new List<string>();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .OnEmission(_ => calls.Add("global"))
             .TrackWindow(
@@ -76,7 +76,7 @@ public sealed class WindowOptionsCallbackTests
     [Fact]
     public void WindowOptionCallbackIsRequired()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .TrackWindow(
                 "DeviceOffline",
@@ -92,7 +92,7 @@ public sealed class WindowOptionsCallbackTests
     {
         WindowOptions<DeviceSignal, string>? captured = null;
         var opened = new List<WindowEmission<DeviceSignal>>();
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<DeviceSignal>()
             .TrackWindow(
                 "DeviceOffline",

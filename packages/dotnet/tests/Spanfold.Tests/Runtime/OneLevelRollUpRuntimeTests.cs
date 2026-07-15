@@ -132,7 +132,7 @@ public sealed class OneLevelRollUpRuntimeTests
     [Fact]
     public void RollUpUsesChildWindowKeyComparerForMembership()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -160,7 +160,7 @@ public sealed class OneLevelRollUpRuntimeTests
 
     private static EventPipeline<PriceTick> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

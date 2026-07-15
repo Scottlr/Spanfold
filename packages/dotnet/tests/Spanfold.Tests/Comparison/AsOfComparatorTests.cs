@@ -93,7 +93,7 @@ public sealed class AsOfComparatorTests
     [Fact]
     public void BuilderRequiresExplicitAsOfOptions()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<NormalizedInput>()
             .RecordWindows()
             .TrackWindow("Quote", input => input.Key, static _ => true);
@@ -120,8 +120,8 @@ public sealed class AsOfComparatorTests
             [ComparisonSelector.ForSource("quote")],
             ComparisonScope.Window("Quote"),
             ComparisonNormalizationPolicy.Default,
-            [comparator],
-            ComparisonOutputOptions.Default);
+            [comparator]
+            );
         var selected = new List<WindowRecord>(inputs.Length);
         var normalized = new List<NormalizedWindowRecord>(inputs.Length);
 

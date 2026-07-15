@@ -1,10 +1,9 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Describes finality metadata for a materialized comparison row.
 /// </summary>
-/// <param name="RowType">The canonical exported row family, such as overlap or residual.</param>
-/// <param name="RowId">The opaque deterministic row identifier assigned by the producing result.</param>
+/// <param name="Reference">The canonical row family and opaque row identifier.</param>
 /// <param name="Finality">Whether the row is final or provisional.</param>
 /// <param name="Reason">A short human-readable finality reason.</param>
 /// <param name="Version">The deterministic row metadata version.</param>
@@ -14,9 +13,18 @@ namespace Spanfold;
 /// should preserve them rather than recomputing the private identity algorithm
 /// or assuming parity with Rust identifiers.
 public sealed record ComparisonRowFinality(
-    string RowType,
-    string RowId,
+    ComparisonRowReference Reference,
     ComparisonFinality Finality,
     string Reason,
     int Version = 1,
-    string? SupersedesRowId = null);
+    string? SupersedesRowId = null)
+{
+    /// <summary>Gets the canonical row family.</summary>
+    public ComparisonRowKind RowKind => Reference.Kind;
+
+    /// <summary>Gets the canonical exported row-family label.</summary>
+    public string RowType => Reference.Kind.ToArtifactLabel();
+
+    /// <summary>Gets the opaque deterministic row identifier.</summary>
+    public string RowId => Reference.RowId;
+}

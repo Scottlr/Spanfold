@@ -44,12 +44,13 @@ The core flow is:
 
 ## Install the preview
 
-Install the library, optional testing helpers, and CLI tool from NuGet.org:
+Install the core library, optional artifact and testing layers, and CLI tool:
 
 ```bash
-dotnet add package Spanfold --version 0.1.0-preview.2
-dotnet add package Spanfold.Testing --version 0.1.0-preview.2
-dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.2
+dotnet add package Spanfold --version 0.2.0-preview.1
+dotnet add package Spanfold.Artifacts --version 0.2.0-preview.1
+dotnet add package Spanfold.Testing --version 0.2.0-preview.1
+dotnet tool install --global Spanfold.Cli --version 0.2.0-preview.1
 ```
 
 `Spanfold.Testing` is optional. It is useful in consumer test suites when you want
@@ -61,9 +62,10 @@ Define the event shape, the key that owns state, and the predicate that says
 when the window is active.
 
 ```csharp
-using Spanfold; // Import Spanfold's pipeline and comparison APIs.
+using Spanfold;
+using Spanfold.Comparison;
 
-var pipeline = Spanfold.Spanfold // Start a Spanfold pipeline definition.
+var pipeline = EventPipeline // Start a Spanfold pipeline definition.
     .For<DeviceSignal>() // Configure the event type that will be ingested.
     .RecordWindows() // Store opened and closed windows for comparison.
     .TrackWindow( // Define one state-driven window.
@@ -125,7 +127,7 @@ across identity-scheme revisions. `CoverageRow` describes one aligned target
 segment, while `CoverageSummaries` is the authority for grouped aggregate
 coverage.
 
-The result is structured data:
+The core result is structured data:
 
 - diagnostics
 - selected, excluded, and normalized windows
@@ -133,30 +135,89 @@ The result is structured data:
 - comparator rows
 - summaries
 - finality metadata
-- deterministic JSON, JSON Lines, Markdown, and debug HTML exports
+
+Exports are an optional package concern. Add `Spanfold.Artifacts`, then import
+`Spanfold.Artifacts` for JSON, JSON Lines, Markdown, debug HTML, parsed artifact
+models, and verifiable audit bundles.
 
 For visual debugging, export the result as a standalone HTML artifact:
 
 ```csharp
+using Spanfold.Artifacts;
+
 result.ExportDebugHtml("artifacts/provider-qa.html"); // Write a browser-readable timeline and segment graph.
 ```
 
-You can also make debug output a configuration-driven execution option:
+Comparison execution never writes files. This keeps the analytical result
+boundary deterministic; export only after a result exists:
 
 ```csharp
-var debugHtml = ComparisonDebugHtmlOptions.ToFile("artifacts/provider-qa.html"); // Enable a visual artifact for this run.
-var comparison = pipeline.History // Start from recorded windows.
+var resultWithDebug = pipeline.History // Start from recorded windows.
     .Compare("Provider QA") // Name the comparison.
     .Target("provider-a", selector => selector.Source("provider-a")) // Select the target source.
     .Against("provider-b", selector => selector.Source("provider-b")) // Select the comparison source.
     .Within(scope => scope.Window("DeviceOffline")) // Limit analysis to one window family.
-    .Using(comparators => comparators.Overlap().Residual()); // Request agreement and target-only rows.
-var resultWithDebug = comparison.Run(debugHtml); // Execute and write the debug file.
+    .Using(comparators => comparators.Overlap().Residual()) // Request agreement and target-only rows.
+    .Run();
+resultWithDebug.ExportDebugHtml("artifacts/provider-qa.html");
 ```
 
 The debug HTML file is useful when you need to see why a comparison produced a
 row: which source window was active, where the overlap started, where a gap
 appeared, and whether live rows are still provisional.
+
+## Assess, Trace, Revise, and Audit
+
+`Spanfold.Assessment` turns acceptance criteria into named, portable rules:
+
+```csharp
+using Spanfold.Assessment;
+
+var specification = AssessmentSpecification.Create("provider-gate", rules => rules
+    .MinimumCoverage(0.99)
+    .MaximumResidualMagnitude(5, AssessmentAggregation.Total)
+    .RequireFinalRows());
+var assessment = result.Assess(specification);
+```
+
+Every violation can carry canonical `ComparisonRowReference` evidence. Follow
+that evidence through the result without switching on strings:
+
+```csharp
+var residual = result.ResidualRowsWithFinality().First();
+ComparisonRowTrace<ResidualRow> trace = result.TraceRow(residual);
+```
+
+`ComparisonRevision.Between(previous, current)` reports added, revised, and
+retracted rows plus coverage and lead/lag summary deltas. Supplying both
+assessments also reports introduced, changed, and resolved violations.
+
+For a durable handoff, write and verify an audit bundle:
+
+```csharp
+using Spanfold.Artifacts;
+
+var bundle = AuditBundleWriter.Write("artifacts/provider-gate", result, assessment);
+var verification = AuditBundleReader.Open(bundle.Path).Verify();
+```
+
+Verification checks file sizes and SHA-256 digests against the manifest. It
+proves bundle integrity, not producer authenticity. Row IDs are scoped to the
+manifest identity domain; the current .NET contract does not claim row-ID
+parity with the Rust package.
+
+The CLI exposes the same boundaries:
+
+```bash
+spanfold check fixture.json --spec assessment.json
+spanfold suite fixture.json --suite assessment-suite.json
+spanfold audit fixture.json --out artifacts/run-42
+spanfold verify-bundle artifacts/run-42
+spanfold diff artifacts/baseline artifacts/run-42
+```
+
+Portable timestamp-known-at input remains intentionally deferred until the
+.NET and Rust runtimes share one explicit clock and availability contract.
 
 ## Query Recorded Windows Directly
 
@@ -317,7 +378,7 @@ var liveness = LaneLivenessTracker.ForLanes( // Create deterministic liveness st
     "provider-a", // Track provider A.
     "provider-b"); // Track provider B.
 
-var silencePipeline = Spanfold.Spanfold // Build a normal Spanfold pipeline for liveness events.
+var silencePipeline = EventPipeline // Build a normal Spanfold pipeline for liveness events.
     .For<LaneLivenessSignal>() // Consume liveness state-change events.
     .RecordWindows() // Record silence windows.
     .WithEventTime(signal => signal.OccurredAt) // Use the actual silence/recovery time.
@@ -343,7 +404,7 @@ active. This records the analytical shape during ingestion instead of slicing
 windows later.
 
 ```csharp
-var pipeline = Spanfold.Spanfold // Start a Spanfold pipeline definition.
+var pipeline = EventPipeline // Start a Spanfold pipeline definition.
     .For<DeviceStateChanged>() // Configure the event type that will be ingested.
     .RecordWindows() // Store open and closed windows for comparison.
     .Window("DeviceOffline", window => window // Define one device-state window.

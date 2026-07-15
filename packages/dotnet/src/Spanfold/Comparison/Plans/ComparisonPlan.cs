@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Represents a window comparison question as inspectable data.
@@ -20,7 +20,6 @@ public sealed class ComparisonPlan
     /// <param name="scope">The comparison scope.</param>
     /// <param name="normalization">The normalization policy.</param>
     /// <param name="comparators">The comparator declarations.</param>
-    /// <param name="output">The output options.</param>
     /// <param name="isStrict">Whether validation warnings should be treated strictly by later execution stages.</param>
     public ComparisonPlan(
         string name,
@@ -29,7 +28,6 @@ public sealed class ComparisonPlan
         ComparisonScope? scope,
         ComparisonNormalizationPolicy? normalization,
         IEnumerable<string>? comparators,
-        ComparisonOutputOptions? output,
         bool isStrict = false)
     {
         Name = name;
@@ -38,7 +36,6 @@ public sealed class ComparisonPlan
         Scope = scope;
         Normalization = normalization ?? ComparisonNormalizationPolicy.Default;
         Comparators = MaterializeComparators(comparators);
-        Output = output ?? ComparisonOutputOptions.Default;
         IsStrict = isStrict;
     }
 
@@ -71,11 +68,6 @@ public sealed class ComparisonPlan
     /// Gets comparator declarations in deterministic declaration order.
     /// </summary>
     public IReadOnlyList<string> Comparators { get; }
-
-    /// <summary>
-    /// Gets output preferences for later execution.
-    /// </summary>
-    public ComparisonOutputOptions Output { get; }
 
     /// <summary>
     /// Gets whether later execution should treat validation warnings strictly.

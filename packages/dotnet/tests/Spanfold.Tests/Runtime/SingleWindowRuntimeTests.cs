@@ -66,7 +66,7 @@ public sealed class SingleWindowRuntimeTests
 
     private static EventPipeline<PriceTick> CreatePipeline()
     {
-        return Spanfold
+        return EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

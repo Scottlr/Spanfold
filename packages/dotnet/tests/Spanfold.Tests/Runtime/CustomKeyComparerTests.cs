@@ -7,7 +7,7 @@ public sealed class CustomKeyComparerTests
     [Fact]
     public void WindowCanUseCustomKeyComparer()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",
@@ -25,7 +25,7 @@ public sealed class CustomKeyComparerTests
     [Fact]
     public void RecordedWindowClosesWithCustomKeyComparer()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .Window(
@@ -46,7 +46,7 @@ public sealed class CustomKeyComparerTests
     [Fact]
     public void ComparisonAlignsComparerEquivalentKeysAcrossSources()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .RecordWindows()
             .Window(
@@ -74,7 +74,7 @@ public sealed class CustomKeyComparerTests
     [Fact]
     public void WindowUsesDefaultComparerWhenCustomComparerIsOmitted()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceTick>()
             .Window(
                 "SelectionSuspension",

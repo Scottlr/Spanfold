@@ -7,7 +7,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void RollUpsPreserveChildSegmentContext()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -34,7 +34,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void MultiLevelRollUpsPreserveChildSegmentContext()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -62,7 +62,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void RollUpCanDropChildSegmentContext()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -96,7 +96,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void DroppedSegmentChangeStillMigratesActiveChildToNewParent()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -124,7 +124,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void RollUpCanPreserveSelectedChildSegments()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -173,7 +173,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void RollUpCanRenameChildSegment()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -200,7 +200,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void RollUpCanTransformChildSegmentValue()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window
@@ -225,7 +225,7 @@ public sealed class SegmentedRollUpRuntimeTests
     [Fact]
     public void RollUpRejectsDuplicateProjectedSegmentNames()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<PriceUpdate>()
             .RecordWindows()
             .Window("SelectionPriced", window => window

@@ -1,0 +1,22 @@
+{
+  "schema": "spanfold.assessment-specification",
+  "schemaVersion": 1,
+  "name": "provider-release-gate",
+  "rules": [
+    {
+      "id": "coverage",
+      "type": "minimumCoverage",
+      "minimumRatio": 0.99
+    },
+    {
+      "id": "residual-budget",
+      "type": "maximumResidualMagnitude",
+      "maximumMagnitude": 5,
+      "aggregation": "total"
+    },
+    {
+      "id": "final-only",
+      "type": "requireFinalRows"
+    }
+  ]
+}

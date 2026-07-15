@@ -1,6 +1,6 @@
 using Spanfold.Internal.Keys;
 
-namespace Spanfold;
+namespace Spanfold.Comparison;
 
 /// <summary>
 /// Describes a selection used by a window comparison plan.

@@ -9,26 +9,22 @@ public sealed class ComparisonChangelogTests
     {
         var previous = new[]
         {
-            new ComparisonRowFinality(
-                "residual",
-                "residual[0]",
-                ComparisonFinality.Provisional,
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Provisional,
                 "Depends on at least one open window clipped to the evaluation horizon.")
         };
         var current = new[]
         {
-            new ComparisonRowFinality(
-                "residual",
-                "residual[0]",
-                ComparisonFinality.Final,
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Final,
                 "All contributing windows were closed when the row was produced.")
         };
 
         var entry = Assert.Single(ComparisonChangelog.Create(previous, current));
 
-        Assert.Equal("residual[0]", entry.RowId);
+        Assert.Equal("residual[0]", entry.Row.RowId);
         Assert.Equal(2, entry.Version);
-        Assert.Equal(ComparisonFinality.Revised, entry.Finality);
+        Assert.Equal(ComparisonRevisionKind.Revised, entry.Kind);
+        Assert.Equal(ComparisonFinality.Provisional, entry.PreviousFinality);
+        Assert.Equal(ComparisonFinality.Final, entry.CurrentFinality);
         Assert.Equal("residual[0]", entry.SupersedesRowId);
     }
 
@@ -37,12 +33,12 @@ public sealed class ComparisonChangelogTests
     {
         var previous = new[]
         {
-            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Provisional, "open")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Provisional, "open")
         };
 
         var entry = Assert.Single(ComparisonChangelog.Create(previous, []));
 
-        Assert.Equal(ComparisonFinality.Retracted, entry.Finality);
+        Assert.Equal(ComparisonRevisionKind.Retracted, entry.Kind);
         Assert.Equal(2, entry.Version);
         Assert.Equal("residual[0]", entry.SupersedesRowId);
     }
@@ -52,12 +48,12 @@ public sealed class ComparisonChangelogTests
     {
         var previous = new[]
         {
-            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Provisional, "open"),
-            new ComparisonRowFinality("missing", "missing[0]", ComparisonFinality.Final, "closed")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Provisional, "open"),
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Missing, "missing[0]"), ComparisonFinality.Final, "closed")
         };
         var current = new[]
         {
-            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Final, "closed")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Final, "closed")
         };
 
         var entries = ComparisonChangelog.Create(previous, current);
@@ -75,11 +71,11 @@ public sealed class ComparisonChangelogTests
     {
         var previous = new[]
         {
-            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Final, "closed")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Final, "closed")
         };
         var current = new[]
         {
-            new ComparisonRowFinality("residual", "residual[0]", ComparisonFinality.Provisional, "reopened")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Residual, "residual[0]"), ComparisonFinality.Provisional, "reopened")
         };
 
         var replayed = ComparisonChangelog.Replay(previous, ComparisonChangelog.Create(previous, current));
@@ -94,13 +90,13 @@ public sealed class ComparisonChangelogTests
     {
         var previous = new[]
         {
-            new ComparisonRowFinality("coverage", "coverage[1]", ComparisonFinality.Provisional, "open"),
-            new ComparisonRowFinality("coverage", "coverage[0]", ComparisonFinality.Provisional, "open")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Coverage, "coverage[1]"), ComparisonFinality.Provisional, "open"),
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Coverage, "coverage[0]"), ComparisonFinality.Provisional, "open")
         };
         var current = new[]
         {
-            new ComparisonRowFinality("coverage", "coverage[1]", ComparisonFinality.Final, "closed"),
-            new ComparisonRowFinality("coverage", "coverage[0]", ComparisonFinality.Final, "closed")
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Coverage, "coverage[1]"), ComparisonFinality.Final, "closed"),
+            new ComparisonRowFinality(new ComparisonRowReference(ComparisonRowKind.Coverage, "coverage[0]"), ComparisonFinality.Final, "closed")
         };
 
         var first = ComparisonChangelog.Create(previous, current);
@@ -110,7 +106,7 @@ public sealed class ComparisonChangelogTests
         Assert.All(first, entry => Assert.Equal(2, entry.Version));
         Assert.Collection(
             first,
-            entry => Assert.Equal("coverage[0]", entry.RowId),
-            entry => Assert.Equal("coverage[1]", entry.RowId));
+            entry => Assert.Equal("coverage[0]", entry.Row.RowId),
+            entry => Assert.Equal("coverage[1]", entry.Row.RowId));
     }
 }

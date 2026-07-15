@@ -217,7 +217,7 @@ var liveness = LaneLivenessTracker.ForLanes( // Create deterministic liveness st
     "provider-a", // Track provider A.
     "provider-b"); // Track provider B.
 
-var silencePipeline = Spanfold.Spanfold // Build a normal Spanfold pipeline for liveness events.
+var silencePipeline = EventPipeline // Build a normal Spanfold pipeline for liveness events.
     .For<LaneLivenessSignal>() // Consume liveness state-change events.
     .RecordWindows() // Record silence windows.
     .WithEventTime(signal => signal.OccurredAt) // Use the actual silence/recovery time.
@@ -312,27 +312,20 @@ result.ExportDebugHtml("artifacts/provider-qa.html"); // Write a self-contained 
 result.ExportLlmContext("artifacts/provider-qa.llm.json"); // Write agent-readable context and full data.
 ```
 
-When configuration should control whether a run writes an artifact, pass
-options to `Run()` or `RunLive()`:
+Comparison execution does not write artifacts. Let configuration decide whether
+to call an exporter after the immutable result exists:
 
 ```csharp
-var debugHtml = ComparisonDebugHtmlOptions.ToFile("artifacts/provider-qa.html"); // Enable a visual artifact for this run.
-var llmContext = ComparisonLlmContextOptions.ToFile("artifacts/provider-qa.llm.json"); // Enable an agent context artifact.
 var resultWithDebug = pipeline.History // Start from recorded windows.
     .Compare("Provider QA") // Name the comparison.
     .Target("provider-a", selector => selector.Source("provider-a")) // Select the target source.
     .Against("provider-b", selector => selector.Source("provider-b")) // Select the comparison source.
     .Within(scope => scope.Window("DeviceOffline")) // Limit the scope to one window family.
     .Using(comparators => comparators.Overlap().Residual()) // Request agreement and target-only rows.
-    .Run(debugHtml); // Execute and write the debug file.
+    .Run();
 
-var resultWithContext = pipeline.History // Start from recorded windows.
-    .Compare("Provider QA") // Name the comparison.
-    .Target("provider-a", selector => selector.Source("provider-a")) // Select the target source.
-    .Against("provider-b", selector => selector.Source("provider-b")) // Select the comparison source.
-    .Within(scope => scope.Window("DeviceOffline")) // Limit the scope to one window family.
-    .Using(comparators => comparators.Overlap().Residual()) // Request agreement and target-only rows.
-    .Run(llmContext); // Execute and write the LLM context file.
+resultWithDebug.ExportDebugHtml("artifacts/provider-qa.html");
+resultWithDebug.ExportLlmContext("artifacts/provider-qa.llm.json");
 ```
 
 Use debug HTML at workflow boundaries, test failure boundaries, notebook
@@ -375,7 +368,7 @@ the active predicate remains true, Spanfold closes the current window and opens 
 new one at the same processing position or event timestamp.
 
 ```csharp
-var pipeline = Spanfold.Spanfold // Start a Spanfold pipeline definition.
+var pipeline = EventPipeline // Start a Spanfold pipeline definition.
     .For<DeviceStateChanged>() // Configure the event type.
     .RecordWindows() // Store windows for comparison.
     .Window("DeviceOffline", window => window // Define the source window.

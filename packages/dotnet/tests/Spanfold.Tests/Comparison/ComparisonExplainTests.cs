@@ -13,8 +13,8 @@ public sealed class ComparisonExplainTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         var first = plan.Explain();
         var second = plan.Explain();
@@ -52,8 +52,8 @@ public sealed class ComparisonExplainTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         var explanation = plan.Explain(ComparisonExplanationFormat.PlainText);
 
@@ -70,8 +70,8 @@ public sealed class ComparisonExplainTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("Device_[Offline]"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
 
         var explanation = plan.Explain(ComparisonExplanationFormat.Markdown);
 
@@ -87,8 +87,8 @@ public sealed class ComparisonExplainTests
             [ComparisonSelector.ForSource("provider-b")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["overlap"],
-            ComparisonOutputOptions.Default);
+            ["overlap"]
+            );
         var prepared = new PreparedComparison(
             plan,
             [],

@@ -7,7 +7,7 @@ public sealed class AtomicIngestionTests
     [Fact]
     public void LaterSelectorFailureRollsBackEarlierRuntimeAndPosition()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<ObservedEvent>()
             .RecordWindows()
             .Window("First", key: item => item.Key, isActive: item => item.IsActive)

@@ -76,7 +76,7 @@ public sealed class ContainmentComparatorTests
     [Fact]
     public void BuilderAddsContainmentComparator()
     {
-        var pipeline = Spanfold
+        var pipeline = EventPipeline
             .For<NormalizedInput>()
             .RecordWindows()
             .TrackWindow("DeviceOffline", input => input.Key, static _ => true);
@@ -100,8 +100,8 @@ public sealed class ContainmentComparatorTests
             [ComparisonSelector.ForSource("container")],
             ComparisonScope.Window("DeviceOffline"),
             ComparisonNormalizationPolicy.Default,
-            ["containment"],
-            ComparisonOutputOptions.Default);
+            ["containment"]
+            );
         var selected = new List<WindowRecord>(inputs.Length);
         var normalized = new List<NormalizedWindowRecord>(inputs.Length);
 

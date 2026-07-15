@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.2.0-preview.1
+
+- Organize comparison, liveness, assessment, revisions, and artifacts into
+  explicit C# namespaces and packages.
+- Add canonical typed row references, row lineage traces, semantic snapshot
+  revisions, portable assessment rules and suites, and assertion helpers.
+- Move export and explanation APIs into the optional `Spanfold.Artifacts`
+  package with atomic audit bundles, disclosure profiles, parsed artifact
+  models, and SHA-256 integrity verification.
+- Add CLI `check`, `suite`, `verify-bundle`, and `diff` workflows.
+- Replace the pipeline entry point with `EventPipeline.For<TEvent>()`; the old
+  entry point remains obsolete for source migration.
+- Remove comparison-run output options so execution remains free of file I/O.
+
 ## 0.1.0-preview.2
 
 - Render the package README logo using CommonMark image syntax supported by

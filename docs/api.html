@@ -222,7 +222,7 @@ cargo run -p spanfold-cli -- --help</code></pre>
           </p>
           <table class="member-table">
             <tr><th>Rust member</th><th>C# equivalent</th></tr>
-            <tr><td><code>spanfold::for_events::&lt;T&gt;()</code></td><td><code>Spanfold.For&lt;TEvent&gt;()</code></td></tr>
+            <tr><td><code>spanfold::for_events::&lt;T&gt;()</code></td><td><code>EventPipeline.For&lt;TEvent&gt;()</code></td></tr>
             <tr><td><code>EventPipelineBuilder::record_windows()</code></td><td><code>EventPipelineBuilder.RecordWindows()</code></td></tr>
             <tr><td><code>EventPipelineBuilder::track_window(...)</code></td><td><code>EventPipelineBuilder.TrackWindow(...)</code></td></tr>
             <tr><td><code>WindowHistory::compare(...)</code></td><td><code>WindowHistory.Compare(...)</code></td></tr>
@@ -548,8 +548,7 @@ let result = history
             <tr><td><code>ExportMarkdown()</code></td><td>Deterministic Markdown explanation.</td></tr>
             <tr><td><code>ExportDebugHtml()</code></td><td>Self-contained visual comparison document.</td></tr>
             <tr><td><code>ExportLlmContext()</code></td><td>Agent-readable JSON with instructions, summary, Markdown orientation, full result data, and row documents.</td></tr>
-            <tr><td><code>ComparisonDebugHtmlOptions.ToFile(...)</code></td><td>Configuration-driven debug output from `Run()` or `RunLive()`.</td></tr>
-            <tr><td><code>ComparisonLlmContextOptions.ToFile(...)</code></td><td>Configuration-driven LLM context output from `Run()` or `RunLive()`.</td></tr>
+            <tr><td><code>AuditBundleWriter.Write(...)</code></td><td>Atomic, integrity-verifiable audit bundle output in the optional Spanfold.Artifacts package.</td></tr>
           </table>
         </section>
 

@@ -1,4 +1,4 @@
-namespace Spanfold;
+namespace Spanfold.Liveness;
 
 /// <summary>
 /// Emits deterministic lane liveness state changes from explicit observations and horizon checks.

@@ -1,8 +1,9 @@
 using Spanfold;
+using Spanfold.Comparison;
 
 var start = DateTimeOffset.Parse("2026-04-21T11:00:00Z");
 
-var pipeline = Spanfold.Spanfold
+var pipeline = EventPipeline
     .For<AccountRiskSignal>()
     .RecordWindows()
     .WithEventTime(signal => signal.Timestamp)

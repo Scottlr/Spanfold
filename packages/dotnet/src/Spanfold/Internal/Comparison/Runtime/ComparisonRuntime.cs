@@ -970,8 +970,7 @@ internal static class ComparisonRuntime
             : ComparisonFinality.Final;
 
         finalities.Add(new ComparisonRowFinality(
-            kind.ToArtifactLabel(),
-            ComparisonRowIdentity.Create(kind, row),
+            new ComparisonRowReference(kind, ComparisonRowIdentity.Create(kind, row)),
             finality,
             finality == ComparisonFinality.Provisional
                 ? "Depends on at least one open window clipped to the evaluation horizon."
@@ -992,8 +991,7 @@ internal static class ComparisonRuntime
                 : ComparisonFinality.Final;
 
         finalities.Add(new ComparisonRowFinality(
-            kind.ToArtifactLabel(),
-            ComparisonRowIdentity.Create(kind, row),
+            new ComparisonRowReference(kind, ComparisonRowIdentity.Create(kind, row)),
             finality,
             finality == ComparisonFinality.Provisional
                 ? "Depends on at least one open window clipped to the evaluation horizon."
