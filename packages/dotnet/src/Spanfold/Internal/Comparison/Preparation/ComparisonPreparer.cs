@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Spanfold;
+using Spanfold.Internal.Analysis;
 using Spanfold.Internal.Keys;
 
 namespace Spanfold.Internal.Comparison;
@@ -59,19 +60,20 @@ internal static class ComparisonPreparer
 
         foreach (var window in windows)
         {
-            if (canFilterByKnownAt && !IsKnownAt(window, knownAtFilter))
-            {
-                AddExclusion(
+            if (canFilterByKnownAt
+                && !WindowRangeNormalizer.TryNormalize(
                     window,
-                    "Window was not available at the configured known-at point.",
-                    ComparisonPlanValidationCode.FutureWindowExcluded,
-                    diagnostics,
-                    excluded,
-                    ComparisonPlanDiagnosticSeverity.Warning);
+                    plan.Normalization,
+                    knownAtFilter,
+                    out _,
+                    out var knownAtFailure)
+                && knownAtFailure?.Kind == WindowRangeNormalizationFailureKind.FutureWindowExcluded)
+            {
+                AddNormalizationFailure(window, plan.Normalization, knownAtFailure, diagnostics, excluded);
                 continue;
             }
 
-            if (!IsInScope(window, plan.Scope))
+            if (!WindowScopeMatcher.Matches(window, plan.Scope))
             {
                 excluded.Add(new ExcludedWindowRecord(window, "Window is outside the comparison scope."));
                 continue;
@@ -123,8 +125,14 @@ internal static class ComparisonPreparer
             return;
         }
 
-        if (!TryCreateRange(window, plan.Normalization, canFilterByKnownAt ? knownAt : null, diagnostics, excluded, out var range))
+        if (!WindowRangeNormalizer.TryNormalize(
+            window,
+            plan.Normalization,
+            canFilterByKnownAt ? knownAt : null,
+            out var normalizedRange,
+            out var failure))
         {
+            AddNormalizationFailure(window, plan.Normalization, failure!, diagnostics, excluded);
             return;
         }
 
@@ -133,136 +141,45 @@ internal static class ComparisonPreparer
             selected.Add(window);
         }
 
-        normalized.Add(new NormalizedWindowRecord(window, window.Id, selectorName, side, range, window.Segments));
+        normalized.Add(new NormalizedWindowRecord(
+            window,
+            window.Id,
+            selectorName,
+            side,
+            normalizedRange.Range,
+            window.Segments));
     }
 
-    private static bool TryCreateRange(
+    private static void AddNormalizationFailure(
         WindowRecord window,
         ComparisonNormalizationPolicy policy,
-        TemporalPoint? knownAt,
+        WindowRangeNormalizationFailure failure,
         List<ComparisonPlanDiagnostic> diagnostics,
-        List<ExcludedWindowRecord> excluded,
-        out TemporalRange range)
+        List<ExcludedWindowRecord> excluded)
     {
-        range = default;
-
-        if (policy.TimeAxis == TemporalAxis.Timestamp)
+        var (code, severity) = failure.Kind switch
         {
-            return TryCreateTimestampRange(window, policy, diagnostics, excluded, out range);
-        }
-
-        var start = TemporalPoint.ForPosition(window.StartPosition);
-        if (knownAt.HasValue && knownAt.Value.Position >= window.StartPosition
-            && (!window.EndPosition.HasValue || knownAt.Value.Position < window.EndPosition.Value))
-        {
-            range = TemporalRange.WithEffectiveEnd(start, knownAt.Value, TemporalRangeEndStatus.OpenAtHorizon);
-            return true;
-        }
-
-        if (window.EndPosition.HasValue)
-        {
-            range = TemporalRange.Closed(start, TemporalPoint.ForPosition(window.EndPosition.Value));
-            return true;
-        }
-
-        if (policy.OpenWindowPolicy == ComparisonOpenWindowPolicy.ClipToHorizon
-            && policy.OpenWindowHorizon.HasValue)
-        {
-            return TryCreateClippedRange(
-                window,
-                start,
-                policy.OpenWindowHorizon.Value,
-                diagnostics,
-                excluded,
-                out range);
-        }
-
-        AddExclusion(window, "Open windows require an explicit clipping policy.", ComparisonPlanValidationCode.OpenWindowsWithoutPolicy, diagnostics, excluded);
-        return false;
-    }
-
-    private static bool TryCreateTimestampRange(
-        WindowRecord window,
-        ComparisonNormalizationPolicy policy,
-        List<ComparisonPlanDiagnostic> diagnostics,
-        List<ExcludedWindowRecord> excluded,
-        out TemporalRange range)
-    {
-        range = default;
-
-        if (!window.StartTime.HasValue || (!window.EndTime.HasValue && window.IsClosed))
-        {
-            AddExclusion(
-                window,
-                "Event-time comparison requires recorded event timestamps.",
+            WindowRangeNormalizationFailureKind.FutureWindowExcluded => (
+                ComparisonPlanValidationCode.FutureWindowExcluded,
+                ComparisonPlanDiagnosticSeverity.Warning),
+            WindowRangeNormalizationFailureKind.MissingEventTime => (
                 ComparisonPlanValidationCode.MissingEventTime,
-                diagnostics,
-                excluded,
                 policy.NullTimestampPolicy == ComparisonNullTimestampPolicy.Reject
                     ? ComparisonPlanDiagnosticSeverity.Error
-                    : ComparisonPlanDiagnosticSeverity.Warning);
-            return false;
-        }
-
-        var start = TemporalPoint.ForTimestamp(window.StartTime.Value, window.TimestampClock);
-        if (window.EndTime.HasValue)
-        {
-            range = TemporalRange.Closed(
-                start,
-                TemporalPoint.ForTimestamp(window.EndTime.Value, window.TimestampClock));
-            return true;
-        }
-
-        if (policy.OpenWindowPolicy == ComparisonOpenWindowPolicy.ClipToHorizon
-            && policy.OpenWindowHorizon.HasValue)
-        {
-            return TryCreateClippedRange(
-                window,
-                start,
-                policy.OpenWindowHorizon.Value,
-                diagnostics,
-                excluded,
-                out range);
-        }
-
-        AddExclusion(window, "Open windows require an explicit clipping policy.", ComparisonPlanValidationCode.OpenWindowsWithoutPolicy, diagnostics, excluded);
-        return false;
-    }
-
-    private static bool TryCreateClippedRange(
-        WindowRecord window,
-        TemporalPoint start,
-        TemporalPoint horizon,
-        List<ComparisonPlanDiagnostic> diagnostics,
-        List<ExcludedWindowRecord> excluded,
-        out TemporalRange range)
-    {
-        range = default;
-
-        if (horizon.Axis != start.Axis)
-        {
-            AddExclusion(
-                window,
-                "Open-window horizon must use the same temporal axis as the normalized range.",
+                    : ComparisonPlanDiagnosticSeverity.Warning),
+            WindowRangeNormalizationFailureKind.OpenWindowWithoutPolicy => (
+                ComparisonPlanValidationCode.OpenWindowsWithoutPolicy,
+                ComparisonPlanDiagnosticSeverity.Error),
+            WindowRangeNormalizationFailureKind.MixedTimeAxes => (
                 ComparisonPlanValidationCode.MixedTimeAxes,
-                diagnostics,
-                excluded);
-            return false;
-        }
-
-        if (horizon.CompareTo(start) < 0)
-        {
-            AddExclusion(
-                window,
-                "Open-window horizon cannot be earlier than the window start.",
+                ComparisonPlanDiagnosticSeverity.Error),
+            WindowRangeNormalizationFailureKind.InvalidRangeDuration => (
                 ComparisonPlanValidationCode.InvalidRangeDuration,
-                diagnostics,
-                excluded);
-            return false;
-        }
+                ComparisonPlanDiagnosticSeverity.Error),
+            _ => throw new ArgumentOutOfRangeException(nameof(failure), failure.Kind, "Unknown normalization failure kind.")
+        };
 
-        range = TemporalRange.WithEffectiveEnd(start, horizon, TemporalRangeEndStatus.OpenAtHorizon);
-        return true;
+        AddExclusion(window, failure.Reason, code, diagnostics, excluded, severity);
     }
 
     private static void AddExclusion(
@@ -275,70 +192,6 @@ internal static class ComparisonPreparer
     {
         excluded.Add(new ExcludedWindowRecord(window, reason, code));
         diagnostics.Add(new ComparisonPlanDiagnostic(code, reason, $"window[{window.Id}]", severity));
-    }
-
-    private static bool IsInScope(WindowRecord window, ComparisonScope scope)
-    {
-        if (scope.WindowName is not null
-            && !string.Equals(window.WindowName, scope.WindowName, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        for (var i = 0; i < scope.SegmentFilters.Count; i++)
-        {
-            var filter = scope.SegmentFilters[i];
-            if (!HasSegment(window, filter))
-            {
-                return false;
-            }
-        }
-
-        for (var i = 0; i < scope.TagFilters.Count; i++)
-        {
-            var filter = scope.TagFilters[i];
-            if (!HasTag(window, filter))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool HasSegment(WindowRecord window, WindowSegmentFilter filter)
-    {
-        for (var i = 0; i < window.Segments.Count; i++)
-        {
-            var segment = window.Segments[i];
-            if (string.Equals(segment.Name, filter.Name, StringComparison.Ordinal)
-                && EqualityComparer<object?>.Default.Equals(segment.Value, filter.Value))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool HasTag(WindowRecord window, WindowTagFilter filter)
-    {
-        for (var i = 0; i < window.Tags.Count; i++)
-        {
-            var tag = window.Tags[i];
-            if (string.Equals(tag.Name, filter.Name, StringComparison.Ordinal)
-                && EqualityComparer<object?>.Default.Equals(tag.Value, filter.Value))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsKnownAt(WindowRecord window, TemporalPoint knownAt)
-    {
-        return window.StartPosition <= knownAt.Position;
     }
 
     private static PreparedComparison Create(
