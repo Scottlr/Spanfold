@@ -145,7 +145,7 @@ the appropriate first documented journey.
 
 | ID | Completed | Title | Description | Github Issue # | Blocked By | Task File |
 |---|---|---|---|---|---|---|
-| T001 | [ ] | Extract shared window-range normalization | Move temporal range and scope preparation into a neutral internal seam while preserving every existing comparison behavior and diagnostic mapping. |  | None | [`tasks/T001.md`](tasks/T001.md) |
+| T001 | [x] | Extract shared window-range normalization | Move temporal range and scope preparation into a neutral internal seam while preserving every existing comparison behavior and diagnostic mapping. | #81 | None | [`tasks/T001.md`](tasks/T001.md) |
 | T002 | [ ] | Form deterministic episodes from window history | Add the `Spanfold.Episodes` formation model, fluent builder, fragment-preserving runtime, deterministic identity, and explicit historical/live finality semantics. |  | T001 | [`tasks/T002.md`](tasks/T002.md) |
 | T003 | [ ] | Relate episode sets as a component graph | Add the `CompareEpisodes` plan and runtime that forms both sides, relates actual fragments, and classifies deterministic one-to-one, split, merge, complex, and unmatched components. |  | T002 | [`tasks/T003.md`](tasks/T003.md) |
 | T004 | [ ] | Add analyst summaries and reference scorecards | Add single-set and comparison summaries, deterministic latency distributions, internal-fragment and split/merge measures, and an explicit target-as-reference scorecard. |  | T003 | [`tasks/T004.md`](tasks/T004.md) |
