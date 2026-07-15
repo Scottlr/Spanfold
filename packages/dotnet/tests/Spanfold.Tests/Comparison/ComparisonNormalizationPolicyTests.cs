@@ -33,6 +33,16 @@ public sealed class ComparisonNormalizationPolicyTests
     }
 
     [Fact]
+    public void BuilderCanSelectEventTimeScope()
+    {
+        var scope = new ComparisonScopeBuilder()
+            .Window("DeviceOffline", TemporalAxis.Timestamp);
+
+        Assert.Equal("DeviceOffline", scope.WindowName);
+        Assert.Equal(TemporalAxis.Timestamp, scope.TimeAxis);
+    }
+
+    [Fact]
     public void BuilderCanClipOpenWindowsToHorizon()
     {
         var horizon = TemporalPoint.ForPosition(100);
