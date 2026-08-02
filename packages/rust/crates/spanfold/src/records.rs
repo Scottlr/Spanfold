@@ -37,6 +37,12 @@ impl WindowRecordId {
     }
 }
 
+impl std::fmt::Display for WindowRecordId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 impl<'de> Deserialize<'de> for WindowRecordId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -205,6 +211,17 @@ pub enum WindowHistoryFixtureError {
     /// Fixture metadata was invalid.
     #[error(transparent)]
     Metadata(#[from] WindowMetadataError),
+}
+
+/// Error returned when importing materialized window history.
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum WindowHistoryImportError {
+    /// The materialized open-window list contains the same record ID twice.
+    #[error("duplicate open window record id '{record_id}'")]
+    DuplicateOpenRecordId {
+        /// The repeated open-window record ID.
+        record_id: WindowRecordId,
+    },
 }
 
 impl<'de> Deserialize<'de> for WindowTag {
@@ -750,12 +767,8 @@ impl<'de> Deserialize<'de> for WindowHistory {
         }
 
         let raw = RawHistory::deserialize(deserializer)?;
-        let mut open_indexes = BTreeMap::new();
-        for (index, window) in raw.open.iter().enumerate() {
-            if open_indexes.insert(window.id.clone(), index).is_some() {
-                return Err(serde::de::Error::custom("duplicate open window record id"));
-            }
-        }
+        let open_indexes = rebuild_open_indexes(&raw.open)
+            .map_err(|error| serde::de::Error::custom(error.to_string()))?;
         Ok(Self {
             closed: raw.closed,
             open: raw.open,
@@ -775,6 +788,27 @@ impl WindowHistory {
             open_indexes: BTreeMap::new(),
             annotations: Vec::new(),
         }
+    }
+
+    /// Imports materialized closed and open records into a queryable history.
+    ///
+    /// The import boundary performs the same open-record identity validation
+    /// as history deserialization and rebuilds the live open-record index.
+    /// Queries sort both record families into deterministic order regardless
+    /// of their input order.
+    pub fn from_records(
+        closed: impl IntoIterator<Item = ClosedWindow>,
+        open: impl IntoIterator<Item = OpenWindow>,
+    ) -> Result<Self, WindowHistoryImportError> {
+        let closed = closed.into_iter().collect::<Vec<_>>();
+        let open = open.into_iter().collect::<Vec<_>>();
+        let open_indexes = rebuild_open_indexes(&open)?;
+        Ok(Self {
+            closed,
+            open,
+            open_indexes,
+            annotations: Vec::new(),
+        })
     }
 
     /// Returns closed windows.
@@ -1013,6 +1047,20 @@ impl WindowHistory {
         window.tags = tags;
         true
     }
+}
+
+fn rebuild_open_indexes(
+    open: &[OpenWindow],
+) -> Result<BTreeMap<WindowRecordId, usize>, WindowHistoryImportError> {
+    let mut open_indexes = BTreeMap::new();
+    for (index, window) in open.iter().enumerate() {
+        if open_indexes.insert(window.id.clone(), index).is_some() {
+            return Err(WindowHistoryImportError::DuplicateOpenRecordId {
+                record_id: window.id.clone(),
+            });
+        }
+    }
+    Ok(open_indexes)
 }
 
 #[derive(Clone, Copy, Debug)]

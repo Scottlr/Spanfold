@@ -84,18 +84,61 @@ pub(super) fn build_coverage_rows(aligned: &AlignedComparison) -> Vec<CoverageRo
 }
 
 pub(super) fn build_gap_rows(aligned: &AlignedComparison) -> Vec<GapRow> {
-    let mut rows = Vec::new();
+    let mut groups: BTreeMap<GroupKey, Vec<&AlignedSegmentArtifact>> = BTreeMap::new();
     for segment in &aligned.segments {
-        if !segment.target_record_ids.is_empty() || segment.against_is_active {
-            continue;
-        }
+        groups
+            .entry((
+                segment.window_name.clone(),
+                segment.key.clone(),
+                segment.partition.clone(),
+                segment.range.axis,
+                segment.range.clock.clone(),
+            ))
+            .or_default()
+            .push(segment);
+    }
 
-        rows.push(GapRow {
-            window_name: segment.window_name.clone(),
-            key: segment.key.clone(),
-            partition: segment.partition.clone(),
-            range: segment.range.clone(),
+    let mut rows = Vec::new();
+    for mut segments in groups.into_values() {
+        segments.retain(|segment| {
+            !segment.target_record_ids.is_empty() || !segment.against_record_ids.is_empty()
         });
+        segments.sort_by(|left, right| {
+            left.range
+                .start
+                .cmp(&right.range.start)
+                .then_with(|| left.range.end.cmp(&right.range.end))
+                .then_with(|| left.target_record_ids.cmp(&right.target_record_ids))
+                .then_with(|| left.against_record_ids.cmp(&right.against_record_ids))
+        });
+
+        for pair in segments.windows(2) {
+            let [current, next] = pair else {
+                unreachable!("windows(2) always yields two segments");
+            };
+            if current.range.end >= next.range.start {
+                continue;
+            }
+
+            let mut boundary_record_ids = BTreeSet::new();
+            boundary_record_ids.extend(current.target_record_ids.iter().cloned());
+            boundary_record_ids.extend(current.against_record_ids.iter().cloned());
+            boundary_record_ids.extend(next.target_record_ids.iter().cloned());
+            boundary_record_ids.extend(next.against_record_ids.iter().cloned());
+
+            rows.push(GapRow {
+                window_name: current.window_name.clone(),
+                key: current.key.clone(),
+                partition: current.partition.clone(),
+                range: RowRange {
+                    start: current.range.end,
+                    end: next.range.start,
+                    axis: current.range.axis,
+                    clock: current.range.clock.clone(),
+                },
+                boundary_record_ids: boundary_record_ids.into_iter().collect(),
+            });
+        }
     }
     rows
 }
