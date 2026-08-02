@@ -119,7 +119,9 @@ impl<'a> EpisodeFormationBuilder<'a> {
     }
 }
 
-fn validate_horizons(policy: &ComparisonNormalizationPolicy) -> Result<(), EpisodeError> {
+pub(crate) fn validate_horizons(
+    policy: &ComparisonNormalizationPolicy,
+) -> Result<(), EpisodeError> {
     if policy.known_at.is_some() && policy.open_window_horizon.is_some() {
         return Err(EpisodeError::CompetingHorizons);
     }
@@ -149,7 +151,10 @@ struct GroupKey {
     clock: Option<String>,
 }
 
-fn run(history: &WindowHistory, plan: EpisodeFormationPlan) -> Result<EpisodeSet, EpisodeError> {
+pub(crate) fn run(
+    history: &WindowHistory,
+    plan: EpisodeFormationPlan,
+) -> Result<EpisodeSet, EpisodeError> {
     let evaluation_horizon = plan
         .normalization
         .known_at
