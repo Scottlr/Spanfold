@@ -20,6 +20,11 @@ mod comparators;
 use comparators::*;
 mod finality;
 use finality::*;
+mod trace;
+use trace::ComparisonTraceContext;
+pub use trace::{
+    AnyComparisonRowTrace, ComparisonRowTrace, ComparisonRowTraceError, ComparisonRowTraceLineage,
+};
 
 /// Comparator family supported by the Rust implementation.
 #[non_exhaustive]
@@ -1301,6 +1306,7 @@ struct ResultArtifacts {
     row_finalities: Vec<ComparisonRowFinality>,
     extension_metadata: Vec<ComparisonExtensionMetadata>,
     rows: ComparisonRows,
+    trace_context: Option<Arc<ComparisonTraceContext>>,
 }
 
 /// Portable selected/excluded/normalized window artifact.
@@ -1532,6 +1538,7 @@ fn execute_compare(
                 row_finalities: Vec::new(),
                 extension_metadata: Vec::new(),
                 rows: ComparisonRows::default(),
+                trace_context: None,
             },
         );
         result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -1633,9 +1640,27 @@ fn execute_compare(
         .filter(|window| window.is_provisional)
         .map(|window| window.record_id.clone())
         .collect::<BTreeSet<_>>();
+    let gap_provisional_record_ids = prepared
+        .normalized_windows
+        .iter()
+        .filter(|window| window.is_provisional)
+        .flat_map(|window| window.record_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
     let rows = rows.into_shared();
     let coverage_summaries = build_coverage_summaries(&rows.coverage);
-    let row_finalities = build_row_finalities(&rows, &provisional_record_ids);
+    let row_finalities =
+        build_row_finalities(&rows, &provisional_record_ids, &gap_provisional_record_ids);
+
+    let prepared_value = if plan.output.include_explain_data {
+        Some(serde_json::to_value(&prepared).expect("prepared artifact"))
+    } else {
+        None
+    };
+    let aligned_value = if plan.output.include_aligned_segments {
+        Some(serde_json::to_value(&aligned).expect("aligned artifact"))
+    } else {
+        None
+    };
 
     let mut result = materialize_result(
         plan,
@@ -1651,6 +1676,7 @@ fn execute_compare(
             row_finalities,
             extension_metadata: build_extension_metadata(&aligned, plan),
             rows,
+            trace_context: Some(Arc::new(ComparisonTraceContext { prepared, aligned })),
         },
     );
     result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -1658,12 +1684,8 @@ fn execute_compare(
         .as_ref()
         .or(plan.open_window_horizon.as_ref())
         .map(row_point_from_temporal_point);
-    if plan.output.include_explain_data {
-        result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
-    }
-    if plan.output.include_aligned_segments {
-        result.aligned = Some(serde_json::to_value(aligned).expect("aligned artifact"));
-    }
+    result.prepared = prepared_value;
+    result.aligned = aligned_value;
     result
 }
 
@@ -1683,6 +1705,7 @@ fn invalid_result(
             row_finalities: Vec::new(),
             extension_metadata: Vec::new(),
             rows: ComparisonRows::default(),
+            trace_context: None,
         },
     );
     result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -1833,6 +1856,7 @@ fn materialize_result(
         row_finalities: artifacts.row_finalities,
         extension_metadata: artifacts.extension_metadata,
         rows: artifacts.rows,
+        trace_context: artifacts.trace_context,
     }
 }
 

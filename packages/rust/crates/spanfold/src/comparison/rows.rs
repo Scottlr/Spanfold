@@ -234,6 +234,56 @@ impl ComparisonRowKind {
     }
 }
 
+/// Canonical identity for one row in a materialized comparison result.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ComparisonRowReference {
+    kind: ComparisonRowKind,
+    row_id: String,
+}
+
+impl ComparisonRowReference {
+    /// Creates a validated canonical row reference.
+    pub fn new(
+        kind: ComparisonRowKind,
+        row_id: impl Into<String>,
+    ) -> Result<Self, ComparisonRowReferenceError> {
+        let row_id = row_id.into();
+        if row_id.trim().is_empty() {
+            return Err(ComparisonRowReferenceError::EmptyRowId);
+        }
+        Ok(Self { kind, row_id })
+    }
+
+    /// Returns the closed comparison row family.
+    #[must_use]
+    pub const fn kind(&self) -> ComparisonRowKind {
+        self.kind
+    }
+
+    /// Returns the opaque row identifier.
+    #[must_use]
+    pub fn row_id(&self) -> &str {
+        &self.row_id
+    }
+}
+
+impl std::fmt::Display for ComparisonRowReference {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}:{}", self.kind, self.row_id)
+    }
+}
+
+/// Error returned when a canonical comparison-row reference cannot be built.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ComparisonRowReferenceError {
+    /// The row-family label is not one of the closed comparison families.
+    #[error(transparent)]
+    UnknownKind(#[from] ComparisonRowKindParseError),
+    /// A canonical row reference cannot contain a blank row ID.
+    #[error("comparison row id cannot be blank")]
+    EmptyRowId,
+}
+
 impl std::fmt::Display for ComparisonRowKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
@@ -309,6 +359,11 @@ impl ComparisonRowFinality {
     /// are accepted.
     pub fn row_kind(&self) -> Result<ComparisonRowKind, ComparisonRowKindParseError> {
         self.row_type.parse()
+    }
+
+    /// Returns the validated canonical reference represented by this metadata.
+    pub fn reference(&self) -> Result<ComparisonRowReference, ComparisonRowReferenceError> {
+        ComparisonRowReference::new(self.row_kind()?, self.row_id.clone())
     }
 }
 
@@ -466,6 +521,9 @@ pub struct GapRow {
     pub partition: Option<String>,
     /// Gap range.
     pub range: RowRange,
+    /// Records bounding the gap and determining its live finality.
+    #[serde(rename = "boundaryRecordIds")]
+    pub boundary_record_ids: Vec<String>,
 }
 
 /// Symmetric-difference row.
@@ -744,6 +802,8 @@ pub struct ComparisonResult {
     /// Serializable extension metadata.
     #[serde(rename = "extensionMetadata")]
     pub extension_metadata: Vec<ComparisonExtensionMetadata>,
+    #[serde(skip)]
+    pub(super) trace_context: Option<Arc<super::trace::ComparisonTraceContext>>,
 }
 
 impl ComparisonResult {

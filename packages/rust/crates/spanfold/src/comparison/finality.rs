@@ -5,13 +5,14 @@ use super::*;
 pub(super) fn build_row_finalities(
     rows: &ComparisonRows,
     provisional_record_ids: &BTreeSet<String>,
+    gap_provisional_record_ids: &BTreeSet<String>,
 ) -> Vec<ComparisonRowFinality> {
     let mut finalities = Vec::new();
     append_overlap_finalities(&mut finalities, &rows.overlap, provisional_record_ids);
     append_residual_finalities(&mut finalities, &rows.residual, provisional_record_ids);
     append_missing_finalities(&mut finalities, &rows.missing, provisional_record_ids);
     append_coverage_finalities(&mut finalities, &rows.coverage, provisional_record_ids);
-    append_gap_finalities(&mut finalities, &rows.gap);
+    append_gap_finalities(&mut finalities, &rows.gap, gap_provisional_record_ids);
     append_symmetric_difference_finalities(
         &mut finalities,
         &rows.symmetric_difference,
@@ -35,13 +36,19 @@ fn stable_row_id<T: Serialize>(kind: ComparisonRowKind, row: &T) -> String {
     format!("{row_type}:{hash:016x}")
 }
 
-pub(super) fn append_gap_finalities(finalities: &mut Vec<ComparisonRowFinality>, rows: &[GapRow]) {
+pub(super) fn append_gap_finalities(
+    finalities: &mut Vec<ComparisonRowFinality>,
+    rows: &[GapRow],
+    provisional_record_ids: &BTreeSet<String>,
+) {
     for row in rows {
         push_finality(
             finalities,
             ComparisonRowKind::Gap,
             stable_row_id(ComparisonRowKind::Gap, row),
-            false,
+            row.boundary_record_ids
+                .iter()
+                .any(|id| provisional_record_ids.contains(id)),
         );
     }
 }

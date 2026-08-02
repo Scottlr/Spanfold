@@ -49,18 +49,20 @@ pub use changelog::{
     ComparisonChangeKind, ComparisonChangelogEntry, create_changelog, replay_changelog,
 };
 pub use comparison::{
-    AgainstSelection, AlignedComparison, AlignedSegmentArtifact, AsOfDirection, AsOfMatchStatus,
-    AsOfRow, CohortActivity, Comparator, ComparatorParseError, ComparatorSummary,
-    ComparisonDiagnostic, ComparisonDuplicateWindowPolicy, ComparisonFinality,
+    AgainstSelection, AlignedComparison, AlignedSegmentArtifact, AnyComparisonRowTrace,
+    AsOfDirection, AsOfMatchStatus, AsOfRow, CohortActivity, Comparator, ComparatorParseError,
+    ComparatorSummary, ComparisonDiagnostic, ComparisonDuplicateWindowPolicy, ComparisonFinality,
     ComparisonNormalizationPolicy, ComparisonNullTimestampPolicy, ComparisonOutputOptions,
     ComparisonPlan, ComparisonResult, ComparisonRowFinality, ComparisonRowKind,
-    ComparisonRowKindParseError, ComparisonRowMetadataError, ComparisonRowWithFinality,
-    ComparisonRows, ComparisonScope, ComparisonSelector, ComparisonSelectorError, ComparisonSide,
-    ContainmentRow, ContainmentStatus, CoverageRow, CoverageSummary, DiagnosticSeverity,
-    ExcludedWindowRecord, GapRow, LeadLagDirection, LeadLagRow, LeadLagSummary, LeadLagTransition,
-    MissingRow, NormalizedWindowRecord, OpenWindowPolicy, OverlapRow, PreparedComparison,
-    ResidualRow, RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact, WindowFilter, align,
-    compare, compare_live, prepare, prepare_live,
+    ComparisonRowKindParseError, ComparisonRowMetadataError, ComparisonRowReference,
+    ComparisonRowReferenceError, ComparisonRowTrace, ComparisonRowTraceError,
+    ComparisonRowTraceLineage, ComparisonRowWithFinality, ComparisonRows, ComparisonScope,
+    ComparisonSelector, ComparisonSelectorError, ComparisonSide, ContainmentRow, ContainmentStatus,
+    CoverageRow, CoverageSummary, DiagnosticSeverity, ExcludedWindowRecord, GapRow,
+    LeadLagDirection, LeadLagRow, LeadLagSummary, LeadLagTransition, MissingRow,
+    NormalizedWindowRecord, OpenWindowPolicy, OverlapRow, PreparedComparison, ResidualRow,
+    RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact, WindowFilter, align, compare,
+    compare_live, prepare, prepare_live,
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
@@ -86,9 +88,10 @@ pub use records::{
     ClosedWindow, OpenWindow, SummaryError, WindowAnnotation, WindowAnnotationTarget,
     WindowBoundaryChange, WindowBoundaryReason, WindowGroupKind, WindowGroupSummary, WindowHistory,
     WindowHistoryFixture, WindowHistoryFixtureError, WindowHistoryFixtureWindow,
-    WindowHistoryQuery, WindowHistoryRefQuery, WindowHistorySnapshot, WindowMetadataError,
-    WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment, WindowSegment,
-    WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment, summarize_by_tag,
+    WindowHistoryImportError, WindowHistoryQuery, WindowHistoryRefQuery, WindowHistorySnapshot,
+    WindowMetadataError, WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment,
+    WindowSegment, WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment,
+    summarize_by_tag,
 };
 pub use temporal::{
     TemporalAxis, TemporalPoint, TemporalPointError, TemporalRange, TemporalRangeError,
