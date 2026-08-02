@@ -25,6 +25,8 @@ mod analytics;
 mod builders;
 mod changelog;
 mod comparison;
+/// Deterministic formation of episodes from recorded window evidence.
+pub mod episodes;
 mod explain;
 /// Portable comparison artifact encoders and atomic file sinks.
 pub mod export;
@@ -64,6 +66,10 @@ pub use comparison::{
     NormalizedWindowRecord, OpenWindowPolicy, OverlapRow, PreparedComparison, ResidualRow,
     RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact, WindowFilter, align, compare,
     compare_live, prepare, prepare_live,
+};
+pub use episodes::{
+    Episode, EpisodeError, EpisodeFormationBuilder, EpisodeFormationPlan, EpisodeFormationPolicy,
+    EpisodeFragment, EpisodeId, EpisodeNormalizationFailure, EpisodeSet, TemporalTolerance,
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
