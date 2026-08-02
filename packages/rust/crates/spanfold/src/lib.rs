@@ -68,8 +68,11 @@ pub use comparison::{
     compare_live, prepare, prepare_live,
 };
 pub use episodes::{
-    Episode, EpisodeError, EpisodeFormationBuilder, EpisodeFormationPlan, EpisodeFormationPolicy,
-    EpisodeFragment, EpisodeId, EpisodeNormalizationFailure, EpisodeSet, TemporalTolerance,
+    Episode, EpisodeComparisonBuilder, EpisodeComparisonError, EpisodeComparisonPlan,
+    EpisodeComparisonResult, EpisodeError, EpisodeFormationBuilder, EpisodeFormationPlan,
+    EpisodeFormationPolicy, EpisodeFragment, EpisodeId, EpisodeNormalizationFailure,
+    EpisodeRelation, EpisodeRelationKind, EpisodeRelationMetrics, EpisodeRelationPolicy,
+    EpisodeSet, TemporalTolerance,
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
