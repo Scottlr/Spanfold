@@ -8,6 +8,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::window_normalization::{
+    NormalizedWindowEvidence, RawWindowRef, WindowNormalizationFailure, WindowNormalizationRequest,
+};
 use crate::{
     ComparisonExtensionMetadata, PrimitiveValue, TemporalAxis, TemporalPoint, WindowHistory,
     WindowSegment, WindowTag,
@@ -1962,33 +1965,26 @@ fn prepare_internal(
     let mut excluded_windows = Vec::new();
     let mut normalized_windows = Vec::new();
 
-    let mut candidates = history
-        .closed_windows()
-        .iter()
-        .map(RawWindowRef::Closed)
-        .collect::<Vec<_>>();
-    candidates.extend(history.open_windows().iter().map(RawWindowRef::Open));
-
-    candidates.sort_by(|left, right| {
-        (
-            left.window_name(),
-            left.key(),
-            left.source().unwrap_or(""),
-            left.partition().unwrap_or(""),
-            left.start_position(),
-            left.end_position().unwrap_or(i64::MAX),
-            left.record_id(),
-        )
-            .cmp(&(
-                right.window_name(),
-                right.key(),
-                right.source().unwrap_or(""),
-                right.partition().unwrap_or(""),
-                right.start_position(),
-                right.end_position().unwrap_or(i64::MAX),
-                right.record_id(),
-            ))
-    });
+    let scope = ComparisonScope {
+        window_name: plan.scope_window.clone(),
+        key: plan.scope_key.clone(),
+        partition: plan.scope_partition.clone(),
+        time_axis: plan.time_axis,
+        segment_filters: plan.scope_segments.clone(),
+        tag_filters: plan.scope_tags.clone(),
+    };
+    let normalization_request = WindowNormalizationRequest {
+        scope: &scope,
+        time_axis: plan.time_axis,
+        known_at: plan.known_at.as_ref(),
+        null_timestamp_policy: plan.null_timestamp_policy,
+        require_closed: plan.require_closed_windows,
+        open_window_policy: plan.open_window_policy,
+        evaluation_horizon: live_horizon_override
+            .as_ref()
+            .or(plan.open_window_horizon.as_ref()),
+    };
+    let candidates = crate::window_normalization::ordered_candidates(history);
 
     let target_selector = plan.effective_target_selector();
     let target_selector_name = if plan.target_selector.is_some() {
@@ -2002,71 +1998,24 @@ fn prepare_internal(
     for candidate in candidates {
         let window = to_window_artifact(&candidate);
         let record = candidate.to_window_record();
-        let known_at_point = candidate.known_at_point().unwrap_or_else(|| {
-            candidate
-                .end_point()
-                .unwrap_or_else(|| candidate.start_point())
-        });
-        if let Some(known_at) = plan.known_at.as_ref()
-            && !matches!(
-                known_at_point.try_cmp(known_at),
-                Ok(Ordering::Less | Ordering::Equal)
-            )
-        {
-            excluded_windows.push(ExcludedWindowRecord {
-                record_id: window.record_id.clone(),
-                reason: "Window was not available at the configured known-at point.".to_owned(),
-                diagnostic_code: Some("FutureWindowExcluded".to_owned()),
-                window,
-            });
-            diagnostics.push(ComparisonDiagnostic {
-                code: "FutureWindowExcluded".to_owned(),
-                severity: DiagnosticSeverity::Warning,
-            });
+        let normalization =
+            crate::window_normalization::normalize_window(candidate, &normalization_request);
+        if matches!(
+            &normalization,
+            Err(WindowNormalizationFailure::FutureWindowExcluded { .. })
+        ) {
+            push_normalization_exclusion(
+                &candidate,
+                normalization
+                    .as_ref()
+                    .expect_err("matched future exclusion"),
+                &mut diagnostics,
+                &mut excluded_windows,
+            );
             continue;
         }
-
-        if let Some(scope_window) = &plan.scope_window
-            && candidate.window_name() != scope_window
-        {
-            excluded_windows.push(ExcludedWindowRecord {
-                record_id: window.record_id.clone(),
-                reason: "Window is outside the comparison scope.".to_owned(),
-                diagnostic_code: None,
-                window,
-            });
-            continue;
-        }
-        if let Some(scope_key) = &plan.scope_key
-            && candidate.key() != scope_key
-        {
-            excluded_windows.push(ExcludedWindowRecord {
-                record_id: window.record_id.clone(),
-                reason: "Window is outside the comparison scope.".to_owned(),
-                diagnostic_code: None,
-                window,
-            });
-            continue;
-        }
-        if let Some(scope_partition) = &plan.scope_partition
-            && candidate.partition() != Some(scope_partition.as_str())
-        {
-            excluded_windows.push(ExcludedWindowRecord {
-                record_id: window.record_id.clone(),
-                reason: "Window is outside the comparison scope.".to_owned(),
-                diagnostic_code: None,
-                window,
-            });
-            continue;
-        }
-
-        if !matches_window_artifact(&window, &plan.scope_segments, &plan.scope_tags) {
-            excluded_windows.push(ExcludedWindowRecord {
-                record_id: window.record_id.clone(),
-                reason: "Window is outside the comparison scope.".to_owned(),
-                diagnostic_code: None,
-                window,
-            });
+        if matches!(&normalization, Ok(None)) {
+            push_scope_exclusion(&candidate, &mut excluded_windows);
             continue;
         }
 
@@ -2087,12 +2036,11 @@ fn prepare_internal(
 
         selected_windows.push(window.clone());
         if is_target
-            && let Some(normalized) = normalize_candidate(
+            && let Some(normalized) = normalize_for_side(
                 &candidate,
                 target_selector_name,
                 ComparisonSide::Target,
-                plan,
-                live_horizon_override.clone(),
+                &normalization,
                 &mut diagnostics,
                 &mut excluded_windows,
             )
@@ -2105,12 +2053,11 @@ fn prepare_internal(
             } else {
                 "against"
             };
-            if let Some(normalized) = normalize_candidate(
+            if let Some(normalized) = normalize_for_side(
                 &candidate,
                 selector_name,
                 ComparisonSide::Against,
-                plan,
-                live_horizon_override.clone(),
+                &normalization,
                 &mut diagnostics,
                 &mut excluded_windows,
             ) {
@@ -2342,106 +2289,6 @@ fn row_point_from_temporal_point(point: &crate::TemporalPoint) -> RowPoint {
     }
 }
 
-enum RawWindowRef<'a> {
-    Closed(&'a crate::ClosedWindow),
-    Open(&'a crate::OpenWindow),
-}
-
-impl RawWindowRef<'_> {
-    fn record_id(&self) -> &str {
-        match self {
-            Self::Closed(window) => window.id.as_str(),
-            Self::Open(window) => window.id.as_str(),
-        }
-    }
-
-    fn window_name(&self) -> &str {
-        match self {
-            Self::Closed(window) => &window.window_name,
-            Self::Open(window) => &window.window_name,
-        }
-    }
-
-    fn key(&self) -> &str {
-        match self {
-            Self::Closed(window) => &window.key,
-            Self::Open(window) => &window.key,
-        }
-    }
-
-    fn source(&self) -> Option<&str> {
-        match self {
-            Self::Closed(window) => window.source.as_deref(),
-            Self::Open(window) => window.source.as_deref(),
-        }
-    }
-
-    fn partition(&self) -> Option<&str> {
-        match self {
-            Self::Closed(window) => window.partition.as_deref(),
-            Self::Open(window) => window.partition.as_deref(),
-        }
-    }
-
-    fn start_position(&self) -> i64 {
-        self.start_point().magnitude()
-    }
-
-    fn start_point(&self) -> crate::TemporalPoint {
-        match self {
-            Self::Closed(window) => window.range.start(),
-            Self::Open(window) => window.start.clone(),
-        }
-    }
-
-    fn end_position(&self) -> Option<i64> {
-        self.end_point().map(|point| point.magnitude())
-    }
-
-    fn end_point(&self) -> Option<crate::TemporalPoint> {
-        match self {
-            Self::Closed(window) => Some(window.range.end()),
-            Self::Open(_) => None,
-        }
-    }
-
-    fn known_at_point(&self) -> Option<crate::TemporalPoint> {
-        match self {
-            Self::Closed(window) => window.known_at.clone(),
-            Self::Open(window) => window.known_at.clone(),
-        }
-    }
-
-    fn known_at_position(&self) -> Option<i64> {
-        self.known_at_point().map(|point| point.magnitude())
-    }
-
-    fn segments(&self) -> &[WindowSegment] {
-        match self {
-            Self::Closed(window) => &window.segments,
-            Self::Open(window) => &window.segments,
-        }
-    }
-
-    fn tags(&self) -> &[WindowTag] {
-        match self {
-            Self::Closed(window) => &window.tags,
-            Self::Open(window) => &window.tags,
-        }
-    }
-
-    fn is_open(&self) -> bool {
-        matches!(self, Self::Open(_))
-    }
-
-    fn to_window_record(&self) -> crate::WindowRecord {
-        match self {
-            Self::Closed(window) => crate::WindowRecord::Closed((*window).clone()),
-            Self::Open(window) => crate::WindowRecord::Open((*window).clone()),
-        }
-    }
-}
-
 fn to_window_artifact(candidate: &RawWindowRef<'_>) -> WindowArtifact {
     WindowArtifact {
         record_id: candidate.record_id().to_owned(),
@@ -2458,150 +2305,98 @@ fn to_window_artifact(candidate: &RawWindowRef<'_>) -> WindowArtifact {
     }
 }
 
-fn normalize_candidate(
+fn push_scope_exclusion(
+    candidate: &RawWindowRef<'_>,
+    excluded_windows: &mut Vec<ExcludedWindowRecord>,
+) {
+    let window = to_window_artifact(candidate);
+    excluded_windows.push(ExcludedWindowRecord {
+        record_id: window.record_id.clone(),
+        reason: "Window is outside the comparison scope.".to_owned(),
+        diagnostic_code: None,
+        window,
+    });
+}
+
+fn push_normalization_exclusion(
+    candidate: &RawWindowRef<'_>,
+    failure: &WindowNormalizationFailure,
+    diagnostics: &mut Vec<ComparisonDiagnostic>,
+    excluded_windows: &mut Vec<ExcludedWindowRecord>,
+) {
+    let (reason, code, severity) = match failure {
+        WindowNormalizationFailure::FutureWindowExcluded { .. } => (
+            "Window was not available at the configured known-at point.".to_owned(),
+            "FutureWindowExcluded",
+            DiagnosticSeverity::Warning,
+        ),
+        WindowNormalizationFailure::MissingTimestamp { policy, .. } => (
+            "Window temporal axis does not match the comparison plan.".to_owned(),
+            "MissingEventTime",
+            match policy {
+                ComparisonNullTimestampPolicy::Reject => DiagnosticSeverity::Error,
+                ComparisonNullTimestampPolicy::Exclude => DiagnosticSeverity::Warning,
+            },
+        ),
+        WindowNormalizationFailure::TemporalAxisMismatch { .. } => (
+            "Window temporal axis does not match the comparison plan.".to_owned(),
+            "TemporalAxisMismatch",
+            DiagnosticSeverity::Error,
+        ),
+        WindowNormalizationFailure::OpenWindowWithoutPolicy => (
+            "Open windows require an explicit clipping policy.".to_owned(),
+            "OpenWindowsWithoutPolicy",
+            DiagnosticSeverity::Error,
+        ),
+        WindowNormalizationFailure::InvalidRangeDuration { .. } => (
+            "Open-window horizon cannot be earlier than the window start.".to_owned(),
+            "InvalidRangeDuration",
+            DiagnosticSeverity::Error,
+        ),
+        WindowNormalizationFailure::InvalidTemporalRange { error } => (
+            error.to_string(),
+            "InvalidTemporalRange",
+            DiagnosticSeverity::Error,
+        ),
+    };
+    let window = to_window_artifact(candidate);
+    excluded_windows.push(ExcludedWindowRecord {
+        record_id: window.record_id.clone(),
+        reason,
+        diagnostic_code: Some(code.to_owned()),
+        window,
+    });
+    diagnostics.push(ComparisonDiagnostic {
+        code: code.to_owned(),
+        severity,
+    });
+}
+
+fn normalize_for_side(
     candidate: &RawWindowRef<'_>,
     selector_name: &str,
     side: ComparisonSide,
-    plan: &ComparisonPlan,
-    live_horizon_override: Option<crate::TemporalPoint>,
+    normalization: &Result<Option<NormalizedWindowEvidence<'_>>, WindowNormalizationFailure>,
     diagnostics: &mut Vec<ComparisonDiagnostic>,
     excluded_windows: &mut Vec<ExcludedWindowRecord>,
 ) -> Option<NormalizedWindowRecord> {
-    let horizon = live_horizon_override.or_else(|| plan.open_window_horizon.clone());
-    if candidate.start_point().axis() != plan.time_axis {
-        let window = to_window_artifact(candidate);
-        let (code, severity) = if plan.time_axis == TemporalAxis::Timestamp {
-            (
-                "MissingEventTime",
-                match plan.null_timestamp_policy {
-                    ComparisonNullTimestampPolicy::Reject => DiagnosticSeverity::Error,
-                    ComparisonNullTimestampPolicy::Exclude => DiagnosticSeverity::Warning,
-                },
-            )
-        } else {
-            ("TemporalAxisMismatch", DiagnosticSeverity::Error)
-        };
-        excluded_windows.push(ExcludedWindowRecord {
-            record_id: window.record_id.clone(),
-            reason: "Window temporal axis does not match the comparison plan.".to_owned(),
-            diagnostic_code: Some(code.to_owned()),
-            window,
-        });
-        diagnostics.push(ComparisonDiagnostic {
-            code: code.to_owned(),
-            severity,
-        });
-        return None;
-    }
-
-    let end_point = match candidate.end_point() {
-        Some(end) => (end, false),
-        None => match (
-            plan.require_closed_windows,
-            plan.open_window_policy,
-            horizon,
-        ) {
-            (true, _, _) | (false, OpenWindowPolicy::RequireClosed, _) => {
-                let window = to_window_artifact(candidate);
-                excluded_windows.push(ExcludedWindowRecord {
-                    record_id: window.record_id.clone(),
-                    reason: "Open windows require an explicit clipping policy.".to_owned(),
-                    diagnostic_code: Some("OpenWindowsWithoutPolicy".to_owned()),
-                    window,
-                });
-                diagnostics.push(ComparisonDiagnostic {
-                    code: "OpenWindowsWithoutPolicy".to_owned(),
-                    severity: DiagnosticSeverity::Error,
-                });
-                return None;
-            }
-            (false, OpenWindowPolicy::ClipToHorizon, Some(point))
-                if point.is_compatible_with(&candidate.start_point())
-                    && matches!(
-                        point.try_cmp(&candidate.start_point()),
-                        Ok(Ordering::Greater | Ordering::Equal)
-                    ) =>
-            {
-                (point, true)
-            }
-            (false, OpenWindowPolicy::ClipToHorizon, Some(_)) => {
-                let window = to_window_artifact(candidate);
-                excluded_windows.push(ExcludedWindowRecord {
-                    record_id: window.record_id.clone(),
-                    reason: "Open-window horizon cannot be earlier than the window start."
-                        .to_owned(),
-                    diagnostic_code: Some("InvalidRangeDuration".to_owned()),
-                    window,
-                });
-                diagnostics.push(ComparisonDiagnostic {
-                    code: "InvalidRangeDuration".to_owned(),
-                    severity: DiagnosticSeverity::Error,
-                });
-                return None;
-            }
-            (false, OpenWindowPolicy::ClipToHorizon, None) => {
-                let window = to_window_artifact(candidate);
-                excluded_windows.push(ExcludedWindowRecord {
-                    record_id: window.record_id.clone(),
-                    reason: "Open-window clipping requires an evaluation horizon.".to_owned(),
-                    diagnostic_code: Some("OpenWindowsWithoutPolicy".to_owned()),
-                    window,
-                });
-                diagnostics.push(ComparisonDiagnostic {
-                    code: "OpenWindowsWithoutPolicy".to_owned(),
-                    severity: DiagnosticSeverity::Error,
-                });
-                return None;
-            }
-        },
-    };
-
-    let range = match crate::TemporalRange::new(candidate.start_point(), end_point.0.clone()) {
-        Ok(range) => range,
-        Err(error) => {
-            let window = to_window_artifact(candidate);
-            excluded_windows.push(ExcludedWindowRecord {
-                record_id: window.record_id.clone(),
-                reason: error.to_string(),
-                diagnostic_code: Some("InvalidTemporalRange".to_owned()),
-                window,
-            });
-            diagnostics.push(ComparisonDiagnostic {
-                code: "InvalidTemporalRange".to_owned(),
-                severity: DiagnosticSeverity::Error,
-            });
-            return None;
+    match normalization {
+        Ok(Some(evidence)) => Some(NormalizedWindowRecord {
+            record_id: evidence.candidate.record_id().to_owned(),
+            record_ids: vec![evidence.candidate.record_id().to_owned()],
+            selector_name: selector_name.to_owned(),
+            side,
+            range: evidence.range.clone(),
+            is_provisional: evidence.is_provisional,
+            segments: evidence.candidate.segments().to_vec(),
+            window: to_window_artifact(&evidence.candidate),
+        }),
+        Ok(None) => None,
+        Err(failure) => {
+            push_normalization_exclusion(candidate, failure, diagnostics, excluded_windows);
+            None
         }
-    };
-
-    Some(NormalizedWindowRecord {
-        record_id: candidate.record_id().to_owned(),
-        record_ids: vec![candidate.record_id().to_owned()],
-        selector_name: selector_name.to_owned(),
-        side,
-        range,
-        is_provisional: end_point.1,
-        segments: candidate.segments().to_vec(),
-        window: to_window_artifact(candidate),
-    })
-}
-
-fn matches_window_artifact(
-    window: &WindowArtifact,
-    segment_filters: &[WindowFilter],
-    tag_filters: &[WindowFilter],
-) -> bool {
-    segment_filters.iter().all(|filter| {
-        window
-            .segments
-            .iter()
-            .any(|item| item.name == filter.name && item.value == filter.value)
-    }) && tag_filters.iter().all(|filter| {
-        window
-            .tags
-            .iter()
-            .any(|item| item.name == filter.name && item.value == filter.value)
-    })
+    }
 }
 
 fn aligned_segments(

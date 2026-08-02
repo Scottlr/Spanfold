@@ -39,6 +39,7 @@ pub mod records;
 /// Temporal axes, points, ranges, and domain validation.
 pub mod temporal;
 mod testing;
+mod window_normalization;
 
 pub use analytics::{
     HierarchyComparisonResult, HierarchyComparisonRow, HierarchyComparisonRowKind,
