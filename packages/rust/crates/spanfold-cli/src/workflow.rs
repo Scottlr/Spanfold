@@ -167,7 +167,9 @@ pub(super) fn import_events(path: &Path, map_path: &Path) -> Result<Vec<Imported
     match input {
         "jsonl" => import_events_jsonl(path, &import_map, &mut windows),
         "csv" => import_events_csv(path, &import_map, &mut windows),
-        _ => Err(format!("unsupported event input format: {input}")),
+        _ => Err(ImportError::Input(format!(
+            "unsupported event input format: {input}"
+        ))),
     }
     .map_err(CliError::from)?;
     Ok(windows)
@@ -185,17 +187,54 @@ pub(super) fn import_events_to_file(
     match input {
         "jsonl" => import_events_jsonl(path, &import_map, &mut sink),
         "csv" => import_events_csv(path, &import_map, &mut sink),
-        _ => Err(format!("unsupported event input format: {input}")),
+        _ => Err(ImportError::Input(format!(
+            "unsupported event input format: {input}"
+        ))),
     }
     .map_err(CliError::from)
 }
 
+enum ImportError {
+    Input(String),
+    Io(String),
+}
+
+impl ImportError {
+    fn io(error: impl std::fmt::Display) -> Self {
+        Self::Io(error.to_string())
+    }
+
+    fn csv(context: &str, error: csv::Error) -> Self {
+        let message = format!("{context}: {error}");
+        if error.is_io_error() {
+            Self::Io(message)
+        } else {
+            Self::Input(message)
+        }
+    }
+}
+
+impl From<String> for ImportError {
+    fn from(message: String) -> Self {
+        Self::Input(message)
+    }
+}
+
+impl From<ImportError> for CliError {
+    fn from(error: ImportError) -> Self {
+        match error {
+            ImportError::Input(message) => Self::from(message),
+            ImportError::Io(message) => Self::io(message),
+        }
+    }
+}
+
 trait ImportedWindowSink {
-    fn push(&mut self, window: ImportedWindow) -> Result<(), String>;
+    fn push(&mut self, window: ImportedWindow) -> Result<(), ImportError>;
 }
 
 impl ImportedWindowSink for Vec<ImportedWindow> {
-    fn push(&mut self, window: ImportedWindow) -> Result<(), String> {
+    fn push(&mut self, window: ImportedWindow) -> Result<(), ImportError> {
         self.push(window);
         Ok(())
     }
@@ -206,9 +245,9 @@ struct JsonlWindowSink<W> {
 }
 
 impl<W: Write> ImportedWindowSink for JsonlWindowSink<W> {
-    fn push(&mut self, window: ImportedWindow) -> Result<(), String> {
+    fn push(&mut self, window: ImportedWindow) -> Result<(), ImportError> {
         let line = serde_json::to_string(&window).map_err(|error| error.to_string())?;
-        writeln!(self.writer, "{line}").map_err(|error| error.to_string())
+        writeln!(self.writer, "{line}").map_err(ImportError::io)
     }
 }
 
@@ -216,15 +255,15 @@ fn import_events_jsonl(
     path: &Path,
     import_map: &EventImportMap,
     sink: &mut impl ImportedWindowSink,
-) -> Result<(), String> {
+) -> Result<(), ImportError> {
     let path_label = path.display().to_string();
-    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let file = fs::File::open(path).map_err(ImportError::io)?;
     let reader = BufReader::new(file);
     let mut active: BTreeMap<ImportStateKey, ImportState> = BTreeMap::new();
     let mut last_position: Option<i64> = None;
 
     for (index, line) in reader.lines().enumerate() {
-        let line = line.map_err(|error| error.to_string())?;
+        let line = line.map_err(ImportError::io)?;
         if line.trim().is_empty() {
             continue;
         }
@@ -249,16 +288,16 @@ fn import_events_csv(
     path: &Path,
     import_map: &EventImportMap,
     sink: &mut impl ImportedWindowSink,
-) -> Result<(), String> {
+) -> Result<(), ImportError> {
     let path_label = path.display().to_string();
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(false)
         .from_path(path)
-        .map_err(|error| format!("{path_label}: {error}"))?;
+        .map_err(|error| ImportError::csv(&path_label, error))?;
     let headers = reader
         .headers()
-        .map_err(|error| format!("{path_label}:1: {error}"))?
+        .map_err(|error| ImportError::csv(&format!("{path_label}:1"), error))?
         .iter()
         .enumerate()
         .map(|(index, header)| {
@@ -270,16 +309,12 @@ fn import_events_csv(
         })
         .collect::<Vec<_>>();
     if headers.is_empty() {
-        return Err(format!(
-            "{path_label}:1: CSV header must contain at least one column"
-        ));
+        return Err(format!("{path_label}:1: CSV header must contain at least one column").into());
     }
     let mut header_names = std::collections::BTreeSet::new();
     for header in &headers {
         if header.trim().is_empty() || !header_names.insert(header.as_str()) {
-            return Err(format!(
-                "{path_label}:1: CSV headers must be non-empty and unique"
-            ));
+            return Err(format!("{path_label}:1: CSV headers must be non-empty and unique").into());
         }
     }
 
@@ -288,7 +323,8 @@ fn import_events_csv(
 
     for (index, record) in reader.records().enumerate() {
         let line_number = index + 2;
-        let record = record.map_err(|error| format!("{path_label}:{line_number}: {error}"))?;
+        let record = record
+            .map_err(|error| ImportError::csv(&format!("{path_label}:{line_number}"), error))?;
         let mut event = serde_json::Map::new();
         for (header, field) in headers.iter().zip(record.iter()) {
             event.insert(header.clone(), serde_json::Value::String(field.to_owned()));
@@ -316,12 +352,10 @@ fn process_import_event(
     active: &mut BTreeMap<ImportStateKey, ImportState>,
     sink: &mut impl ImportedWindowSink,
     last_position: &mut Option<i64>,
-) -> Result<(), String> {
+) -> Result<(), ImportError> {
     let position = select_i64(event, &import_map.position, path, line_number)?;
     if last_position.is_some_and(|last| position < last) {
-        return Err(format!(
-            "{path}:{line_number}: event position cannot move backwards"
-        ));
+        return Err(format!("{path}:{line_number}: event position cannot move backwards").into());
     }
     *last_position = Some(position);
     let source = select_string(event, &import_map.source, path, line_number)?;
@@ -383,7 +417,7 @@ fn process_import_event(
 fn close_remaining_imported_windows(
     active: BTreeMap<ImportStateKey, ImportState>,
     sink: &mut impl ImportedWindowSink,
-) -> Result<(), String> {
+) -> Result<(), ImportError> {
     for (state_key, state) in active {
         sink.push(state.to_window_for_key(&state_key, None))?;
     }
