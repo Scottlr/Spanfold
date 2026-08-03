@@ -146,6 +146,52 @@ before fragment checks, then use these checked-in cases as the before/after
 gate; formation-specific work should remain separate unless its own scale
 trend is the target.
 
+### P2 relation candidate indexing
+
+P2 replaced the all-pairs target-against compatibility scan with a private
+against-side candidate index. The index uses the existing compatibility
+identity: window family, logical key, partition, temporal axis, and timestamp
+clock. .NET delegates key equality and hashing to the configured per-window
+key comparer; Rust keys are exact strings. Candidate lists retain against-side
+episode order, and actual fragment overlap/proximity remains the final edge
+test.
+
+The after measurement used the same machine and runtime configuration as the
+baseline above. Only the checked-in sparse relation cases were rerun. From the
+repository root, the exact .NET commands were:
+
+```bash
+dotnet build packages/dotnet/benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj -c Release -p:RestoreSources=https://api.nuget.org/v3/index.json
+RestoreSources=https://api.nuget.org/v3/index.json dotnet run -c Release --no-build --project packages/dotnet/benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj -- --filter '*EpisodeRelationBenchmarks.BuildSparseRelationGraph*' --job Short --artifacts /tmp/spanfold-p2-bdn-final --noOverwrite > /tmp/spanfold-p2-bdn-final.log 2>&1
+```
+
+From `packages/rust`, the exact Rust commands were:
+
+```bash
+cargo build --release --bench spanfold_benchmarks
+cargo bench --bench spanfold_benchmarks -- episode_relation_sparse > /tmp/spanfold-p2-criterion-final.log 2>&1
+```
+
+| .NET scale | Before mean | After mean | Speedup | Before allocated | After allocated |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 episodes/side | 234.7 us | 213.9 us | 1.10x | 872.88 KB | 881.69 KB |
+| 256 episodes/side | 1.604 ms | 1.117 ms | 1.44x | 3,912.86 KB | 3,948.19 KB |
+| 1,024 episodes/side | 17.722 ms | 8.522 ms | 2.08x | 17,650.52 KB | 17,787.36 KB |
+
+| Rust scale | Before middle estimate | After middle estimate | Speedup |
+| ---: | ---: | ---: | ---: |
+| 64 episodes/side | 213.83 us | 208.14 us | 1.03x |
+| 256 episodes/side | 1.0562 ms | 900.17 us | 1.17x |
+| 1,024 episodes/side | 7.8685 ms | 3.9065 ms | 2.01x |
+
+The 256-to-1,024 scale ratio fell from 11.1x to 7.6x in .NET and from
+7.4x to 4.3x in Rust. The larger representative case is about twice as fast in
+both runtimes, while the 64-per-side case improved slightly in .NET and was
+effectively unchanged in Rust. .NET allocation increased by less than 1.1%
+because the index materializes private lookup buckets. P2 therefore passes the
+acceptance gate without changing Episode formation, public APIs, relation
+evidence, component semantics, or summary interpretation.
+
 ## Current Optimization Work
 
 The first benchmark-backed optimization target was comparison alignment. The
