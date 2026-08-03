@@ -3,7 +3,10 @@
 #![allow(unused_must_use)]
 
 use super::*;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 #[derive(Clone)]
 struct PriceTick {
@@ -729,6 +732,96 @@ fn projection_preflight_keeps_multi_definition_ingestion_atomic() {
     assert_eq!(pipeline.processing_position(), 0);
     assert!(pipeline.history().closed_windows().is_empty());
     assert!(pipeline.history().open_windows().is_empty());
+}
+
+#[test]
+fn metadata_and_rollup_observations_are_evaluated_once_per_event() {
+    let key_calls = Arc::new(AtomicUsize::new(0));
+    let active_calls = Arc::new(AtomicUsize::new(0));
+    let segment_calls = Arc::new(AtomicUsize::new(0));
+    let tag_calls = Arc::new(AtomicUsize::new(0));
+    let rollup_key_calls = Arc::new(AtomicUsize::new(0));
+    let transform_calls = Arc::new(AtomicUsize::new(0));
+
+    let mut pipeline = for_events::<PriceTick>()
+        .record_windows()
+        .window_with_metadata(
+            "SelectionPriced",
+            {
+                let calls = Arc::clone(&key_calls);
+                move |tick| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    tick.selection_id
+                }
+            },
+            {
+                let calls = Arc::clone(&active_calls);
+                move |tick| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    tick.price > 0.0
+                }
+            },
+            {
+                let calls = Arc::clone(&segment_calls);
+                move |tick| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    vec![WindowSegment::new("phase", tick.market_id).expect("segment name")]
+                }
+            },
+            {
+                let calls = Arc::clone(&tag_calls);
+                move |tick| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    vec![WindowTag::new("fixture", tick.fixture_id).expect("tag name")]
+                }
+            },
+        )
+        .roll_up_with_segment_projection(
+            "MarketPriced",
+            {
+                let calls = Arc::clone(&rollup_key_calls);
+                move |tick| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    tick.market_id
+                }
+            },
+            |children| children.any_active(),
+            {
+                let calls = Arc::clone(&transform_calls);
+                move |projection| {
+                    projection.transform("phase", move |value| {
+                        calls.fetch_add(1, Ordering::Relaxed);
+                        value.clone()
+                    })
+                }
+            },
+        )
+        .build_or_panic();
+
+    pipeline
+        .ingest(
+            PriceTick {
+                selection_id: "selection-1",
+                market_id: "in-play",
+                fixture_id: "fixture-1",
+                price: 1.01,
+                observed_at: 100,
+            },
+            None,
+            None,
+        )
+        .expect("ingest");
+
+    for calls in [
+        key_calls,
+        active_calls,
+        segment_calls,
+        tag_calls,
+        rollup_key_calls,
+        transform_calls,
+    ] {
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
 }
 
 #[test]

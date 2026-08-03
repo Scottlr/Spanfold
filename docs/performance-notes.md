@@ -306,6 +306,52 @@ large-case improvement, but it does not establish that transition comparison
 now scales linearly. Further transition work is not justified by P3b alone and
 would require separate measurement of the remaining costs.
 
+## Rust ingestion observation reuse
+
+The affected Rust ingestion case records 8,192 deterministic events across 128
+selections and four sources. Each selection/source lane repeatedly opens, changes
+its `phase` and `period` boundary segments, updates only its `state` tag, and
+closes. The source window has four segment dimensions and one tag; its market
+roll-up preserves `phase` and `period` and renames `phase` to `trading_phase`.
+This exercises active and metadata selectors, segment-change close/reopen,
+tag-only updates, segment projection, child membership, roll-up state, emissions,
+and history recording.
+
+The affected Criterion case prepares deterministic events and source strings
+outside measurement. `iter_batched` clones that prepared input and constructs a
+fresh pipeline in its untimed setup; the timed routine only loops over the 8,192
+`ingest` calls and returns the resulting pipeline to `black_box`. The existing
+simple case remains unchanged and includes its historical fixture construction
+and ingestion journey, so its before/after values are comparable to each other
+but not directly to the affected case.
+
+The measurements were taken on 2026-08-03 on an Apple M4 Pro (12 cores), macOS
+26.5.2 (25F84), using rustc and Cargo 1.95.0 for `aarch64-apple-darwin`,
+Criterion 0.8.2, and Criterion's default 3-second warmup, 100 samples, and
+approximately 5-second target measurement. From `packages/rust`, the exact
+commands were run before and after the production change:
+
+```bash
+cargo bench --bench spanfold_benchmarks -- ingest_8192
+cargo bench --bench spanfold_benchmarks -- metadata_rollup_8192
+```
+
+Criterion reports a confidence interval; the middle estimate is used for the
+ratio.
+
+| Workload | Before | After | After/before | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Simple ingestion, 8,192 events | 13.242 ms `[13.174, 13.339]` | 13.285 ms `[13.252, 13.318]` | 1.003x | 0.997x |
+| Metadata and projected roll-up ingestion, 8,192 events | 70.245 ms `[70.105, 70.384]` | 67.033 ms `[66.616, 67.609]` | 0.954x | 1.048x |
+
+The gate passes. Reusing preflighted active, segment, and projected roll-up
+observations reduced the representative affected workload by 4.57%. The simple
+path moved by 0.32%, which is not a meaningful regression. The change preserves
+the preflight-before-mutation boundary, consumes projected observations without
+recloning them, and caches the immutable definition-tree record bound at pipeline
+construction. No public API, event-time, watermark, callback emission, or
+lifecycle ownership changes were made.
+
 ## Current Optimization Work
 
 The first benchmark-backed optimization target was comparison alignment. The
