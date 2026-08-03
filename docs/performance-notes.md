@@ -31,6 +31,8 @@ The benchmark project covers:
 - deterministic Episode formation across geometric history sizes
 - sparse Episode relation-graph construction across geometric episode counts
 - reference-scorecard interpretation from an already materialized comparison
+- dense single-scope lead/lag and as-of transition matching across geometric
+  transition counts
 
 The comparison benchmark also includes `DenseSingleScope`, a checked-in shape
 with one device key and alternating states across both sources. This keeps the
@@ -191,6 +193,86 @@ effectively unchanged in Rust. .NET allocation increased by less than 1.1%
 because the index materializes private lookup buckets. P2 therefore passes the
 acceptance gate without changing Episode formation, public APIs, relation
 evidence, component semantics, or summary interpretation.
+
+## Transition Comparator Baseline
+
+The lead/lag and as-of workloads use the same deterministic processing-position
+shape in .NET and Rust. Each case contains 64, 256, or 1,024 closed target
+windows and the same number of against windows. Every record shares the `State`
+window, `dense-scope` key, `partition-0` partition, and processing-position
+axis, so one candidate list grows with the parameter instead of the workload
+being divided across high-cardinality groups.
+
+Against start `i` is at `10i`, and its paired target starts one position later
+at `10i + 1`; both windows are four positions long. A tolerance of two therefore
+gives every target a real nearest `LeadLag(Start)` match with delta `+1` and a
+real `AsOf(Previous)` match at distance `1`. Setup constructs the histories and
+reusable configured builders, runs each comparison once, and checks the row
+count, match identity, delta or distance, status, and tolerance result. The
+timed methods only run the public comparison journey and return or black-box
+the materialized result. There are six cases in each runtime: two comparator
+operations at three geometric scales.
+
+The baseline was measured on 2026-08-03 on the same Apple M4 Pro and macOS
+26.5.2 (25F84) environment as the Episode baseline. .NET used SDK 10.0.102,
+runtime 10.0.2, BenchmarkDotNet 0.15.2, Arm64 RyuJIT, concurrent workstation
+GC, and the `Short` job. Rust used rustc and Cargo 1.95.0 for
+`aarch64-apple-darwin`, Criterion 0.8.2, and Criterion's default 3-second
+warmup, 100-sample, approximately 5-second measurement per case.
+
+From the repository root, the exact .NET commands were:
+
+```bash
+dotnet build packages/dotnet/benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj -c Release -p:RestoreSources=https://api.nuget.org/v3/index.json
+RestoreSources=https://api.nuget.org/v3/index.json dotnet run -c Release --no-build --project packages/dotnet/benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj -- --filter '*TransitionComparatorBenchmarks*' --job Short --artifacts /tmp/spanfold-p3-bdn --noOverwrite
+```
+
+From `packages/rust`, the exact Rust commands were:
+
+```bash
+cargo build --release --bench spanfold_benchmarks
+cargo bench --bench spanfold_benchmarks -- transition_comparators
+```
+
+### .NET baseline
+
+| Operation | Transitions/side | Mean | Allocated | Previous-scale ratio |
+| --- | ---: | ---: | ---: | ---: |
+| Lead/lag start | 64 | 211.3 us | 545.25 KB | - |
+| Lead/lag start | 256 | 1.4607 ms | 2,175.34 KB | 6.91x |
+| Lead/lag start | 1,024 | 15.8069 ms | 8,726.42 KB | 10.82x |
+| As-of previous | 64 | 201.8 us | 549.11 KB | - |
+| As-of previous | 256 | 1.6852 ms | 2,191.10 KB | 8.35x |
+| As-of previous | 1,024 | 14.4275 ms | 8,790.46 KB | 8.56x |
+
+### Rust reference baseline
+
+Criterion reports a confidence interval; the middle estimate is shown here.
+
+| Operation | Transitions/side | Time | Previous-scale ratio |
+| --- | ---: | ---: | ---: |
+| Lead/lag start | 64 | 742.76 us | - |
+| Lead/lag start | 256 | 3.0056 ms | 4.05x |
+| Lead/lag start | 1,024 | 12.341 ms | 4.11x |
+| As-of previous | 64 | 745.00 us | - |
+| As-of previous | 256 | 3.0258 ms | 4.06x |
+| As-of previous | 1,024 | 12.653 ms | 4.18x |
+
+These absolute .NET and Rust numbers are not a language comparison. The public
+journeys are conceptually aligned and were measured on the same machine, but
+the harnesses, runtimes, allocation models, and implementations differ. The
+useful comparison is each operation's scale trend within its own runtime.
+
+P3b .NET transition-candidate indexing is justified. From 256 to 1,024
+transitions per side, a 4x input increase raised .NET lead/lag time by 10.82x
+and as-of time by 8.56x, while allocation remained close to linear. The Rust
+reference, whose transition lookup already uses partition points over sorted
+candidates, rose by 4.11x and 4.18x respectively. Together with the current
+.NET full candidate-list scan per target, this is evidence for replacing that
+scan with a private sorted-candidate lookup while preserving scope identity,
+deterministic tie-breaking, tolerance, direction, diagnostics, and public APIs.
+The checked-in cases should be the before/after gate. No Rust optimization is
+indicated by this baseline.
 
 ## Current Optimization Work
 

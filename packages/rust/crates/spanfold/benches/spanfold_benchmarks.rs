@@ -1,9 +1,10 @@
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use spanfold::{
-    CohortActivity, ComparisonScope, ComparisonSelector, EpisodeComparisonBuilder, PrimitiveValue,
-    TemporalPoint, TemporalTolerance, WindowHistory, WindowHistoryFixture, WindowSegment,
+    AsOfDirection, CohortActivity, Comparator, ComparisonScope, ComparisonSelector,
+    EpisodeComparisonBuilder, LeadLagTransition, PrimitiveValue, TemporalAxis, TemporalPoint,
+    TemporalTolerance, WindowComparisonBuilder, WindowHistory, WindowHistoryFixture, WindowSegment,
     WindowTag, export_result_json, export_result_llm_context, for_events,
 };
 
@@ -12,6 +13,14 @@ const EPISODE_TARGET_SOURCE: &str = "reference";
 const EPISODE_WINDOW_NAME: &str = "State";
 const FRAGMENTS_PER_EPISODE: usize = 8;
 const RELATION_STRIDE: i64 = 20;
+const TRANSITION_AGAINST_SOURCE: &str = "against";
+const TRANSITION_EXPECTED_DELTA: i64 = 1;
+const TRANSITION_KEY: &str = "dense-scope";
+const TRANSITION_PARTITION: &str = "partition-0";
+const TRANSITION_STRIDE: i64 = 10;
+const TRANSITION_TARGET_SOURCE: &str = "target";
+const TRANSITION_TOLERANCE: i64 = 2;
+const TRANSITION_WINDOW_NAME: &str = "State";
 
 #[derive(Clone)]
 struct DeviceSignal {
@@ -227,6 +236,110 @@ fn segment_cohort_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
+fn create_transition_comparator_history(transition_count_per_side: usize) -> WindowHistory {
+    let mut fixture = WindowHistoryFixture::new();
+    for index in 0..transition_count_per_side {
+        let against_start = i64::try_from(index).expect("transition index") * TRANSITION_STRIDE;
+        fixture = fixture
+            .closed_window(
+                TRANSITION_WINDOW_NAME,
+                TRANSITION_KEY,
+                against_start,
+                against_start + 4,
+                |window| {
+                    window
+                        .source(TRANSITION_AGAINST_SOURCE)
+                        .partition(TRANSITION_PARTITION)
+                },
+            )
+            .expect("valid against transition window");
+
+        let target_start = against_start + TRANSITION_EXPECTED_DELTA;
+        fixture = fixture
+            .closed_window(
+                TRANSITION_WINDOW_NAME,
+                TRANSITION_KEY,
+                target_start,
+                target_start + 4,
+                |window| {
+                    window
+                        .source(TRANSITION_TARGET_SOURCE)
+                        .partition(TRANSITION_PARTITION)
+                },
+            )
+            .expect("valid target transition window");
+    }
+    fixture.build()
+}
+
+fn transition_comparison(
+    history: &WindowHistory,
+    comparator: Comparator,
+) -> WindowComparisonBuilder<'_> {
+    history
+        .compare("Dense transition matching")
+        .target_source(TRANSITION_TARGET_SOURCE)
+        .against_source(TRANSITION_AGAINST_SOURCE)
+        .scope_window(TRANSITION_WINDOW_NAME)
+        .scope_key(TRANSITION_KEY)
+        .scope_partition(TRANSITION_PARTITION)
+        .use_comparator(comparator)
+}
+
+fn transition_comparator_benchmarks(c: &mut Criterion) {
+    let mut group = c.benchmark_group("transition_comparators");
+    for transition_count_per_side in [64_usize, 256, 1_024] {
+        let history = create_transition_comparator_history(transition_count_per_side);
+        let lead_lag = transition_comparison(
+            &history,
+            Comparator::LeadLag {
+                transition: LeadLagTransition::Start,
+                axis: TemporalAxis::ProcessingPosition,
+                tolerance_magnitude: TRANSITION_TOLERANCE,
+            },
+        );
+        let as_of = transition_comparison(
+            &history,
+            Comparator::AsOf {
+                direction: AsOfDirection::Previous,
+                axis: TemporalAxis::ProcessingPosition,
+                tolerance_magnitude: TRANSITION_TOLERANCE,
+            },
+        );
+
+        let lead_lag_result = lead_lag.run();
+        assert_eq!(
+            lead_lag_result.lead_lag_rows.len(),
+            transition_count_per_side
+        );
+        assert!(lead_lag_result.lead_lag_rows.iter().all(|row| {
+            row.comparison_record_id.is_some()
+                && row.delta_magnitude == Some(TRANSITION_EXPECTED_DELTA)
+                && row.is_within_tolerance
+        }));
+
+        let as_of_result = as_of.run();
+        assert_eq!(as_of_result.as_of_rows.len(), transition_count_per_side);
+        assert!(as_of_result.as_of_rows.iter().all(|row| {
+            row.matched_record_id.is_some()
+                && row.distance_magnitude == Some(TRANSITION_EXPECTED_DELTA)
+                && row.status == spanfold::AsOfMatchStatus::Matched
+        }));
+
+        group.bench_with_input(
+            BenchmarkId::new("lead_lag_start", transition_count_per_side),
+            &transition_count_per_side,
+            |b, _| b.iter(|| black_box(&lead_lag).run()),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("as_of_previous", transition_count_per_side),
+            &transition_count_per_side,
+            |b, _| b.iter(|| black_box(&as_of).run()),
+        );
+    }
+    group.finish();
+}
+
 fn create_episode_formation_history(window_count: usize) -> WindowHistory {
     let mut fixture = WindowHistoryFixture::new();
     for index in 0..window_count {
@@ -342,6 +455,7 @@ criterion_group!(
     ingestion_benchmarks,
     comparison_benchmarks,
     segment_cohort_benchmarks,
+    transition_comparator_benchmarks,
     episode_benchmarks
 );
 criterion_main!(benches);
