@@ -289,6 +289,7 @@ impl Episode {
 pub struct EpisodeSet {
     plan: EpisodeFormationPlan,
     episodes: Vec<Episode>,
+    summary: super::EpisodeSetSummary,
     evaluation_horizon: Option<TemporalPoint>,
 }
 
@@ -297,12 +298,14 @@ impl EpisodeSet {
         plan: EpisodeFormationPlan,
         episodes: Vec<Episode>,
         evaluation_horizon: Option<TemporalPoint>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, EpisodeError> {
+        let summary = super::summary::summarize_set(&plan, &episodes)?;
+        Ok(Self {
             plan,
             episodes,
+            summary,
             evaluation_horizon,
-        }
+        })
     }
     /// Returns the analytical set name.
     #[must_use]
@@ -318,6 +321,11 @@ impl EpisodeSet {
     #[must_use]
     pub fn episodes(&self) -> &[Episode] {
         &self.episodes
+    }
+    /// Returns the materialized neutral set summary.
+    #[must_use]
+    pub const fn summary(&self) -> &super::EpisodeSetSummary {
+        &self.summary
     }
     /// Returns the live or configured horizon, when present.
     #[must_use]

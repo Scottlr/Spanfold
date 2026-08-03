@@ -242,7 +242,7 @@ pub(crate) fn run(
             evaluation_horizon.as_ref(),
         )?);
     }
-    Ok(EpisodeSet::new(plan, episodes, evaluation_horizon))
+    EpisodeSet::new(plan, episodes, evaluation_horizon)
 }
 
 fn push_fragment(
