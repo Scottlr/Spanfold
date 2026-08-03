@@ -109,6 +109,46 @@ fn import_events_writes_window_jsonl() {
 }
 
 #[test]
+fn import_events_updates_tags_without_reopening_unchanged_segments() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    write_event_import_files(&events, &map);
+    fs::write(
+        &events,
+        [
+            r#"{"position":1,"source":"provider-a","deviceId":"device-1","status":"offline","region":"eu","severity":"high"}"#,
+            r#"{"position":2,"source":"provider-a","deviceId":"device-1","status":"offline","region":"eu","severity":"critical"}"#,
+        ]
+        .join("\n"),
+    )
+    .expect("events file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .success();
+
+    let output = fs::read_to_string(out).expect("windows output");
+    let windows = output.lines().collect::<Vec<_>>();
+    assert_eq!(windows.len(), 1);
+    let window: serde_json::Value = serde_json::from_str(windows[0]).expect("window json parse");
+    assert_eq!(window["startPosition"], 1);
+    assert!(window["endPosition"].is_null());
+    assert_eq!(window["segments"][0]["value"], "eu");
+    assert_eq!(window["tags"][0]["value"], "critical");
+}
+
+#[test]
 fn import_events_accepts_csv_with_header_row() {
     let workspace = tempdir().expect("tempdir");
     let events = workspace.path().join("events.csv");

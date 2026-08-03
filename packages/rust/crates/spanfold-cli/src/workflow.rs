@@ -357,6 +357,8 @@ fn process_import_event(
                         segments,
                         tags,
                     };
+                } else if state.tags != tags {
+                    state.tags = tags;
                 }
                 continue;
             }
