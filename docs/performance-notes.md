@@ -274,6 +274,38 @@ deterministic tie-breaking, tolerance, direction, diagnostics, and public APIs.
 The checked-in cases should be the before/after gate. No Rust optimization is
 indicated by this baseline.
 
+### .NET indexed transition lookup
+
+The after measurement used the same six-case `Short` workload and environment:
+
+```bash
+RestoreSources=https://api.nuget.org/v3/index.json dotnet run -c Release --no-build --project packages/dotnet/benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj -- --filter '*TransitionComparatorBenchmarks*' --job Short --artifacts /tmp/spanfold-p3b-bdn-final --noOverwrite
+```
+
+| Operation | Transitions/side | Before mean | After mean | Speedup | After allocated |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Lead/lag start | 64 | 211.3 us | 194.1 us | 1.09x | 545.25 KB |
+| Lead/lag start | 256 | 1.4607 ms | 1.1902 ms | 1.23x | 2,175.34 KB |
+| Lead/lag start | 1,024 | 15.8069 ms | 14.2611 ms | 1.11x | 8,726.42 KB |
+| As-of previous | 64 | 201.8 us | 206.2 us | 0.98x | 549.11 KB |
+| As-of previous | 256 | 1.6852 ms | 1.2025 ms | 1.40x | 2,191.04 KB |
+| As-of previous | 1,024 | 14.4275 ms | 12.2167 ms | 1.18x | 8,790.46 KB |
+
+P3b passes its gate modestly. At 1,024 transitions per side, the indexed lookup
+made lead/lag 1.11x faster and as-of 1.18x faster; their combined time improved
+1.14x. The 64-transition lead/lag case improved 1.09x, while the as-of case was
+2.2% slower, which is not a meaningful regression in this three-iteration
+`Short` measurement. Allocation was effectively unchanged because the lookup
+reuses the existing sorted candidate lists and does not materialize per-target
+candidate collections.
+
+The full public journey remains superlinear: from 256 to 1,024 transitions per
+side, the after ratio is 11.98x for lead/lag and 10.16x for as-of. This change
+removes the measured full candidate scan and provides a material absolute
+large-case improvement, but it does not establish that transition comparison
+now scales linearly. Further transition work is not justified by P3b alone and
+would require separate measurement of the remaining costs.
+
 ## Current Optimization Work
 
 The first benchmark-backed optimization target was comparison alignment. The
