@@ -33,8 +33,12 @@ impl ComparisonPlan {
         write_section(&mut out, format, "Plan");
         write_item(&mut out, "name", &self.name);
         write_item(&mut out, "strict", &self.strict.to_string());
-        write_item(&mut out, "target", &self.target_source);
-        write_item(&mut out, "against", &format!("{:?}", self.against));
+        write_item(&mut out, "target", self.target_source());
+        write_item(
+            &mut out,
+            "against",
+            &format!("{:?}", self.against_for_alignment()),
+        );
         write_item(&mut out, "scopeWindow", &format!("{:?}", self.scope_window));
         write_item(&mut out, "scopeKey", &format!("{:?}", self.scope_key));
         write_item(
@@ -415,10 +419,10 @@ mod tests {
             &history,
             &crate::ComparisonPlan {
                 name: "Provider QA".to_owned(),
-                target_source: "provider-a".to_owned(),
-                against: crate::AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: crate::comparison::ComparisonSelection::legacy(
+                    "provider-a",
+                    crate::AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+                ),
                 scope_window: Some("DeviceOffline".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -460,10 +464,10 @@ mod tests {
             &history,
             &crate::ComparisonPlan {
                 name: "Strict broad QA".to_owned(),
-                target_source: "provider-a".to_owned(),
-                against: crate::AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: crate::comparison::ComparisonSelection::legacy(
+                    "provider-a",
+                    crate::AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+                ),
                 scope_window: None,
                 scope_key: None,
                 scope_partition: None,

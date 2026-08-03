@@ -19,30 +19,12 @@ impl WindowHistory {
     pub fn compare(&self, name: impl Into<String>) -> WindowComparisonBuilder<'_> {
         WindowComparisonBuilder {
             history: self,
-            plan: ComparisonPlan {
-                name: name.into(),
-                target_source: String::new(),
-                against: AgainstSelection::Sources(Vec::new()),
-                target_selector: None,
-                against_selectors: Vec::new(),
-                scope_window: None,
-                scope_key: None,
-                scope_partition: None,
-                scope_segments: Vec::new(),
-                scope_tags: Vec::new(),
-                comparators: Vec::new(),
-                require_closed_windows: true,
-                use_half_open_ranges: true,
-                time_axis: crate::TemporalAxis::ProcessingPosition,
-                null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
-                known_at: None,
-                open_window_policy: OpenWindowPolicy::RequireClosed,
-                open_window_horizon: None,
-                coalesce_adjacent_windows: false,
-                duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
-                output: crate::ComparisonOutputOptions::default_options(),
-                strict: false,
-            },
+            plan: ComparisonPlan::new(
+                name,
+                String::new(),
+                AgainstSelection::Sources(Vec::new()),
+                Vec::new(),
+            ),
         }
     }
 }
@@ -57,40 +39,38 @@ impl<'a> WindowComparisonBuilder<'a> {
     /// Sets the target source lane.
     #[must_use]
     pub fn target_source(mut self, source: impl Into<String>) -> Self {
-        self.plan.target_source = source.into();
-        self.plan.target_selector = None;
+        self.plan.set_target_source(source.into());
         self
     }
 
     /// Sets the target selector for the comparison.
     #[must_use]
     pub fn target_selector(mut self, selector: ComparisonSelector) -> Self {
-        self.plan.target_source = selector.name.clone();
-        self.plan.target_selector = Some(selector);
+        self.plan.set_target_selector(selector);
         self
     }
 
     /// Sets one comparison source lane.
     #[must_use]
     pub fn against_source(mut self, source: impl Into<String>) -> Self {
-        self.plan.against = AgainstSelection::Sources(vec![source.into()]);
-        self.plan.against_selectors.clear();
+        self.plan
+            .set_legacy_against(AgainstSelection::Sources(vec![source.into()]));
         self
     }
 
     /// Sets multiple comparison source lanes.
     #[must_use]
     pub fn against_sources(mut self, sources: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.plan.against =
-            AgainstSelection::Sources(sources.into_iter().map(Into::into).collect::<Vec<_>>());
-        self.plan.against_selectors.clear();
+        self.plan.set_legacy_against(AgainstSelection::Sources(
+            sources.into_iter().map(Into::into).collect::<Vec<_>>(),
+        ));
         self
     }
 
     /// Adds a comparison selector.
     #[must_use]
     pub fn against_selector(mut self, selector: ComparisonSelector) -> Self {
-        self.plan.against_selectors.push(selector);
+        self.plan.push_against_selector(selector);
         self
     }
 
@@ -102,12 +82,11 @@ impl<'a> WindowComparisonBuilder<'a> {
         sources: impl IntoIterator<Item = impl Into<String>>,
         activity: CohortActivity,
     ) -> Self {
-        self.plan.against = AgainstSelection::Cohort {
+        self.plan.set_legacy_against(AgainstSelection::Cohort {
             name: name.into(),
             sources: sources.into_iter().map(Into::into).collect::<Vec<_>>(),
             activity,
-        };
-        self.plan.against_selectors.clear();
+        });
         self
     }
 
@@ -387,6 +366,32 @@ mod tests {
         ComparisonNullTimestampPolicy, ComparisonScope, ComparisonSelector, TemporalAxis,
         TemporalPoint, WindowHistoryFixture,
     };
+
+    #[test]
+    fn legacy_and_selector_against_setters_preserve_ordered_transition_contract() {
+        let history = WindowHistoryFixture::new().build();
+
+        let contradictory_codes = history
+            .compare("Mixed selection")
+            .target_source("provider-a")
+            .against_source("provider-b")
+            .against_selector(ComparisonSelector::for_source("provider-c"))
+            .overlap()
+            .validate()
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>();
+        assert_eq!(contradictory_codes, vec!["ContradictoryAgainstSelection"]);
+
+        let replaced_codes = history
+            .compare("Replaced selection")
+            .target_source("provider-a")
+            .against_selector(ComparisonSelector::for_source("provider-c"))
+            .against_source("provider-b")
+            .overlap()
+            .validate();
+        assert!(replaced_codes.is_empty());
+    }
 
     #[test]
     fn builder_can_write_configured_debug_and_llm_exports() {

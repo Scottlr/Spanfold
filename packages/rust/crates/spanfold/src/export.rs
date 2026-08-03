@@ -718,7 +718,10 @@ fn build_plan_json_value(plan: &ComparisonPlan) -> Value {
         "isStrict": plan.strict,
         "isSerializable": plan.is_serializable(),
         "target": selector_json(&target),
-        "against": against.iter().map(selector_json).collect::<Vec<_>>(),
+        "against": against
+            .iter()
+            .map(|selector| selector_json(selector))
+            .collect::<Vec<_>>(),
         "scope": {
             "windowName": plan.scope_window,
             "key": plan.scope_key,
@@ -917,10 +920,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "All row families".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: crate::comparison::ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -1145,10 +1148,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Live finality export".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: crate::comparison::ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -1220,34 +1223,20 @@ mod tests {
 
     #[test]
     fn plan_json_rejects_runtime_only_selectors() {
-        let plan = ComparisonPlan {
-            name: "Runtime selector QA".to_owned(),
-            target_source: "dynamic-target".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: Some(crate::ComparisonSelector::runtime_only(
-                "dynamic-target",
-                "runtime target predicate",
-                |_| true,
-            )),
-            against_selectors: vec![crate::ComparisonSelector::for_source("provider-b")],
-            scope_window: Some("DeviceOffline".to_owned()),
-            scope_key: None,
-            scope_partition: None,
-            scope_segments: Vec::new(),
-            scope_tags: Vec::new(),
-            comparators: vec![Comparator::Overlap],
-            require_closed_windows: true,
-            use_half_open_ranges: true,
-            time_axis: crate::TemporalAxis::Timestamp,
-            null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Exclude,
-            known_at: None,
-            open_window_policy: crate::OpenWindowPolicy::RequireClosed,
-            open_window_horizon: None,
-            coalesce_adjacent_windows: false,
-            duplicate_window_policy: ComparisonDuplicateWindowPolicy::Preserve,
-            output: crate::ComparisonOutputOptions::default_options(),
-            strict: false,
-        };
+        let mut plan = ComparisonPlan::new(
+            "Runtime selector QA",
+            "dynamic-target",
+            AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            vec![Comparator::Overlap],
+        );
+        plan.set_target_selector(crate::ComparisonSelector::runtime_only(
+            "dynamic-target",
+            "runtime target predicate",
+            |_| true,
+        ));
+        plan.scope_window = Some("DeviceOffline".to_owned());
+        plan.time_axis = crate::TemporalAxis::Timestamp;
+        plan.null_timestamp_policy = crate::ComparisonNullTimestampPolicy::Exclude;
 
         let error = export_plan_json(&plan).expect_err("runtime selectors are not portable");
 
@@ -1258,10 +1247,10 @@ mod tests {
     fn plan_json_reports_custom_output_options() {
         let plan = ComparisonPlan {
             name: "Output QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: crate::comparison::ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -1307,10 +1296,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Provider QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: crate::comparison::ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
