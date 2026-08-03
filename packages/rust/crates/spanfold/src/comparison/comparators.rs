@@ -568,10 +568,16 @@ pub(super) fn find_as_of_candidate<'a>(
     let mut future_rejected = None;
     match direction {
         AsOfDirection::Previous => {
-            if lower_bound == 0 {
+            let upper_bound = candidates.partition_point(|candidate| {
+                candidate
+                    .point
+                    .try_cmp(target_point)
+                    .is_ok_and(|ordering| !ordering.is_gt())
+            });
+            if upper_bound == 0 {
                 future_rejected = candidates.first().cloned();
             } else {
-                add_equal_point_run(candidates, lower_bound - 1, &mut indexes);
+                add_equal_point_run(candidates, upper_bound - 1, &mut indexes);
             }
         }
         AsOfDirection::Next => {
