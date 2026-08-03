@@ -11,6 +11,12 @@ use spanfold::{
 const EPISODE_DETECTION_SOURCE: &str = "detection";
 const EPISODE_TARGET_SOURCE: &str = "reference";
 const EPISODE_WINDOW_NAME: &str = "State";
+const DENSE_DUPLICATES_PER_SOURCE: usize = 1_024;
+const DENSE_DUPLICATE_AGAINST_SOURCES: [&str; 3] = ["against-0", "against-1", "against-2"];
+const DENSE_DUPLICATE_KEY: &str = "shared-key";
+const DENSE_DUPLICATE_PARTITION: &str = "partition-0";
+const DENSE_DUPLICATE_TARGET_SOURCE: &str = "target";
+const DENSE_DUPLICATE_WINDOW_NAME: &str = "DenseDuplicate";
 const FRAGMENTS_PER_EPISODE: usize = 8;
 const RELATION_STRIDE: i64 = 20;
 const TRANSITION_AGAINST_SOURCE: &str = "against";
@@ -206,6 +212,55 @@ fn comparison_builder(history: &WindowHistory) -> spanfold::WindowComparisonBuil
         .scope_window("DeviceOffline")
 }
 
+fn create_dense_duplicate_cohort_history() -> WindowHistory {
+    let mut fixture = WindowHistoryFixture::new();
+    for _ in 0..DENSE_DUPLICATES_PER_SOURCE {
+        fixture = fixture
+            .closed_window(
+                DENSE_DUPLICATE_WINDOW_NAME,
+                DENSE_DUPLICATE_KEY,
+                0,
+                10,
+                |window| {
+                    window
+                        .source(DENSE_DUPLICATE_TARGET_SOURCE)
+                        .partition(DENSE_DUPLICATE_PARTITION)
+                },
+            )
+            .expect("valid target duplicate window");
+
+        for source in DENSE_DUPLICATE_AGAINST_SOURCES {
+            fixture = fixture
+                .closed_window(
+                    DENSE_DUPLICATE_WINDOW_NAME,
+                    DENSE_DUPLICATE_KEY,
+                    0,
+                    10,
+                    |window| window.source(source).partition(DENSE_DUPLICATE_PARTITION),
+                )
+                .expect("valid against duplicate window");
+        }
+    }
+    fixture.build()
+}
+
+fn dense_duplicate_cohort_builder(
+    history: &WindowHistory,
+) -> spanfold::WindowComparisonBuilder<'_> {
+    history
+        .compare("Dense duplicate cohort")
+        .target_source(DENSE_DUPLICATE_TARGET_SOURCE)
+        .against_cohort(
+            "against cohort",
+            DENSE_DUPLICATE_AGAINST_SOURCES,
+            CohortActivity::Any,
+        )
+        .scope_window(DENSE_DUPLICATE_WINDOW_NAME)
+        .scope_key(DENSE_DUPLICATE_KEY)
+        .scope_partition(DENSE_DUPLICATE_PARTITION)
+        .overlap()
+}
+
 fn segment_builder(history: &WindowHistory) -> spanfold::WindowComparisonBuilder<'_> {
     history
         .compare("Segment Cohort QA")
@@ -304,6 +359,36 @@ fn comparison_benchmarks(c: &mut Criterion) {
     });
     group.bench_function("export_live_json", |b| {
         b.iter(|| export_result_json(black_box(&live_result_for_export)).expect("json export"));
+    });
+    group.finish();
+}
+
+fn dense_duplicate_cohort_benchmarks(c: &mut Criterion) {
+    let history = create_dense_duplicate_cohort_history();
+    let comparison = dense_duplicate_cohort_builder(&history);
+    let result = comparison.run();
+    assert!(result.is_valid);
+    assert_eq!(result.overlap_rows.len(), 1);
+    assert_eq!(
+        result.overlap_rows[0].target_record_ids.len(),
+        DENSE_DUPLICATES_PER_SOURCE
+    );
+    assert_eq!(
+        result.overlap_rows[0].against_record_ids.len(),
+        DENSE_DUPLICATES_PER_SOURCE * DENSE_DUPLICATE_AGAINST_SOURCES.len()
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "DuplicateWindow")
+    );
+    let mut group = c.benchmark_group("dense_duplicate_cohort");
+    group.bench_function("align", |b| {
+        b.iter(|| black_box(&comparison).align());
+    });
+    group.bench_function("run_overlap", |b| {
+        b.iter(|| black_box(&comparison).run());
     });
     group.finish();
 }
@@ -539,6 +624,7 @@ criterion_group!(
     benches,
     ingestion_benchmarks,
     comparison_benchmarks,
+    dense_duplicate_cohort_benchmarks,
     segment_cohort_benchmarks,
     transition_comparator_benchmarks,
     episode_benchmarks

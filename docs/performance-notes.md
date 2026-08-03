@@ -352,6 +352,54 @@ recloning them, and caches the immutable definition-tree record bound at pipelin
 construction. No public API, event-time, watermark, callback emission, or
 lifecycle ownership changes were made.
 
+## Rust comparison grouping reuse
+
+The affected comparison case contains 1,024 preserved duplicate windows for the
+target source and for each of three sources in an `Any` cohort. All 4,096 windows
+share a window family, key, partition, and range, so the full comparison exercises
+duplicate diagnostics, cohort activity, deterministic record-ID evidence, and the
+real `execute_compare` path. The history and comparison builder are constructed
+outside measurement. The timed `run_overlap` routine performs preparation,
+alignment, comparison, evidence materialization, and result construction. The
+`align` case is the representative control and performs preparation plus public
+alignment over the same input. An untimed assertion confirms that the run remains
+valid, emits one overlap row with 1,024 target and 3,072 against record IDs, and
+retains the `DuplicateWindow` diagnostic.
+
+Before this change, successful full execution called `group_normalized_windows`
+once through alignment and then immediately called it again for comparator
+execution, including transition comparators. Both passes cloned the deterministic
+five-part group keys and every normalized record-ID vector. Full execution now
+creates that private grouping state once and lends it to alignment and any
+comparator that needs it. The public `align` API still owns its single grouping
+pass. Public APIs, ordering, diagnostics, duplicate and cohort semantics, evidence,
+and export shapes are unchanged.
+
+The measurements were taken on 2026-08-03 on an Apple M4 Pro (12 cores), macOS
+26.5.2 (25F84), using rustc and Cargo 1.95.0 for `aarch64-apple-darwin`, Criterion
+0.8.2, and Criterion's default 3-second warmup, 100 samples, and approximately
+5-second target measurement. From `packages/rust`, the exact command was run
+before and after the production change:
+
+```bash
+cargo bench --bench spanfold_benchmarks -- dense_duplicate_cohort
+```
+
+Criterion reports a confidence interval; the middle estimate is used for the
+ratio.
+
+| Workload | Before | After | After/before | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Public alignment control | 5.2623 ms `[5.2270, 5.3119]` | 5.2751 ms `[5.2304, 5.3264]` | 1.002x | 0.998x |
+| Full duplicate-cohort overlap | 14.585 ms `[14.481, 14.711]` | 13.954 ms `[13.863, 14.088]` | 0.957x | 1.045x |
+
+The gate passes. Criterion measured a statistically significant 4.33% reduction
+for the affected full comparison (`p = 0.00`), while the alignment control moved
+by 0.24% and Criterion detected no performance change (`p = 0.71`). This bounded
+reuse removes one complete grouping/allocation pass. It does not change
+preparation, eliminate record-ID materialization required by aligned rows, or
+claim improvements for history queries or cohort evidence construction.
+
 ## Current Optimization Work
 
 The first benchmark-backed optimization target was comparison alignment. The
