@@ -1555,8 +1555,8 @@ fn execute_compare(
         return result;
     }
 
-    let aligned = align_internal(&prepared);
     let groups = group_normalized_windows(&prepared);
+    let aligned = align_grouped(&prepared, &groups);
     let mut rows = RowAccumulator::default();
     let mut comparator_summaries = Vec::new();
     let mut lead_lag_summaries = Vec::new();
@@ -2226,6 +2226,13 @@ fn push_diagnostic_once(
 
 fn align_internal(prepared: &PreparedComparison) -> AlignedComparison {
     let groups = group_normalized_windows(prepared);
+    align_grouped(prepared, &groups)
+}
+
+fn align_grouped(
+    prepared: &PreparedComparison,
+    groups: &BTreeMap<GroupKey, GroupWindows<'_>>,
+) -> AlignedComparison {
     let mut segments = Vec::new();
     for ((window_name, key, partition, axis, clock), (targets, againsts)) in groups {
         for segment in aligned_segments(
@@ -2241,7 +2248,7 @@ fn align_internal(prepared: &PreparedComparison) -> AlignedComparison {
                 range: RowRange {
                     start: segment.start,
                     end: segment.end,
-                    axis,
+                    axis: *axis,
                     clock: clock.clone(),
                 },
                 target_record_ids: segment.target_record_ids,
