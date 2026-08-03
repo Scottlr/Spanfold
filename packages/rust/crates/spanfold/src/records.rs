@@ -888,10 +888,15 @@ impl WindowHistory {
     /// Finds overlapping closed windows within the same window/key/partition scope.
     #[must_use]
     pub fn find_overlaps(&self) -> Vec<WindowOverlap> {
+        let scope_index = index_closed_windows_by_scope(self.closed.iter().enumerate());
         let mut overlaps = Vec::new();
         for (index, first) in self.closed.iter().enumerate() {
-            for second in &self.closed[index + 1..] {
-                if same_closed_scope(first, second) && closed_windows_overlap(first, second) {
+            let candidate_indexes = &scope_index[&ClosedWindowScope::from(first)];
+            let later_candidate_start =
+                candidate_indexes.partition_point(|candidate_index| *candidate_index <= index);
+            for &second_index in &candidate_indexes[later_candidate_start..] {
+                let second = &self.closed[second_index];
+                if closed_windows_overlap(first, second) {
                     overlaps.push(WindowOverlap {
                         first: first.clone(),
                         second: second.clone(),
@@ -905,6 +910,12 @@ impl WindowHistory {
     /// Finds target-source closed segments not covered by other sources.
     #[must_use]
     pub fn find_residuals(&self, target_source: &str) -> Vec<WindowResidualSegment> {
+        let comparison_scope_index = index_closed_windows_by_scope(
+            self.closed
+                .iter()
+                .enumerate()
+                .filter(|(_, window)| window.source.as_deref() != Some(target_source)),
+        );
         let mut residuals = Vec::new();
         for target in &self.closed {
             if target.source.as_deref() != Some(target_source) {
@@ -914,12 +925,12 @@ impl WindowHistory {
                 target.range.start().magnitude(),
                 target.range.end().magnitude(),
             )];
-            for comparison in &self.closed {
-                if comparison.id == target.id
-                    || comparison.source.as_deref() == Some(target_source)
-                    || !same_closed_scope(target, comparison)
-                    || !closed_windows_overlap(target, comparison)
-                {
+            let candidate_indexes = comparison_scope_index
+                .get(&ClosedWindowScope::from(target))
+                .map_or(&[][..], Vec::as_slice);
+            for &comparison_index in candidate_indexes {
+                let comparison = &self.closed[comparison_index];
+                if comparison.id == target.id || !closed_windows_overlap(target, comparison) {
                     continue;
                 }
                 segments = subtract_position_window(&segments, comparison);
@@ -1850,14 +1861,43 @@ fn primitive_sort_key(value: &PrimitiveValue) -> String {
     }
 }
 
-fn same_closed_scope(first: &ClosedWindow, second: &ClosedWindow) -> bool {
-    first.window_name == second.window_name
-        && first.key == second.key
-        && first.partition == second.partition
-        && first
-            .range
-            .start()
-            .is_compatible_with(&second.range.start())
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ClosedWindowScope<'a> {
+    window_name: &'a str,
+    key: &'a str,
+    partition: Option<&'a str>,
+    axis: TemporalAxis,
+    clock: Option<&'a str>,
+}
+
+impl<'a> From<&'a ClosedWindow> for ClosedWindowScope<'a> {
+    fn from(window: &'a ClosedWindow) -> Self {
+        let start = window.range.start_ref();
+        Self {
+            window_name: &window.window_name,
+            key: &window.key,
+            partition: window.partition.as_deref(),
+            axis: start.axis(),
+            clock: if start.axis() == TemporalAxis::Timestamp {
+                start.clock()
+            } else {
+                None
+            },
+        }
+    }
+}
+
+fn index_closed_windows_by_scope<'a>(
+    windows: impl Iterator<Item = (usize, &'a ClosedWindow)>,
+) -> BTreeMap<ClosedWindowScope<'a>, Vec<usize>> {
+    let mut scope_index = BTreeMap::<ClosedWindowScope<'a>, Vec<usize>>::new();
+    for (index, window) in windows {
+        scope_index
+            .entry(ClosedWindowScope::from(window))
+            .or_default()
+            .push(index);
+    }
+    scope_index
 }
 
 fn closed_windows_overlap(first: &ClosedWindow, second: &ClosedWindow) -> bool {

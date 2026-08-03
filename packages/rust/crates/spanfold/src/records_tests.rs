@@ -177,6 +177,112 @@ fn direct_overlap_and_residual_helpers_match_query_surface() {
 }
 
 #[test]
+fn direct_overlap_and_residual_queries_preserve_interleaved_record_order() {
+    let history = WindowHistoryFixture::new()
+        .closed_window("SelectionSuspension", "selection-a", 0, 10, |window| {
+            window.source("provider-a").partition("fixture-1")
+        })
+        .expect("first target")
+        .closed_window("SelectionSuspension", "selection-b", 2, 4, |window| {
+            window.source("provider-b").partition("fixture-1")
+        })
+        .expect("first comparison")
+        .closed_window("SelectionSuspension", "selection-a", 4, 6, |window| {
+            window.source("provider-b").partition("fixture-1")
+        })
+        .expect("second comparison")
+        .closed_window("SelectionSuspension", "selection-b", 0, 10, |window| {
+            window.source("provider-a").partition("fixture-1")
+        })
+        .expect("second target")
+        .closed_window("SelectionSuspension", "selection-a", 7, 8, |window| {
+            window.source("provider-c").partition("fixture-1")
+        })
+        .expect("third comparison")
+        .closed_window("SelectionSuspension", "selection-a", 0, 10, |window| {
+            window.source("provider-b").partition("fixture-2")
+        })
+        .expect("incompatible partition")
+        .build();
+
+    let overlap_ids = history
+        .find_overlaps()
+        .into_iter()
+        .map(|overlap| {
+            (
+                overlap.first.id.as_str().to_owned(),
+                overlap.second.id.as_str().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        overlap_ids,
+        vec![
+            ("window-0000".to_owned(), "window-0002".to_owned()),
+            ("window-0000".to_owned(), "window-0004".to_owned()),
+            ("window-0001".to_owned(), "window-0003".to_owned()),
+        ]
+    );
+
+    let residual_ranges = history
+        .find_residuals("provider-a")
+        .into_iter()
+        .map(|segment| (segment.key, segment.start_position, segment.end_position))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        residual_ranges,
+        vec![
+            ("selection-a".to_owned(), 0, 4),
+            ("selection-a".to_owned(), 6, 7),
+            ("selection-a".to_owned(), 8, 10),
+            ("selection-b".to_owned(), 0, 2),
+            ("selection-b".to_owned(), 4, 10),
+        ]
+    );
+}
+
+#[test]
+fn direct_overlap_and_residual_queries_keep_timestamp_clocks_separate() {
+    let mut history = WindowHistory::new();
+    for (id, clock, source, start, end) in [
+        ("target", "clock-a", "provider-a", 0, 10),
+        ("other-clock", "clock-b", "provider-b", 0, 10),
+        ("same-clock", "clock-a", "provider-b", 4, 6),
+    ] {
+        history.push_closed(ClosedWindow {
+            id: WindowRecordId::new(id).expect("record ID"),
+            window_name: "SelectionSuspension".to_owned(),
+            key: "selection-a".to_owned(),
+            range: TemporalRange::new(
+                TemporalPoint::timestamp_ticks_with_clock(start, clock),
+                TemporalPoint::timestamp_ticks_with_clock(end, clock),
+            )
+            .expect("timestamp range"),
+            known_at: None,
+            source: Some(source.to_owned()),
+            partition: Some("fixture-1".to_owned()),
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        });
+    }
+
+    let overlaps = history.find_overlaps();
+    assert_eq!(overlaps.len(), 1);
+    assert_eq!(overlaps[0].first.id.as_str(), "target");
+    assert_eq!(overlaps[0].second.id.as_str(), "same-clock");
+
+    let residuals = history.find_residuals("provider-a");
+    assert_eq!(residuals.len(), 2);
+    assert_eq!(residuals[0].start_position, 0);
+    assert_eq!(residuals[0].end_position, 4);
+    assert_eq!(residuals[0].clock.as_deref(), Some("clock-a"));
+    assert_eq!(residuals[1].start_position, 6);
+    assert_eq!(residuals[1].end_position, 10);
+}
+
+#[test]
 fn annotations_append_revisions_and_filter_by_known_at() {
     let mut history = WindowHistoryFixture::new()
         .open_window("DeviceOffline", "device-1", 1, |w| w.source("lane-a"))
