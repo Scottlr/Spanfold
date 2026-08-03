@@ -455,6 +455,56 @@ clone and return them; dense residual subtraction likewise still examines the
 eligible same-scope comparison sequence. This change does not claim to remove
 that inherent output or candidate cost.
 
+## Rust cohort activity evidence reuse
+
+The affected workload runs the public comparison path over one target window and
+1,536 staggered against windows: 64 windows for each of 24 cohort sources. The
+windows overlap for 512 processing positions and start 32 positions apart, so
+many windows from the same source remain active across each of 1,919 aligned
+segments. Fixture and builder construction are outside measurement. Untimed
+assertions cover a 12-of-24 threshold, inactive edge segments, a fully active
+middle segment, sorted parsed `cohort_evidence()` sources, and retained
+against-record-ID evidence. A one-source version of the same workload is the
+control.
+
+Before this change, each aligned boundary updated the active against-index set,
+then scanned every active index and rebuilt a `BTreeSet` to recover the distinct
+active source identities. Alignment now updates a private source reference count
+as against windows enter and leave. Each public aligned segment still owns its
+sorted source vector, against record IDs, and target record IDs; only the repeated
+source deduplication is reused across boundaries. A focused regression protects
+the case where one of two overlapping windows for a source leaves while the other
+must keep that source active.
+
+The measurements were taken on 2026-08-03 on an Apple M4 Pro, macOS 26.5.2
+(25F84), using rustc and Cargo 1.95.0 for `aarch64-apple-darwin` and Criterion
+0.8.2. Criterion used its default 3-second warmup and 100 samples. The affected
+case used estimated measurement intervals of 6.99 seconds before and 6.60 seconds
+after; the control used 5.18 seconds before and 5.12 seconds after. From
+`packages/rust`, the identical command was run before and after the production
+change:
+
+```bash
+cargo bench --bench spanfold_benchmarks -- cohort_activity
+```
+
+| Workload | Before | After | After/before | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Staggered 24-source cohort | 70.832 ms `[70.300, 71.649]` | 65.814 ms `[65.470, 66.197]` | 0.929x | 1.076x |
+| Staggered one-source control | 519.50 us `[516.55, 522.42]` | 503.40 us `[500.20, 506.54]` | 0.969x | 1.032x |
+
+The gate passes. Criterion reported a statistically significant 7.08% affected-
+path improvement (`p = 0.00`) and a 2.83% control improvement (`p = 0.00`), with
+no control regression. Public APIs, alignment and row order, lexicographic source
+order, duplicate-window/source counts, all cohort activity rules, diagnostics,
+extension metadata, parsed cohort evidence, record-ID evidence, exports, and
+temporal enter/leave semantics are unchanged.
+
+This reuse is bounded to source membership during comparison alignment. It does
+not remove the contractually required per-segment source vector or record-ID
+materialization, change comparator grouping, optimize direct history queries, or
+address result/export materialization.
+
 ## Current Optimization Work
 
 The first benchmark-backed optimization target was comparison alignment. The
