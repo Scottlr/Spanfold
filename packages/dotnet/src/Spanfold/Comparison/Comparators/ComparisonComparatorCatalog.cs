@@ -1,25 +1,5 @@
 namespace Spanfold.Comparison;
 
-internal enum ComparisonComparatorKind
-{
-    /// <summary>No known comparator kind.</summary>
-    Unknown = 0,
-    /// <summary>Overlap comparator.</summary>
-    Overlap,
-    /// <summary>Residual comparator.</summary>
-    Residual,
-    /// <summary>Missing comparator.</summary>
-    Missing,
-    /// <summary>Coverage comparator.</summary>
-    Coverage,
-    /// <summary>Gap comparator.</summary>
-    Gap,
-    /// <summary>Symmetric-difference comparator.</summary>
-    SymmetricDifference,
-    /// <summary>Containment comparator.</summary>
-    Containment
-}
-
 /// <summary>
 /// Describes comparator declarations understood by core Spanfold.
 /// </summary>
@@ -31,22 +11,11 @@ internal enum ComparisonComparatorKind
 /// </remarks>
 public static class ComparisonComparatorCatalog
 {
-    private static readonly string[] BuiltIns =
-    [
-        "overlap",
-        "residual",
-        "missing",
-        "coverage",
-        "gap",
-        "symmetric-difference",
-        "containment"
-    ];
-    private static readonly IReadOnlyList<string> BuiltInView = Array.AsReadOnly(BuiltIns);
-
     /// <summary>
     /// Gets exact built-in comparator declarations.
     /// </summary>
-    public static IReadOnlyList<string> BuiltInDeclarations => BuiltInView;
+    public static IReadOnlyList<string> BuiltInDeclarations =>
+        ComparisonComparatorDeclarationParser.BuiltInDeclarations;
 
     /// <summary>
     /// Returns true when the declaration is an exact built-in comparator name.
@@ -57,31 +26,8 @@ public static class ComparisonComparatorCatalog
     {
         ArgumentNullException.ThrowIfNull(declaration);
 
-        for (var i = 0; i < BuiltIns.Length; i++)
-        {
-            if (string.Equals(BuiltIns[i], declaration, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    internal static ComparisonComparatorKind GetBuiltInKind(string declaration)
-    {
-        ArgumentNullException.ThrowIfNull(declaration);
-        return declaration switch
-        {
-            "overlap" => ComparisonComparatorKind.Overlap,
-            "residual" => ComparisonComparatorKind.Residual,
-            "missing" => ComparisonComparatorKind.Missing,
-            "coverage" => ComparisonComparatorKind.Coverage,
-            "gap" => ComparisonComparatorKind.Gap,
-            "symmetric-difference" => ComparisonComparatorKind.SymmetricDifference,
-            "containment" => ComparisonComparatorKind.Containment,
-            _ => ComparisonComparatorKind.Unknown
-        };
+        return ComparisonComparatorDeclarationParser.TryParse(declaration, out var parsed)
+            && parsed is ComparisonComparatorDeclaration.BuiltIn;
     }
 
     /// <summary>
@@ -93,32 +39,6 @@ public static class ComparisonComparatorCatalog
     {
         ArgumentNullException.ThrowIfNull(declaration);
 
-        return IsBuiltInDeclaration(declaration)
-            || IsLeadLagDeclaration(declaration)
-            || IsAsOfDeclaration(declaration);
-    }
-
-    private static bool IsLeadLagDeclaration(string declaration)
-    {
-        var parts = declaration.Split(':');
-        return parts.Length == 4
-            && string.Equals(parts[0], "lead-lag", StringComparison.Ordinal)
-            && Enum.TryParse<LeadLagTransition>(parts[1], ignoreCase: false, out _)
-            && Enum.TryParse<TemporalAxis>(parts[2], ignoreCase: false, out var axis)
-            && axis != TemporalAxis.Unknown
-            && long.TryParse(parts[3], out var tolerance)
-            && tolerance >= 0;
-    }
-
-    private static bool IsAsOfDeclaration(string declaration)
-    {
-        var parts = declaration.Split(':');
-        return parts.Length == 4
-            && string.Equals(parts[0], "asof", StringComparison.Ordinal)
-            && Enum.TryParse<AsOfDirection>(parts[1], ignoreCase: false, out _)
-            && Enum.TryParse<TemporalAxis>(parts[2], ignoreCase: false, out var axis)
-            && axis != TemporalAxis.Unknown
-            && long.TryParse(parts[3], out var tolerance)
-            && tolerance >= 0;
+        return ComparisonComparatorDeclarationParser.TryParse(declaration, out _);
     }
 }

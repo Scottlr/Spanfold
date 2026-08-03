@@ -42,6 +42,38 @@ public sealed class ComparatorRuntimeTests
             diagnostic.Code == ComparisonPlanValidationCode.UnknownComparator);
     }
 
+    [Theory]
+    [InlineData("overlap")]
+    [InlineData("lead-lag:End:Timestamp:9223372036854775807")]
+    [InlineData("asof:Nearest:ProcessingPosition:+5")]
+    [InlineData("lead-lag:Start:ProcessingPosition:1,000")]
+    [InlineData("asof:Previous:ProcessingPosition: 10")]
+    [InlineData("asof:previous:ProcessingPosition:10")]
+    public void CatalogAndRuntimeAgreeOnComparatorDeclarations(string declaration)
+    {
+        var plan = new ComparisonPlan(
+            "Provider QA",
+            ComparisonSelector.ForSource("provider-a"),
+            [ComparisonSelector.ForSource("provider-b")],
+            ComparisonScope.Window("DeviceOffline"),
+            ComparisonNormalizationPolicy.Default,
+            [declaration]);
+        var prepared = new PreparedComparison(plan, [], [], [], []);
+
+        var result = InvokeRuntime(prepared);
+
+        var runtimeRecognized = !result.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == ComparisonPlanValidationCode.UnknownComparator);
+        Assert.Equal(ComparisonComparatorCatalog.IsKnownDeclaration(declaration), runtimeRecognized);
+
+        if (runtimeRecognized)
+        {
+            var summary = Assert.Single(result.ComparatorSummaries);
+            Assert.Equal(declaration, summary.ComparatorName);
+            Assert.Equal(0, summary.RowCount);
+        }
+    }
+
     private static ComparisonResult InvokeRuntime(PreparedComparison prepared)
     {
         var method = typeof(WindowComparisonBuilder)

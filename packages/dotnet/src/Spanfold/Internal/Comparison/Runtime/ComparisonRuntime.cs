@@ -37,7 +37,7 @@ internal static class ComparisonRuntime
         for (var i = 0; i < prepared.Plan.Comparators.Count; i++)
         {
             var comparator = prepared.Plan.Comparators[i];
-            if (!ComparisonComparatorCatalog.IsKnownDeclaration(comparator))
+            if (!ComparisonComparatorDeclarationParser.TryParse(comparator, out var declaration))
             {
                 diagnostics.Add(new ComparisonPlanDiagnostic(
                     ComparisonPlanValidationCode.UnknownComparator,
@@ -47,59 +47,59 @@ internal static class ComparisonRuntime
                 continue;
             }
 
-            if (TryParseAsOf(comparator, out var asOf))
+            switch (declaration)
             {
-                var before = asOfRows.Count;
-                AddAsOfRows(prepared, asOf, asOfRows, diagnostics);
-                summaries.Add(new ComparatorSummary(comparator, asOfRows.Count - before));
-                continue;
-            }
+                case ComparisonComparatorDeclaration.AsOf asOf:
+                    var asOfBefore = asOfRows.Count;
+                    AddAsOfRows(prepared, asOf, asOfRows, diagnostics);
+                    summaries.Add(new ComparatorSummary(comparator, asOfRows.Count - asOfBefore));
+                    continue;
+                case ComparisonComparatorDeclaration.LeadLag leadLag:
+                    var leadLagBefore = leadLagRows.Count;
+                    AddLeadLagRows(prepared, leadLag, leadLagRows, leadLagSummaries);
+                    summaries.Add(new ComparatorSummary(comparator, leadLagRows.Count - leadLagBefore));
+                    continue;
+                case ComparisonComparatorDeclaration.BuiltIn builtIn:
+                    switch (builtIn.Kind)
+                    {
+                        case ComparisonComparatorKind.Overlap:
+                            var overlapBefore = overlapRows.Count;
+                            AddOverlapRows(cohortEvidence, aligned, overlapRows);
+                            summaries.Add(new ComparatorSummary(comparator, overlapRows.Count - overlapBefore));
+                            continue;
+                        case ComparisonComparatorKind.Residual:
+                            var residualBefore = residualRows.Count;
+                            AddResidualRows(cohortEvidence, aligned, residualRows);
+                            summaries.Add(new ComparatorSummary(comparator, residualRows.Count - residualBefore));
+                            continue;
+                        case ComparisonComparatorKind.Missing:
+                            var missingBefore = missingRows.Count;
+                            AddMissingRows(cohortEvidence, aligned, missingRows);
+                            summaries.Add(new ComparatorSummary(comparator, missingRows.Count - missingBefore));
+                            continue;
+                        case ComparisonComparatorKind.Coverage:
+                            var coverageBefore = coverageRows.Count;
+                            AddCoverageRows(cohortEvidence, aligned, coverageRows, coverageSummaries);
+                            summaries.Add(new ComparatorSummary(comparator, coverageRows.Count - coverageBefore));
+                            continue;
+                        case ComparisonComparatorKind.Gap:
+                            var gapBefore = gapRows.Count;
+                            AddGapRows(aligned, gapRows);
+                            summaries.Add(new ComparatorSummary(comparator, gapRows.Count - gapBefore));
+                            continue;
+                        case ComparisonComparatorKind.SymmetricDifference:
+                            var symmetricBefore = symmetricDifferenceRows.Count;
+                            AddSymmetricDifferenceRows(cohortEvidence, aligned, symmetricDifferenceRows);
+                            summaries.Add(new ComparatorSummary(comparator, symmetricDifferenceRows.Count - symmetricBefore));
+                            continue;
+                        case ComparisonComparatorKind.Containment:
+                            var containmentBefore = containmentRows.Count;
+                            AddContainmentRows(prepared, aligned, containmentRows);
+                            summaries.Add(new ComparatorSummary(comparator, containmentRows.Count - containmentBefore));
+                            continue;
+                    }
 
-            if (TryParseLeadLag(comparator, out var leadLag))
-            {
-                var before = leadLagRows.Count;
-                AddLeadLagRows(prepared, leadLag, leadLagRows, leadLagSummaries);
-                summaries.Add(new ComparatorSummary(comparator, leadLagRows.Count - before));
-                continue;
-            }
-
-            switch (ComparisonComparatorCatalog.GetBuiltInKind(comparator))
-            {
-                case ComparisonComparatorKind.Overlap:
-                    var overlapBefore = overlapRows.Count;
-                    AddOverlapRows(cohortEvidence, aligned, overlapRows);
-                    summaries.Add(new ComparatorSummary(comparator, overlapRows.Count - overlapBefore));
-                    continue;
-                case ComparisonComparatorKind.Residual:
-                    var residualBefore = residualRows.Count;
-                    AddResidualRows(cohortEvidence, aligned, residualRows);
-                    summaries.Add(new ComparatorSummary(comparator, residualRows.Count - residualBefore));
-                    continue;
-                case ComparisonComparatorKind.Missing:
-                    var missingBefore = missingRows.Count;
-                    AddMissingRows(cohortEvidence, aligned, missingRows);
-                    summaries.Add(new ComparatorSummary(comparator, missingRows.Count - missingBefore));
-                    continue;
-                case ComparisonComparatorKind.Coverage:
-                    var coverageBefore = coverageRows.Count;
-                    AddCoverageRows(cohortEvidence, aligned, coverageRows, coverageSummaries);
-                    summaries.Add(new ComparatorSummary(comparator, coverageRows.Count - coverageBefore));
-                    continue;
-                case ComparisonComparatorKind.Gap:
-                    var gapBefore = gapRows.Count;
-                    AddGapRows(aligned, gapRows);
-                    summaries.Add(new ComparatorSummary(comparator, gapRows.Count - gapBefore));
-                    continue;
-                case ComparisonComparatorKind.SymmetricDifference:
-                    var symmetricBefore = symmetricDifferenceRows.Count;
-                    AddSymmetricDifferenceRows(cohortEvidence, aligned, symmetricDifferenceRows);
-                    summaries.Add(new ComparatorSummary(comparator, symmetricDifferenceRows.Count - symmetricBefore));
-                    continue;
-                case ComparisonComparatorKind.Containment:
-                    var containmentBefore = containmentRows.Count;
-                    AddContainmentRows(prepared, aligned, containmentRows);
-                    summaries.Add(new ComparatorSummary(comparator, containmentRows.Count - containmentBefore));
-                    continue;
+                    break;
             }
 
             summaries.Add(new ComparatorSummary(comparator, RowCount: 0));
@@ -408,7 +408,7 @@ internal static class ComparisonRuntime
 
     private static void AddLeadLagRows(
         PreparedComparison prepared,
-        LeadLagOptions options,
+        ComparisonComparatorDeclaration.LeadLag options,
         List<LeadLagRow> rows,
         List<LeadLagSummary> summaries)
     {
@@ -501,7 +501,7 @@ internal static class ComparisonRuntime
 
     private static void AddAsOfRows(
         PreparedComparison prepared,
-        AsOfOptions options,
+        ComparisonComparatorDeclaration.AsOf options,
         List<AsOfRow> rows,
         List<ComparisonPlanDiagnostic> diagnostics)
     {
@@ -595,7 +595,7 @@ internal static class ComparisonRuntime
 
     private static AsOfRow CreateAsOfRow(
         NormalizedWindowRecord target,
-        AsOfOptions options,
+        ComparisonComparatorDeclaration.AsOf options,
         TemporalPoint targetPoint,
         TransitionPoint? match,
         long? distance,
@@ -619,7 +619,7 @@ internal static class ComparisonRuntime
     private static TransitionPoint? FindAsOfCandidate(
         List<TransitionPoint> candidates,
         TemporalPoint targetPoint,
-        AsOfOptions options,
+        ComparisonComparatorDeclaration.AsOf options,
         out bool ambiguous,
         out TransitionPoint? futureRejected)
     {
@@ -864,7 +864,7 @@ internal static class ComparisonRuntime
     }
 
     private static LeadLagSummary CreateLeadLagSummary(
-        LeadLagOptions options,
+        ComparisonComparatorDeclaration.LeadLag options,
         List<LeadLagRow> rows,
         int startIndex)
     {
@@ -970,52 +970,6 @@ internal static class ComparisonRuntime
         }
 
         return left - right;
-    }
-
-    private static bool TryParseLeadLag(string comparator, out LeadLagOptions options)
-    {
-        options = default;
-
-        var parts = comparator.Split(':');
-        if (parts.Length != 4 || !string.Equals(parts[0], "lead-lag", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (!Enum.TryParse(parts[1], ignoreCase: false, out LeadLagTransition transition)
-            || !Enum.TryParse(parts[2], ignoreCase: false, out TemporalAxis axis)
-            || axis == TemporalAxis.Unknown
-            || !long.TryParse(parts[3], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var toleranceMagnitude)
-            || toleranceMagnitude < 0)
-        {
-            return false;
-        }
-
-        options = new LeadLagOptions(transition, axis, toleranceMagnitude);
-        return true;
-    }
-
-    private static bool TryParseAsOf(string comparator, out AsOfOptions options)
-    {
-        options = default;
-
-        var parts = comparator.Split(':');
-        if (parts.Length != 4 || !string.Equals(parts[0], "asof", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (!Enum.TryParse(parts[1], ignoreCase: false, out AsOfDirection direction)
-            || !Enum.TryParse(parts[2], ignoreCase: false, out TemporalAxis axis)
-            || axis == TemporalAxis.Unknown
-            || !long.TryParse(parts[3], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var toleranceMagnitude)
-            || toleranceMagnitude < 0)
-        {
-            return false;
-        }
-
-        options = new AsOfOptions(direction, axis, toleranceMagnitude);
-        return true;
     }
 
     private static ComparisonRowFinality[] BuildRowFinalities(
@@ -1377,16 +1331,6 @@ internal static class ComparisonRuntime
     }
 
     private sealed record CoverageScope(string WindowName, object Key, object? Partition);
-
-    private readonly record struct LeadLagOptions(
-        LeadLagTransition Transition,
-        TemporalAxis Axis,
-        long ToleranceMagnitude);
-
-    private readonly record struct AsOfOptions(
-        AsOfDirection Direction,
-        TemporalAxis Axis,
-        long ToleranceMagnitude);
 
     private sealed record TransitionScope(
         string WindowName,
