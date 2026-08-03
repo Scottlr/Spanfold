@@ -33,6 +33,8 @@ The benchmark project covers:
 - reference-scorecard interpretation from an already materialized comparison
 - dense single-scope lead/lag and as-of transition matching across geometric
   transition counts
+- direct overlap and residual history queries across incompatible scopes, with
+  a dense same-scope control
 
 The comparison benchmark also includes `DenseSingleScope`, a checked-in shape
 with one device key and alternating states across both sources. This keeps the
@@ -399,6 +401,59 @@ by 0.24% and Criterion detected no performance change (`p = 0.71`). This bounded
 reuse removes one complete grouping/allocation pass. It does not change
 preparation, eliminate record-ID materialization required by aligned rows, or
 claim improvements for history queries or cohort evidence construction.
+
+## Rust direct history-query scope indexing
+
+The affected direct-query workload contains 4,096 closed processing-position
+windows with the same range and window family but a distinct key per record;
+sources alternate between `target` and `against`. It isolates the cost of
+rejecting impossible cross-scope pairs: `find_overlaps` returns no pairs, while
+`find_residuals("target")` returns the 2,048 unchanged target ranges. The fixture
+and untimed result-shape assertions are constructed outside measurement, and the
+timed routines call the public `WindowHistory::find_overlaps` and
+`WindowHistory::find_residuals` methods directly.
+
+The dense control contains 64 target and 64 against records. Every record has
+the same window, key, partition, processing-position range, axis, and clock
+domain. All 128 windows overlap, producing 8,128 overlap pairs, and the against
+records completely cover every target residual. This control keeps genuine
+same-scope candidate and output work visible.
+
+The measurements were taken on 2026-08-03 on an Apple M4 Pro, macOS 26.5.2
+(25F84), using rustc and Cargo 1.95.0 for `aarch64-apple-darwin`, Criterion
+0.8.2, and Criterion's default 3-second warmup, 100 samples, and approximately
+5-second target measurement. From `packages/rust`, the identical command was
+run before and after the production change:
+
+```bash
+cargo bench --bench spanfold_benchmarks -- history_direct_queries
+```
+
+Criterion reports a confidence interval; the middle estimate is used for the
+ratio.
+
+| Workload | Before | After | Speedup |
+| --- | ---: | ---: | ---: |
+| Overlaps, 4,096 incompatible scopes | 27.349 ms `[26.967, 27.844]` | 1.0652 ms `[1.0580, 1.0757]` | 25.67x |
+| Residuals, 4,096 incompatible scopes | 42.079 ms `[41.854, 42.378]` | 687.01 us `[682.34, 694.02]` | 61.25x |
+| Overlaps, 128 dense same-scope records | 2.4491 ms `[2.4375, 2.4604]` | 2.3930 ms `[2.3834, 2.4025]` | 1.02x |
+| Residuals, 128 dense same-scope records | 99.153 us `[97.754, 100.83]` | 42.364 us `[41.600, 43.303]` | 2.34x |
+
+The gate passes. The private borrowed scope index groups candidates by the
+existing compatibility identity: window family, key, partition, temporal axis,
+and timestamp clock. Candidate vectors retain original record order;
+`find_overlaps` also retains the original first-record outer order and only
+considers later record indexes, while `find_residuals` retains target order and
+comparison subtraction order. Public APIs, serialized shapes, half-open overlap
+semantics, source exclusion, range values, axes, and clock identities are
+unchanged. Criterion reported improvements in both affected cases and both
+controls (`p = 0.00`).
+
+The index only removes impossible cross-scope comparisons. A genuinely dense
+same-scope overlap result still contains a quadratic number of pairs and must
+clone and return them; dense residual subtraction likewise still examines the
+eligible same-scope comparison sequence. This change does not claim to remove
+that inherent output or candidate cost.
 
 ## Current Optimization Work
 

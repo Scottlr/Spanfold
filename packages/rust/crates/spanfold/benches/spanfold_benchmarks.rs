@@ -11,6 +11,9 @@ use spanfold::{
 const EPISODE_DETECTION_SOURCE: &str = "detection";
 const EPISODE_TARGET_SOURCE: &str = "reference";
 const EPISODE_WINDOW_NAME: &str = "State";
+const HISTORY_DIRECT_QUERY_DENSE_RECORDS_PER_SOURCE: usize = 64;
+const HISTORY_DIRECT_QUERY_DISTINCT_SCOPES: usize = 4_096;
+const HISTORY_DIRECT_QUERY_TARGET_SOURCE: &str = "target";
 const DENSE_DUPLICATES_PER_SOURCE: usize = 1_024;
 const DENSE_DUPLICATE_AGAINST_SOURCES: [&str; 3] = ["against-0", "against-1", "against-2"];
 const DENSE_DUPLICATE_KEY: &str = "shared-key";
@@ -620,6 +623,80 @@ fn episode_benchmarks(c: &mut Criterion) {
     );
 }
 
+fn create_incompatible_scope_history(scope_count: usize) -> WindowHistory {
+    let mut fixture = WindowHistoryFixture::new();
+    for scope_index in 0..scope_count {
+        fixture = fixture
+            .closed_window(
+                "HistoryQuery",
+                format!("key-{scope_index}"),
+                0,
+                10,
+                |window| {
+                    window.source(if scope_index.is_multiple_of(2) {
+                        HISTORY_DIRECT_QUERY_TARGET_SOURCE
+                    } else {
+                        "against"
+                    })
+                },
+            )
+            .expect("valid incompatible-scope history window");
+    }
+    fixture.build()
+}
+
+fn create_dense_scope_history(records_per_source: usize) -> WindowHistory {
+    let mut fixture = WindowHistoryFixture::new();
+    for source in [HISTORY_DIRECT_QUERY_TARGET_SOURCE, "against"] {
+        for _ in 0..records_per_source {
+            fixture = fixture
+                .closed_window("HistoryQuery", "shared-key", 0, 10, |window| {
+                    window.source(source).partition("shared-partition")
+                })
+                .expect("valid dense-scope history window");
+        }
+    }
+    fixture.build()
+}
+
+fn history_direct_query_benchmarks(c: &mut Criterion) {
+    let incompatible = create_incompatible_scope_history(HISTORY_DIRECT_QUERY_DISTINCT_SCOPES);
+    assert!(incompatible.find_overlaps().is_empty());
+    assert_eq!(
+        incompatible
+            .find_residuals(HISTORY_DIRECT_QUERY_TARGET_SOURCE)
+            .len(),
+        HISTORY_DIRECT_QUERY_DISTINCT_SCOPES / 2
+    );
+
+    let dense = create_dense_scope_history(HISTORY_DIRECT_QUERY_DENSE_RECORDS_PER_SOURCE);
+    let dense_record_count = HISTORY_DIRECT_QUERY_DENSE_RECORDS_PER_SOURCE * 2;
+    assert_eq!(
+        dense.find_overlaps().len(),
+        dense_record_count * (dense_record_count - 1) / 2
+    );
+    assert!(
+        dense
+            .find_residuals(HISTORY_DIRECT_QUERY_TARGET_SOURCE)
+            .is_empty()
+    );
+
+    let mut group = c.benchmark_group("history_direct_queries");
+    group.bench_function("find_overlaps_4096_incompatible_scopes", |b| {
+        b.iter(|| black_box(&incompatible).find_overlaps());
+    });
+    group.bench_function("find_residuals_4096_incompatible_scopes", |b| {
+        b.iter(|| black_box(&incompatible).find_residuals(HISTORY_DIRECT_QUERY_TARGET_SOURCE));
+    });
+    group.bench_function("find_overlaps_128_dense_same_scope", |b| {
+        b.iter(|| black_box(&dense).find_overlaps());
+    });
+    group.bench_function("find_residuals_128_dense_same_scope", |b| {
+        b.iter(|| black_box(&dense).find_residuals(HISTORY_DIRECT_QUERY_TARGET_SOURCE));
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     ingestion_benchmarks,
@@ -627,6 +704,7 @@ criterion_group!(
     dense_duplicate_cohort_benchmarks,
     segment_cohort_benchmarks,
     transition_comparator_benchmarks,
-    episode_benchmarks
+    episode_benchmarks,
+    history_direct_query_benchmarks
 );
 criterion_main!(benches);
