@@ -2461,6 +2461,7 @@ fn aligned_segments(
     }
     let mut active_targets = BTreeSet::new();
     let mut active_againsts = BTreeSet::new();
+    let mut active_against_source_counts = BTreeMap::new();
     let mut target_start_index = 0;
     let mut target_end_index = 0;
     let mut against_start_index = 0;
@@ -2488,7 +2489,16 @@ fn aligned_segments(
                 Ok(Ordering::Less | Ordering::Equal)
             )
         {
-            active_againsts.remove(&against_ends[against_end_index].1);
+            let index = against_ends[against_end_index].1;
+            active_againsts.remove(&index);
+            if let Some(source) = againsts[index].source
+                && let Some(count) = active_against_source_counts.get_mut(source)
+            {
+                *count -= 1;
+                if *count == 0 {
+                    active_against_source_counts.remove(source);
+                }
+            }
             against_end_index += 1;
         }
         while target_start_index < target_starts.len()
@@ -2506,7 +2516,11 @@ fn aligned_segments(
                 Ok(Ordering::Less | Ordering::Equal)
             )
         {
-            active_againsts.insert(against_starts[against_start_index].1);
+            let index = against_starts[against_start_index].1;
+            active_againsts.insert(index);
+            if let Some(source) = againsts[index].source {
+                *active_against_source_counts.entry(source).or_insert(0) += 1;
+            }
             against_start_index += 1;
         }
 
@@ -2519,12 +2533,9 @@ fn aligned_segments(
             against_record_ids.extend(againsts[*index].record_ids.iter().cloned());
         }
 
-        let active_sources = active_againsts
-            .iter()
-            .filter_map(|index| againsts[*index].source)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .map(str::to_owned)
+        let active_sources = active_against_source_counts
+            .keys()
+            .map(|source| (*source).to_owned())
             .collect::<Vec<_>>();
 
         let against_is_active = match against_selection {
@@ -4037,5 +4048,59 @@ mod tests {
         assert_eq!(evidence.len(), 2);
         assert!(!evidence[0].is_active);
         assert!(!evidence[1].is_active);
+    }
+
+    #[test]
+    fn cohort_evidence_counts_a_source_until_its_last_overlapping_window_leaves() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("SelectionPriced", "selection-1", 0, 10, |window| {
+                window.source("target")
+            })
+            .expect("target")
+            .closed_window("SelectionPriced", "selection-1", 0, 6, |window| {
+                window.source("source-b")
+            })
+            .expect("first source-b window")
+            .closed_window("SelectionPriced", "selection-1", 2, 10, |window| {
+                window.source("source-b")
+            })
+            .expect("second source-b window")
+            .closed_window("SelectionPriced", "selection-1", 4, 8, |window| {
+                window.source("source-c")
+            })
+            .expect("source-c window")
+            .build();
+
+        let result = history
+            .compare("duplicate source activity")
+            .target_source("target")
+            .against_cohort(
+                "cohort",
+                ["source-b", "source-c"],
+                CohortActivity::AtLeast { count: 2 },
+            )
+            .scope_window("SelectionPriced")
+            .overlap()
+            .run();
+
+        let evidence = result.cohort_evidence();
+        assert_eq!(
+            evidence
+                .iter()
+                .map(|segment| segment.active_count)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 2, 2, 1]
+        );
+        assert_eq!(
+            evidence
+                .iter()
+                .map(|segment| segment.is_active)
+                .collect::<Vec<_>>(),
+            vec![false, false, true, true, false]
+        );
+        assert_eq!(
+            evidence[3].active_sources,
+            vec!["source-b".to_owned(), "source-c".to_owned()]
+        );
     }
 }

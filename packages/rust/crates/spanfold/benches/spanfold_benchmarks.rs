@@ -20,6 +20,14 @@ const DENSE_DUPLICATE_KEY: &str = "shared-key";
 const DENSE_DUPLICATE_PARTITION: &str = "partition-0";
 const DENSE_DUPLICATE_TARGET_SOURCE: &str = "target";
 const DENSE_DUPLICATE_WINDOW_NAME: &str = "DenseDuplicate";
+const COHORT_ACTIVITY_SOURCE_COUNT: usize = 24;
+const COHORT_ACTIVITY_WINDOWS_PER_SOURCE: usize = 64;
+const COHORT_ACTIVITY_STRIDE: i64 = 32;
+const COHORT_ACTIVITY_WINDOW_WIDTH: i64 = 512;
+const COHORT_ACTIVITY_KEY: &str = "shared-key";
+const COHORT_ACTIVITY_PARTITION: &str = "partition-0";
+const COHORT_ACTIVITY_TARGET_SOURCE: &str = "target";
+const COHORT_ACTIVITY_WINDOW_NAME: &str = "CohortActivity";
 const FRAGMENTS_PER_EPISODE: usize = 8;
 const RELATION_STRIDE: i64 = 20;
 const TRANSITION_AGAINST_SOURCE: &str = "against";
@@ -264,6 +272,66 @@ fn dense_duplicate_cohort_builder(
         .overlap()
 }
 
+fn create_cohort_activity_history(source_count: usize) -> (WindowHistory, Vec<String>) {
+    let sources = (0..source_count)
+        .map(|source_index| format!("source-{source_index:02}"))
+        .collect::<Vec<_>>();
+    let last_end = (COHORT_ACTIVITY_WINDOWS_PER_SOURCE - 1) as i64 * COHORT_ACTIVITY_STRIDE
+        + source_count as i64
+        - 1
+        + COHORT_ACTIVITY_WINDOW_WIDTH;
+    let mut fixture = WindowHistoryFixture::new()
+        .closed_window(
+            COHORT_ACTIVITY_WINDOW_NAME,
+            COHORT_ACTIVITY_KEY,
+            0,
+            last_end,
+            |window| {
+                window
+                    .source(COHORT_ACTIVITY_TARGET_SOURCE)
+                    .partition(COHORT_ACTIVITY_PARTITION)
+            },
+        )
+        .expect("valid cohort activity target window");
+
+    for (source_index, source) in sources.iter().enumerate() {
+        for window_index in 0..COHORT_ACTIVITY_WINDOWS_PER_SOURCE {
+            let start = window_index as i64 * COHORT_ACTIVITY_STRIDE + source_index as i64;
+            fixture = fixture
+                .closed_window(
+                    COHORT_ACTIVITY_WINDOW_NAME,
+                    COHORT_ACTIVITY_KEY,
+                    start,
+                    start + COHORT_ACTIVITY_WINDOW_WIDTH,
+                    |window| window.source(source).partition(COHORT_ACTIVITY_PARTITION),
+                )
+                .expect("valid staggered cohort activity window");
+        }
+    }
+
+    (fixture.build(), sources)
+}
+
+fn cohort_activity_builder<'a>(
+    history: &'a WindowHistory,
+    sources: &[String],
+) -> spanfold::WindowComparisonBuilder<'a> {
+    history
+        .compare("Staggered cohort activity")
+        .target_source(COHORT_ACTIVITY_TARGET_SOURCE)
+        .against_cohort(
+            "against cohort",
+            sources.iter().cloned(),
+            CohortActivity::AtLeast {
+                count: sources.len().div_ceil(2),
+            },
+        )
+        .scope_window(COHORT_ACTIVITY_WINDOW_NAME)
+        .scope_key(COHORT_ACTIVITY_KEY)
+        .scope_partition(COHORT_ACTIVITY_PARTITION)
+        .overlap()
+}
+
 fn segment_builder(history: &WindowHistory) -> spanfold::WindowComparisonBuilder<'_> {
     history
         .compare("Segment Cohort QA")
@@ -392,6 +460,49 @@ fn dense_duplicate_cohort_benchmarks(c: &mut Criterion) {
     });
     group.bench_function("run_overlap", |b| {
         b.iter(|| black_box(&comparison).run());
+    });
+    group.finish();
+}
+
+fn cohort_activity_benchmarks(c: &mut Criterion) {
+    let (history, sources) = create_cohort_activity_history(COHORT_ACTIVITY_SOURCE_COUNT);
+    let comparison = cohort_activity_builder(&history, &sources);
+    let result = comparison.run();
+    let evidence = result.cohort_evidence();
+    assert!(result.is_valid);
+    assert!(!result.overlap_rows.is_empty());
+    assert!(
+        result
+            .overlap_rows
+            .iter()
+            .any(|row| row.against_record_ids.len() > COHORT_ACTIVITY_SOURCE_COUNT)
+    );
+    assert_eq!(
+        evidence.first().expect("first cohort segment").active_count,
+        1
+    );
+    assert!(!evidence.first().expect("first cohort segment").is_active);
+    assert!(evidence.iter().any(
+        |segment| segment.active_count == COHORT_ACTIVITY_SOURCE_COUNT
+            && segment.is_active
+            && segment.active_sources == sources
+    ));
+    assert_eq!(
+        evidence.last().expect("last cohort segment").active_count,
+        1
+    );
+    assert!(!evidence.last().expect("last cohort segment").is_active);
+
+    let (control_history, control_sources) = create_cohort_activity_history(1);
+    let control = cohort_activity_builder(&control_history, &control_sources);
+    assert!(control.run().is_valid);
+
+    let mut group = c.benchmark_group("cohort_activity");
+    group.bench_function("run_staggered_24_sources", |b| {
+        b.iter(|| black_box(&comparison).run());
+    });
+    group.bench_function("run_staggered_1_source_control", |b| {
+        b.iter(|| black_box(&control).run());
     });
     group.finish();
 }
@@ -702,6 +813,7 @@ criterion_group!(
     ingestion_benchmarks,
     comparison_benchmarks,
     dense_duplicate_cohort_benchmarks,
+    cohort_activity_benchmarks,
     segment_cohort_benchmarks,
     transition_comparator_benchmarks,
     episode_benchmarks,
