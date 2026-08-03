@@ -2,9 +2,16 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use spanfold::{
-    CohortActivity, PrimitiveValue, TemporalPoint, WindowHistory, WindowSegment, WindowTag,
-    export_result_json, export_result_llm_context, for_events,
+    CohortActivity, ComparisonScope, ComparisonSelector, EpisodeComparisonBuilder, PrimitiveValue,
+    TemporalPoint, TemporalTolerance, WindowHistory, WindowHistoryFixture, WindowSegment,
+    WindowTag, export_result_json, export_result_llm_context, for_events,
 };
+
+const EPISODE_DETECTION_SOURCE: &str = "detection";
+const EPISODE_TARGET_SOURCE: &str = "reference";
+const EPISODE_WINDOW_NAME: &str = "State";
+const FRAGMENTS_PER_EPISODE: usize = 8;
+const RELATION_STRIDE: i64 = 20;
 
 #[derive(Clone)]
 struct DeviceSignal {
@@ -220,10 +227,121 @@ fn segment_cohort_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
+fn create_episode_formation_history(window_count: usize) -> WindowHistory {
+    let mut fixture = WindowHistoryFixture::new();
+    for index in 0..window_count {
+        let episode_index = index / FRAGMENTS_PER_EPISODE;
+        let fragment_index = index % FRAGMENTS_PER_EPISODE;
+        let start = i64::try_from(fragment_index).expect("fragment index") * 10;
+        fixture = fixture
+            .closed_window(
+                EPISODE_WINDOW_NAME,
+                format!("device-{episode_index}"),
+                start,
+                start + 4,
+                |window| window.source(EPISODE_TARGET_SOURCE),
+            )
+            .expect("valid episode formation window");
+    }
+    fixture.build()
+}
+
+fn create_episode_relation_history(episode_count_per_side: usize) -> WindowHistory {
+    let mut fixture = WindowHistoryFixture::new();
+    for episode_index in 0..episode_count_per_side {
+        let key = format!("device-{episode_index}");
+        let target_start = i64::try_from(episode_index).expect("episode index") * RELATION_STRIDE;
+        fixture = fixture
+            .closed_window(
+                EPISODE_WINDOW_NAME,
+                key.clone(),
+                target_start,
+                target_start + 4,
+                |window| window.source(EPISODE_TARGET_SOURCE),
+            )
+            .expect("valid target episode window");
+
+        let detection_start = if episode_index % 4 == 3 {
+            target_start + 10
+        } else {
+            target_start + 1
+        };
+        fixture = fixture
+            .closed_window(
+                EPISODE_WINDOW_NAME,
+                key,
+                detection_start,
+                detection_start + 4,
+                |window| window.source(EPISODE_DETECTION_SOURCE),
+            )
+            .expect("valid detection episode window");
+    }
+    fixture.build()
+}
+
+fn episode_comparison(history: &WindowHistory) -> EpisodeComparisonBuilder<'_> {
+    history
+        .compare_episodes("Benchmark detector evaluation")
+        .target(
+            EPISODE_TARGET_SOURCE,
+            ComparisonSelector::for_source(EPISODE_TARGET_SOURCE),
+        )
+        .against(
+            EPISODE_DETECTION_SOURCE,
+            ComparisonSelector::for_source(EPISODE_DETECTION_SOURCE),
+        )
+        .scope(ComparisonScope::window(EPISODE_WINDOW_NAME))
+}
+
+fn episode_benchmarks(c: &mut Criterion) {
+    let mut formation_group = c.benchmark_group("episode_formation");
+    for window_count in [128_usize, 1_024, 8_192] {
+        let history = create_episode_formation_history(window_count);
+        let formation = history
+            .form_episodes("Benchmark formation")
+            .from(ComparisonSelector::for_source(EPISODE_TARGET_SOURCE))
+            .scope(ComparisonScope::window(EPISODE_WINDOW_NAME))
+            .stitch_gaps_up_to(
+                TemporalTolerance::processing_positions(6).expect("formation tolerance"),
+            );
+        let _plan = formation.build().expect("valid episode formation plan");
+        formation_group.bench_function(format!("form_{window_count}_windows"), |b| {
+            b.iter(|| formation.run().expect("episode formation"));
+        });
+    }
+    formation_group.finish();
+
+    let mut relation_group = c.benchmark_group("episode_relation_sparse");
+    for episode_count_per_side in [64_usize, 256, 1_024] {
+        let history = create_episode_relation_history(episode_count_per_side);
+        let comparison = episode_comparison(&history);
+        let _plan = comparison.build().expect("valid episode comparison plan");
+        relation_group.bench_function(
+            format!("build_{episode_count_per_side}_episodes_per_side"),
+            |b| {
+                b.iter(|| comparison.run().expect("episode relation graph"));
+            },
+        );
+    }
+    relation_group.finish();
+
+    let history = create_episode_relation_history(1_024);
+    let comparison = episode_comparison(&history)
+        .run()
+        .expect("materialized episode comparison");
+    c.bench_function(
+        "episode_summary/interpret_materialized_reference_scorecard",
+        |b| {
+            b.iter(|| black_box(&comparison).as_reference());
+        },
+    );
+}
+
 criterion_group!(
     benches,
     ingestion_benchmarks,
     comparison_benchmarks,
-    segment_cohort_benchmarks
+    segment_cohort_benchmarks,
+    episode_benchmarks
 );
 criterion_main!(benches);
