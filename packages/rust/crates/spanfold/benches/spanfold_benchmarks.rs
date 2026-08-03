@@ -1,11 +1,12 @@
 use std::hint::black_box;
 
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use spanfold::{
     AsOfDirection, CohortActivity, Comparator, ComparisonScope, ComparisonSelector,
     EpisodeComparisonBuilder, EventPipeline, LeadLagTransition, PrimitiveValue, TemporalAxis,
     TemporalPoint, TemporalTolerance, WindowComparisonBuilder, WindowHistory, WindowHistoryFixture,
-    WindowSegment, WindowTag, export_result_json, export_result_llm_context, for_events,
+    WindowSegment, WindowTag, export_result_json, export_result_json_lines,
+    export_result_llm_context, for_events, write_result_json_lines,
 };
 
 const EPISODE_DETECTION_SOURCE: &str = "detection";
@@ -38,6 +39,7 @@ const TRANSITION_STRIDE: i64 = 10;
 const TRANSITION_TARGET_SOURCE: &str = "target";
 const TRANSITION_TOLERANCE: i64 = 2;
 const TRANSITION_WINDOW_NAME: &str = "State";
+const RESULT_EXPORT_TRANSITIONS_PER_SIDE: usize = 4_096;
 
 #[derive(Clone)]
 struct DeviceSignal {
@@ -434,6 +436,92 @@ fn comparison_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
+fn result_export_materialization_benchmarks(c: &mut Criterion) {
+    let history = create_transition_comparator_history(RESULT_EXPORT_TRANSITIONS_PER_SIDE);
+    let result = transition_comparison(
+        &history,
+        Comparator::LeadLag {
+            transition: LeadLagTransition::Start,
+            axis: TemporalAxis::ProcessingPosition,
+            tolerance_magnitude: TRANSITION_TOLERANCE,
+        },
+    )
+    .use_comparator(Comparator::AsOf {
+        direction: AsOfDirection::Previous,
+        axis: TemporalAxis::ProcessingPosition,
+        tolerance_magnitude: TRANSITION_TOLERANCE,
+    })
+    .run();
+    assert!(result.is_valid);
+    assert_eq!(
+        result.lead_lag_rows.len(),
+        RESULT_EXPORT_TRANSITIONS_PER_SIDE
+    );
+    assert_eq!(result.as_of_rows.len(), RESULT_EXPORT_TRANSITIONS_PER_SIDE);
+    assert_eq!(
+        result.row_finalities.len(),
+        RESULT_EXPORT_TRANSITIONS_PER_SIDE * 2
+    );
+
+    let json = export_result_json(&result).expect("representative JSON export");
+    let json_value: serde_json::Value =
+        serde_json::from_str(&json).expect("representative JSON schema");
+    assert_eq!(json_value["schema"], "spanfold.comparison.result");
+    assert_eq!(
+        json_value["rows"]["leadLag"]
+            .as_array()
+            .expect("lead/lag rows")
+            .len(),
+        RESULT_EXPORT_TRANSITIONS_PER_SIDE
+    );
+    assert_eq!(
+        json_value["rows"]["asOf"]
+            .as_array()
+            .expect("as-of rows")
+            .len(),
+        RESULT_EXPORT_TRANSITIONS_PER_SIDE
+    );
+
+    let json_lines = export_result_json_lines(&result).expect("materialized JSON Lines export");
+    assert_eq!(json_lines.len(), RESULT_EXPORT_TRANSITIONS_PER_SIDE * 2 + 1);
+    let json_lines_bytes = json_lines.iter().map(|line| line.len() + 1).sum::<usize>();
+    let mut streamed_json_lines = Vec::with_capacity(json_lines_bytes);
+    write_result_json_lines(&result, &mut streamed_json_lines)
+        .expect("streaming JSON Lines export");
+    assert_eq!(streamed_json_lines.len(), json_lines_bytes);
+    assert_eq!(
+        streamed_json_lines
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| std::str::from_utf8(line).expect("UTF-8 JSON Line"))
+            .collect::<Vec<_>>(),
+        json_lines.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+
+    let mut group = c.benchmark_group("result_export_materialization");
+    group.throughput(Throughput::Bytes(
+        u64::try_from(json.len()).expect("JSON output size"),
+    ));
+    group.bench_function("json_pretty", |b| {
+        b.iter(|| export_result_json(black_box(&result)).expect("JSON export"));
+    });
+    group.throughput(Throughput::Bytes(
+        u64::try_from(json_lines_bytes).expect("JSON Lines output size"),
+    ));
+    group.bench_function("json_lines_materialized", |b| {
+        b.iter(|| export_result_json_lines(black_box(&result)).expect("JSON Lines export"));
+    });
+    group.bench_function("json_lines_streaming", |b| {
+        b.iter(|| {
+            let mut output = Vec::with_capacity(json_lines_bytes);
+            write_result_json_lines(black_box(&result), &mut output)
+                .expect("streaming JSON Lines export");
+            output
+        });
+    });
+    group.finish();
+}
+
 fn dense_duplicate_cohort_benchmarks(c: &mut Criterion) {
     let history = create_dense_duplicate_cohort_history();
     let comparison = dense_duplicate_cohort_builder(&history);
@@ -812,6 +900,7 @@ criterion_group!(
     benches,
     ingestion_benchmarks,
     comparison_benchmarks,
+    result_export_materialization_benchmarks,
     dense_duplicate_cohort_benchmarks,
     cohort_activity_benchmarks,
     segment_cohort_benchmarks,
