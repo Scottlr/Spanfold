@@ -2941,6 +2941,38 @@ mod tests {
     }
 
     #[test]
+    fn as_of_previous_matches_exact_candidate() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("Quote", "selection-1", 10, 11, |window| {
+                window.source("trade")
+            })
+            .expect("trade")
+            .closed_window("Quote", "selection-1", 10, 12, |window| {
+                window.source("quote")
+            })
+            .expect("quote")
+            .build();
+        let plan = ComparisonPlan::new(
+            "Exact quote at trade",
+            "trade",
+            AgainstSelection::Sources(vec!["quote".to_owned()]),
+            vec![Comparator::AsOf {
+                direction: AsOfDirection::Previous,
+                axis: TemporalAxis::ProcessingPosition,
+                tolerance_magnitude: 0,
+            }],
+        )
+        .with_scope_window(Some("Quote".to_owned()));
+
+        let result = compare(&history, &plan);
+
+        assert_eq!(result.as_of_rows.len(), 1);
+        assert_eq!(result.as_of_rows[0].status, AsOfMatchStatus::Exact);
+        assert_eq!(result.as_of_rows[0].distance_magnitude, Some(0));
+        assert!(result.as_of_rows[0].matched_record_id.is_some());
+    }
+
+    #[test]
     fn lead_lag_and_as_of_saturate_extreme_temporal_distances() {
         let history = WindowHistoryFixture::new()
             .closed_window(
