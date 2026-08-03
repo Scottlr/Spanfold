@@ -317,10 +317,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "fixture helper".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: crate::comparison::ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -376,10 +376,10 @@ mod tests {
         let history = WindowHistoryFixture::new().build();
         let plan = ComparisonPlan {
             name: "empty".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: crate::comparison::ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: None,
             scope_key: None,
             scope_partition: None,

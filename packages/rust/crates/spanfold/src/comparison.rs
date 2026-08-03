@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -873,18 +874,11 @@ impl ComparisonOutputOptions {
 
 /// Typed comparison plan.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ComparisonPlan {
     /// Comparison name.
     pub name: String,
-    /// Target source.
-    pub(crate) target_source: String,
-    /// Comparison side selection.
-    pub(crate) against: AgainstSelection,
-    /// Optional selector object for the target side.
-    pub(crate) target_selector: Option<ComparisonSelector>,
-    /// Optional selector objects for the comparison side.
-    pub(crate) against_selectors: Vec<ComparisonSelector>,
+    pub(crate) selection: ComparisonSelection,
     /// Optional window family scope.
     pub(crate) scope_window: Option<String>,
     /// Optional logical key scope.
@@ -921,6 +915,141 @@ pub struct ComparisonPlan {
     pub(crate) strict: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ComparisonSelection {
+    target: TargetSelection,
+    against: ComparisonAgainstSelection,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TargetSelection {
+    Source(String),
+    Selector(ComparisonSelector),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ComparisonAgainstSelection {
+    Legacy(AgainstSelection),
+    Selectors(Vec<ComparisonSelector>),
+    Contradictory {
+        legacy: AgainstSelection,
+        selectors: Vec<ComparisonSelector>,
+    },
+}
+
+impl ComparisonSelection {
+    pub(crate) fn legacy(target_source: impl Into<String>, against: AgainstSelection) -> Self {
+        Self {
+            target: TargetSelection::Source(target_source.into()),
+            against: ComparisonAgainstSelection::Legacy(against),
+        }
+    }
+
+    fn target_source(&self) -> &str {
+        match &self.target {
+            TargetSelection::Source(source) => source,
+            TargetSelection::Selector(selector) => &selector.name,
+        }
+    }
+
+    fn target_selector(&self) -> Option<&ComparisonSelector> {
+        match &self.target {
+            TargetSelection::Selector(selector) => Some(selector),
+            TargetSelection::Source(_) => None,
+        }
+    }
+
+    fn set_target_source(&mut self, source: String) {
+        self.target = TargetSelection::Source(source);
+    }
+
+    fn set_target_selector(&mut self, selector: ComparisonSelector) {
+        self.target = TargetSelection::Selector(selector);
+    }
+
+    fn legacy_against(&self) -> Option<&AgainstSelection> {
+        match &self.against {
+            ComparisonAgainstSelection::Legacy(against)
+            | ComparisonAgainstSelection::Contradictory {
+                legacy: against, ..
+            } => Some(against),
+            ComparisonAgainstSelection::Selectors(_) => None,
+        }
+    }
+
+    fn against_selectors(&self) -> &[ComparisonSelector] {
+        match &self.against {
+            ComparisonAgainstSelection::Selectors(selectors)
+            | ComparisonAgainstSelection::Contradictory { selectors, .. } => selectors,
+            ComparisonAgainstSelection::Legacy(_) => &[],
+        }
+    }
+
+    fn set_legacy_against(&mut self, against: AgainstSelection) {
+        self.against = ComparisonAgainstSelection::Legacy(against);
+    }
+
+    fn push_against_selector(&mut self, selector: ComparisonSelector) {
+        match &mut self.against {
+            ComparisonAgainstSelection::Legacy(AgainstSelection::Sources(sources))
+                if sources.is_empty() =>
+            {
+                self.against = ComparisonAgainstSelection::Selectors(vec![selector]);
+            }
+            ComparisonAgainstSelection::Legacy(_) => {
+                let ComparisonAgainstSelection::Legacy(legacy) = std::mem::replace(
+                    &mut self.against,
+                    ComparisonAgainstSelection::Selectors(Vec::new()),
+                ) else {
+                    unreachable!("matched legacy comparison selection")
+                };
+                self.against = ComparisonAgainstSelection::Contradictory {
+                    legacy,
+                    selectors: vec![selector],
+                };
+            }
+            ComparisonAgainstSelection::Selectors(selectors)
+            | ComparisonAgainstSelection::Contradictory { selectors, .. } => {
+                selectors.push(selector);
+            }
+        }
+    }
+}
+
+impl fmt::Debug for ComparisonPlan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let empty_against = AgainstSelection::Sources(Vec::new());
+        formatter
+            .debug_struct("ComparisonPlan")
+            .field("name", &self.name)
+            .field("target_source", &self.selection.target_source())
+            .field(
+                "against",
+                self.selection.legacy_against().unwrap_or(&empty_against),
+            )
+            .field("target_selector", &self.selection.target_selector())
+            .field("against_selectors", &self.selection.against_selectors())
+            .field("scope_window", &self.scope_window)
+            .field("scope_key", &self.scope_key)
+            .field("scope_partition", &self.scope_partition)
+            .field("scope_segments", &self.scope_segments)
+            .field("scope_tags", &self.scope_tags)
+            .field("comparators", &self.comparators)
+            .field("require_closed_windows", &self.require_closed_windows)
+            .field("use_half_open_ranges", &self.use_half_open_ranges)
+            .field("time_axis", &self.time_axis)
+            .field("null_timestamp_policy", &self.null_timestamp_policy)
+            .field("known_at", &self.known_at)
+            .field("open_window_policy", &self.open_window_policy)
+            .field("open_window_horizon", &self.open_window_horizon)
+            .field("coalesce_adjacent_windows", &self.coalesce_adjacent_windows)
+            .field("duplicate_window_policy", &self.duplicate_window_policy)
+            .field("output", &self.output)
+            .field("strict", &self.strict)
+            .finish()
+    }
+}
+
 impl ComparisonPlan {
     /// Creates a comparison plan with validated-shape defaults.
     #[must_use]
@@ -932,10 +1061,7 @@ impl ComparisonPlan {
     ) -> Self {
         Self {
             name: name.into(),
-            target_source: target_source.into(),
-            against,
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(target_source, against),
             scope_window: None,
             scope_key: None,
             scope_partition: None,
@@ -989,31 +1115,76 @@ impl ComparisonPlan {
         self
     }
 
-    pub(crate) fn effective_target_selector(&self) -> ComparisonSelector {
-        self.target_selector
-            .clone()
-            .unwrap_or_else(|| ComparisonSelector::for_source(self.target_source.clone()))
+    pub(crate) fn effective_target_selector(&self) -> Cow<'_, ComparisonSelector> {
+        self.selection.target_selector().map_or_else(
+            || {
+                Cow::Owned(ComparisonSelector::for_source(
+                    self.selection.target_source(),
+                ))
+            },
+            Cow::Borrowed,
+        )
     }
 
-    pub(crate) fn effective_against_selectors(&self) -> Vec<ComparisonSelector> {
-        if !self.against_selectors.is_empty() {
-            return self.against_selectors.clone();
+    pub(crate) fn effective_against_selectors(&self) -> Vec<Cow<'_, ComparisonSelector>> {
+        let selectors = self.selection.against_selectors();
+        if !selectors.is_empty() {
+            return selectors.iter().map(Cow::Borrowed).collect();
         }
-        match &self.against {
-            AgainstSelection::Sources(sources) => sources
+        match self.selection.legacy_against() {
+            None => Vec::new(),
+            Some(AgainstSelection::Sources(sources)) => sources
                 .iter()
-                .cloned()
-                .map(ComparisonSelector::for_source)
+                .map(|source| Cow::Owned(ComparisonSelector::for_source(source)))
                 .collect(),
-            AgainstSelection::Cohort {
+            Some(AgainstSelection::Cohort {
                 name,
                 sources,
                 activity,
-            } => vec![
+            }) => vec![Cow::Owned(
                 ComparisonSelector::for_cohort_sources(sources.clone(), activity.clone())
                     .with_name(name.clone()),
-            ],
+            )],
         }
+    }
+
+    pub(crate) fn target_source(&self) -> &str {
+        self.selection.target_source()
+    }
+
+    pub(crate) fn legacy_against(&self) -> Option<&AgainstSelection> {
+        self.selection.legacy_against()
+    }
+
+    pub(crate) fn against_for_alignment(&self) -> Cow<'_, AgainstSelection> {
+        self.selection.legacy_against().map_or_else(
+            || Cow::Owned(AgainstSelection::Sources(Vec::new())),
+            Cow::Borrowed,
+        )
+    }
+
+    pub(crate) fn explicit_target_selector(&self) -> Option<&ComparisonSelector> {
+        self.selection.target_selector()
+    }
+
+    pub(crate) fn explicit_against_selectors(&self) -> &[ComparisonSelector] {
+        self.selection.against_selectors()
+    }
+
+    pub(crate) fn set_target_source(&mut self, source: String) {
+        self.selection.set_target_source(source);
+    }
+
+    pub(crate) fn set_target_selector(&mut self, selector: ComparisonSelector) {
+        self.selection.set_target_selector(selector);
+    }
+
+    pub(crate) fn set_legacy_against(&mut self, against: AgainstSelection) {
+        self.selection.set_legacy_against(against);
+    }
+
+    pub(crate) fn push_against_selector(&mut self, selector: ComparisonSelector) {
+        self.selection.push_against_selector(selector);
     }
 
     /// Returns whether every effective selector can be exported as portable data.
@@ -1034,7 +1205,9 @@ impl ComparisonPlan {
             diagnostics.push(plan_diagnostic("MissingName", DiagnosticSeverity::Error));
         }
 
-        if self.target_selector.is_none() && self.target_source.trim().is_empty() {
+        if self.selection.target_selector().is_none()
+            && self.selection.target_source().trim().is_empty()
+        {
             diagnostics.push(plan_diagnostic("MissingTarget", DiagnosticSeverity::Error));
         }
 
@@ -1084,7 +1257,7 @@ impl ComparisonPlan {
             }
         }
 
-        if let Some(selector) = &self.target_selector
+        if let Some(selector) = self.selection.target_selector()
             && selector.name.trim().is_empty()
         {
             diagnostics.push(plan_diagnostic(
@@ -1092,27 +1265,18 @@ impl ComparisonPlan {
                 DiagnosticSeverity::Error,
             ));
         }
-        if let Some(selector) = &self.target_selector
-            && !self.target_source.trim().is_empty()
-            && self.target_source != selector.name
-        {
-            diagnostics.push(plan_diagnostic(
-                "ContradictoryTargetSelection",
-                DiagnosticSeverity::Error,
-            ));
-        }
-
-        if !self.against_selectors.is_empty()
-            && (!matches!(&self.against, AgainstSelection::Sources(sources) if sources.is_empty()))
-        {
+        if matches!(
+            &self.selection.against,
+            ComparisonAgainstSelection::Contradictory { .. }
+        ) {
             diagnostics.push(plan_diagnostic(
                 "ContradictoryAgainstSelection",
                 DiagnosticSeverity::Error,
             ));
         }
 
-        if self.against_selectors.is_empty() {
-            match &self.against {
+        if self.selection.against_selectors().is_empty() {
+            match self.selection.legacy_against().expect("legacy selection") {
                 AgainstSelection::Sources(sources) => {
                     validate_source_list(sources, false, &mut diagnostics);
                 }
@@ -1146,9 +1310,10 @@ impl ComparisonPlan {
 
         let mut selector_names = BTreeSet::new();
         for selector in self
-            .target_selector
-            .iter()
-            .chain(self.against_selectors.iter())
+            .selection
+            .target_selector()
+            .into_iter()
+            .chain(self.selection.against_selectors())
         {
             if selector.name.trim().is_empty() {
                 diagnostics.push(plan_diagnostic(
@@ -1904,9 +2069,9 @@ fn build_extension_metadata(
     aligned: &AlignedComparison,
     plan: &ComparisonPlan,
 ) -> Vec<ComparisonExtensionMetadata> {
-    let AgainstSelection::Cohort {
+    let Some(AgainstSelection::Cohort {
         activity, sources, ..
-    } = &plan.against
+    }) = plan.legacy_against()
     else {
         return Vec::new();
     };
@@ -1987,13 +2152,13 @@ fn prepare_internal(
     let candidates = crate::window_normalization::ordered_candidates(history);
 
     let target_selector = plan.effective_target_selector();
-    let target_selector_name = if plan.target_selector.is_some() {
+    let target_selector_name = if plan.explicit_target_selector().is_some() {
         target_selector.name.as_str()
     } else {
         "target"
     };
     let against_selectors = plan.effective_against_selectors();
-    let use_explicit_against_selector_names = !plan.against_selectors.is_empty();
+    let use_explicit_against_selector_names = !plan.explicit_against_selectors().is_empty();
 
     for candidate in candidates {
         let window = to_window_artifact(&candidate);
@@ -2235,11 +2400,8 @@ fn align_grouped(
 ) -> AlignedComparison {
     let mut segments = Vec::new();
     for ((window_name, key, partition, axis, clock), (targets, againsts)) in groups {
-        for segment in aligned_segments(
-            targets.as_slice(),
-            againsts.as_slice(),
-            &prepared.plan.against,
-        ) {
+        let against = prepared.plan.against_for_alignment();
+        for segment in aligned_segments(targets.as_slice(), againsts.as_slice(), &against) {
             segments.push(AlignedSegmentArtifact {
                 segment_id: format!("segment[{}]", segments.len()),
                 window_name: window_name.clone(),
@@ -2780,10 +2942,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Provider QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -2829,10 +2991,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Containment".to_owned(),
-            target_source: "target".to_owned(),
-            against: AgainstSelection::Sources(vec!["container".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "target",
+                AgainstSelection::Sources(vec!["container".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -2887,10 +3049,10 @@ mod tests {
             &history,
             &ComparisonPlan {
                 name: "Latency QA".to_owned(),
-                target_source: "target".to_owned(),
-                against: AgainstSelection::Sources(vec!["comparison".to_owned()]),
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "target",
+                    AgainstSelection::Sources(vec!["comparison".to_owned()]),
+                ),
                 scope_window: Some("DeviceOffline".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -2926,10 +3088,10 @@ mod tests {
             &history,
             &ComparisonPlan {
                 name: "Quote at trade".to_owned(),
-                target_source: "trade".to_owned(),
-                against: AgainstSelection::Sources(vec!["quote".to_owned()]),
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "trade",
+                    AgainstSelection::Sources(vec!["quote".to_owned()]),
+                ),
                 scope_window: Some("Quote".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -3095,10 +3257,10 @@ mod tests {
             history,
             &ComparisonPlan {
                 name: "Timestamp latency".to_owned(),
-                target_source: "trade".to_owned(),
-                against: AgainstSelection::Sources(vec!["quote".to_owned()]),
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "trade",
+                    AgainstSelection::Sources(vec!["quote".to_owned()]),
+                ),
                 scope_window: Some("Quote".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -3136,10 +3298,10 @@ mod tests {
             history,
             &ComparisonPlan {
                 name: "Timestamp quote".to_owned(),
-                target_source: "trade".to_owned(),
-                against: AgainstSelection::Sources(vec!["quote".to_owned()]),
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "trade",
+                    AgainstSelection::Sources(vec!["quote".to_owned()]),
+                ),
                 scope_window: Some("Quote".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -3191,14 +3353,14 @@ mod tests {
             &history,
             &ComparisonPlan {
                 name: "cohort all".to_owned(),
-                target_source: "source-a".to_owned(),
-                against: AgainstSelection::Cohort {
-                    name: "cohort".to_owned(),
-                    sources: vec!["source-b".to_owned(), "source-c".to_owned()],
-                    activity: CohortActivity::All,
-                },
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "source-a",
+                    AgainstSelection::Cohort {
+                        name: "cohort".to_owned(),
+                        sources: vec!["source-b".to_owned(), "source-c".to_owned()],
+                        activity: CohortActivity::All,
+                    },
+                ),
                 scope_window: Some("SelectionPriced".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -3252,18 +3414,18 @@ mod tests {
             &threshold_history,
             &ComparisonPlan {
                 name: "cohort at least".to_owned(),
-                target_source: "source-a".to_owned(),
-                against: AgainstSelection::Cohort {
-                    name: "cohort".to_owned(),
-                    sources: vec![
-                        "source-b".to_owned(),
-                        "source-c".to_owned(),
-                        "source-d".to_owned(),
-                    ],
-                    activity: CohortActivity::AtLeast { count: 2 },
-                },
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "source-a",
+                    AgainstSelection::Cohort {
+                        name: "cohort".to_owned(),
+                        sources: vec![
+                            "source-b".to_owned(),
+                            "source-c".to_owned(),
+                            "source-d".to_owned(),
+                        ],
+                        activity: CohortActivity::AtLeast { count: 2 },
+                    },
+                ),
                 scope_window: Some("SelectionPriced".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -3300,14 +3462,14 @@ mod tests {
             &none_history,
             &ComparisonPlan {
                 name: "cohort none".to_owned(),
-                target_source: "source-a".to_owned(),
-                against: AgainstSelection::Cohort {
-                    name: "cohort".to_owned(),
-                    sources: vec!["source-b".to_owned(), "source-c".to_owned()],
-                    activity: CohortActivity::None,
-                },
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "source-a",
+                    AgainstSelection::Cohort {
+                        name: "cohort".to_owned(),
+                        sources: vec!["source-b".to_owned(), "source-c".to_owned()],
+                        activity: CohortActivity::None,
+                    },
+                ),
                 scope_window: Some("SelectionPriced".to_owned()),
                 scope_key: None,
                 scope_partition: None,
@@ -3347,10 +3509,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Live QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3391,10 +3553,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Decision audit".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3446,10 +3608,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Scoped".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: Some("device-1".to_owned()),
             scope_partition: Some("fleet-a".to_owned()),
@@ -3501,10 +3663,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Duplicate QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3554,10 +3716,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Coalesce QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3595,10 +3757,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Runtime critic".to_owned(),
-            target_source: "trade".to_owned(),
-            against: AgainstSelection::Sources(vec!["quote".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "trade",
+                AgainstSelection::Sources(vec!["quote".to_owned()]),
+            ),
             scope_window: None,
             scope_key: None,
             scope_partition: None,
@@ -3725,10 +3887,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Strict broad".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: None,
             scope_key: None,
             scope_partition: None,
@@ -3769,10 +3931,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Open QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3814,10 +3976,10 @@ mod tests {
         let history = WindowHistoryFixture::new().build();
         let plan = ComparisonPlan {
             name: "Live QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3853,10 +4015,10 @@ mod tests {
         let history = WindowHistoryFixture::new().build();
         let plan = ComparisonPlan {
             name: "Clock QA".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -3898,10 +4060,10 @@ mod tests {
             .build();
         let plan = ComparisonPlan {
             name: "Decision audit".to_owned(),
-            target_source: "provider-a".to_owned(),
-            against: AgainstSelection::Sources(vec!["provider-b".to_owned()]),
-            target_selector: None,
-            against_selectors: Vec::new(),
+            selection: ComparisonSelection::legacy(
+                "provider-a",
+                AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            ),
             scope_window: Some("DeviceOffline".to_owned()),
             scope_key: None,
             scope_partition: None,
@@ -4015,14 +4177,14 @@ mod tests {
             &history,
             &ComparisonPlan {
                 name: "cohort evidence".to_owned(),
-                target_source: "source-a".to_owned(),
-                against: AgainstSelection::Cohort {
-                    name: "cohort".to_owned(),
-                    sources: vec!["source-b".to_owned(), "source-c".to_owned()],
-                    activity: CohortActivity::All,
-                },
-                target_selector: None,
-                against_selectors: Vec::new(),
+                selection: ComparisonSelection::legacy(
+                    "source-a",
+                    AgainstSelection::Cohort {
+                        name: "cohort".to_owned(),
+                        sources: vec!["source-b".to_owned(), "source-c".to_owned()],
+                        activity: CohortActivity::All,
+                    },
+                ),
                 scope_window: Some("SelectionPriced".to_owned()),
                 scope_key: None,
                 scope_partition: None,

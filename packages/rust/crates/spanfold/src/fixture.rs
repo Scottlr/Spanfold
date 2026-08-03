@@ -258,36 +258,25 @@ impl TryFrom<RawPlan> for ComparisonPlan {
             .live_horizon_position
             .or(value.open_window_horizon_position);
 
-        Ok(ComparisonPlan {
-            name: value.name,
-            target_source: value.target_source,
-            against,
-            target_selector: None,
-            against_selectors: Vec::new(),
-            scope_window: value.scope_window,
-            scope_key: value.scope_key,
-            scope_partition: value.scope_partition,
-            scope_segments: into_filters(value.scope_segments),
-            scope_tags: into_filters(value.scope_tags),
-            comparators,
-            require_closed_windows: open_window_horizon.is_none(),
-            use_half_open_ranges: true,
-            time_axis: crate::TemporalAxis::ProcessingPosition,
-            null_timestamp_policy: crate::ComparisonNullTimestampPolicy::Reject,
-            known_at: value.known_at_position.map(crate::TemporalPoint::position),
-            open_window_policy: if open_window_horizon.is_some() {
-                OpenWindowPolicy::ClipToHorizon
-            } else {
-                OpenWindowPolicy::RequireClosed
-            },
-            open_window_horizon: open_window_horizon.map(crate::TemporalPoint::position),
-            coalesce_adjacent_windows: value.coalesce_adjacent_windows,
-            duplicate_window_policy: parse_duplicate_window_policy(
-                value.duplicate_window_policy.as_deref(),
-            )?,
-            output: crate::ComparisonOutputOptions::default_options(),
-            strict: value.strict,
-        })
+        let mut plan = ComparisonPlan::new(value.name, value.target_source, against, comparators);
+        plan.scope_window = value.scope_window;
+        plan.scope_key = value.scope_key;
+        plan.scope_partition = value.scope_partition;
+        plan.scope_segments = into_filters(value.scope_segments);
+        plan.scope_tags = into_filters(value.scope_tags);
+        plan.require_closed_windows = open_window_horizon.is_none();
+        plan.known_at = value.known_at_position.map(crate::TemporalPoint::position);
+        plan.open_window_policy = if open_window_horizon.is_some() {
+            OpenWindowPolicy::ClipToHorizon
+        } else {
+            OpenWindowPolicy::RequireClosed
+        };
+        plan.open_window_horizon = open_window_horizon.map(crate::TemporalPoint::position);
+        plan.coalesce_adjacent_windows = value.coalesce_adjacent_windows;
+        plan.duplicate_window_policy =
+            parse_duplicate_window_policy(value.duplicate_window_policy.as_deref())?;
+        plan.strict = value.strict;
+        Ok(plan)
     }
 }
 
