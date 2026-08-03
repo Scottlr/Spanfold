@@ -1,11 +1,11 @@
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use spanfold::{
     AsOfDirection, CohortActivity, Comparator, ComparisonScope, ComparisonSelector,
-    EpisodeComparisonBuilder, LeadLagTransition, PrimitiveValue, TemporalAxis, TemporalPoint,
-    TemporalTolerance, WindowComparisonBuilder, WindowHistory, WindowHistoryFixture, WindowSegment,
-    WindowTag, export_result_json, export_result_llm_context, for_events,
+    EpisodeComparisonBuilder, EventPipeline, LeadLagTransition, PrimitiveValue, TemporalAxis,
+    TemporalPoint, TemporalTolerance, WindowComparisonBuilder, WindowHistory, WindowHistoryFixture,
+    WindowSegment, WindowTag, export_result_json, export_result_llm_context, for_events,
 };
 
 const EPISODE_DETECTION_SOURCE: &str = "detection";
@@ -133,6 +133,71 @@ fn create_segment_cohort_data() -> WindowHistory {
     pipeline.history().clone()
 }
 
+fn create_metadata_rollup_pipeline() -> EventPipeline<SegmentSignal> {
+    for_events::<SegmentSignal>()
+        .record_windows()
+        .window_with_metadata(
+            "SelectionPriced",
+            |signal| signal.selection_id.clone(),
+            |signal| !signal.is_online,
+            |signal| {
+                vec![
+                    WindowSegment::new("market", signal.market_id.clone()).expect("segment name"),
+                    WindowSegment::new("fixture", signal.fixture_id.clone()).expect("segment name"),
+                    WindowSegment::new("phase", signal.phase.clone()).expect("segment name"),
+                    WindowSegment::new("period", signal.period.clone())
+                        .and_then(|segment| segment.with_parent("phase"))
+                        .expect("segment names"),
+                ]
+            },
+            |signal| vec![WindowTag::new("state", signal.state.clone()).expect("tag name")],
+        )
+        .roll_up_with_segment_projection(
+            "MarketPriced",
+            |signal| signal.market_id.clone(),
+            |children| children.any_active(),
+            |projection| {
+                projection
+                    .preserve("phase")
+                    .preserve("period")
+                    .rename("phase", "trading_phase")
+            },
+        )
+        .build()
+        .expect("valid benchmark pipeline")
+}
+
+fn create_metadata_rollup_events(event_count: usize) -> Vec<(SegmentSignal, String)> {
+    let selection_count = 128_usize;
+    let source_count = 4_usize;
+    let mut events = Vec::with_capacity(event_count);
+    for event_index in 0..event_count {
+        let selection_index = event_index % selection_count;
+        let source_index = (event_index / selection_count) % source_count;
+        let occurrence = event_index / (selection_count * source_count);
+        let source = format!("provider-{source_index}");
+        let (is_online, phase, period, state) = match occurrence % 4 {
+            0 => (false, "pre-match", "period-0", "available"),
+            1 => (false, "in-play", "period-1", "active"),
+            2 => (false, "in-play", "period-1", "paused"),
+            _ => (true, "in-play", "period-1", "settled"),
+        };
+        events.push((
+            SegmentSignal {
+                selection_id: format!("selection-{selection_index}"),
+                market_id: format!("market-{}", selection_index % 16),
+                fixture_id: format!("fixture-{}", selection_index % 8),
+                is_online,
+                phase: phase.to_owned(),
+                period: period.to_owned(),
+                state: state.to_owned(),
+            },
+            source,
+        ));
+    }
+    events
+}
+
 fn comparison_builder(history: &WindowHistory) -> spanfold::WindowComparisonBuilder<'_> {
     history
         .compare("Benchmark Provider QA")
@@ -161,6 +226,26 @@ fn ingestion_benchmarks(c: &mut Criterion) {
             b.iter(|| create_comparison_data(black_box(event_count), 128, 2));
         });
     }
+    let metadata_rollup_events = create_metadata_rollup_events(8_192);
+    group.bench_function("metadata_rollup_8192", |b| {
+        b.iter_batched(
+            || {
+                (
+                    create_metadata_rollup_pipeline(),
+                    metadata_rollup_events.clone(),
+                )
+            },
+            |(mut pipeline, events)| {
+                for (event, source) in events {
+                    pipeline
+                        .ingest(event, Some(&source), None)
+                        .expect("benchmark ingestion");
+                }
+                black_box(pipeline)
+            },
+            BatchSize::SmallInput,
+        );
+    });
     group.finish();
 }
 

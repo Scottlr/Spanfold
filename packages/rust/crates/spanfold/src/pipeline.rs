@@ -128,6 +128,18 @@ struct WindowObservation {
     tags: Vec<WindowTag>,
 }
 
+struct EventWindowObservation {
+    is_active: bool,
+    segments: Vec<WindowSegment>,
+    rollups: Vec<EventRollupObservation>,
+}
+
+struct EventRollupObservation {
+    segments: Vec<WindowSegment>,
+    segment_context: String,
+    rollups: Vec<EventRollupObservation>,
+}
+
 impl ParentState {
     fn view(&self) -> ChildActivityView {
         ChildActivityView {
@@ -382,6 +394,8 @@ pub struct WindowPipelineBuilder<T> {
 /// Event ingestion pipeline that records source windows and roll-ups.
 pub struct EventPipeline<T> {
     windows: Vec<WindowDefinition<T>>,
+    max_new_records: Option<u64>,
+    observation_buffer: Vec<EventWindowObservation>,
     event_time: Option<EventTimeSelector<T>>,
     emission_callbacks: Vec<EmissionCallback>,
     window_callbacks: BTreeMap<String, WindowCallbackSet>,
@@ -683,8 +697,14 @@ impl<T> EventPipelineBuilder<T> {
         validate_window_names(&self.windows)?;
         validate_segment_projections(&self.windows)?;
         let window_callbacks = collect_window_callbacks(&self.windows);
+        let max_new_records = self.windows.iter().try_fold(0_u64, |total, definition| {
+            total.checked_add(window_definition_count(definition)?)
+        });
+        let observation_buffer = Vec::with_capacity(self.windows.len());
         Ok(EventPipeline {
             windows: self.windows,
+            max_new_records,
+            observation_buffer,
             event_time: self.event_time,
             emission_callbacks: self.emission_callbacks,
             window_callbacks,
@@ -872,10 +892,7 @@ impl<T> EventPipeline<T> {
             .checked_add(1)
             .ok_or(IngestionError::ProcessingPositionOverflow)?;
         let max_new_records = self
-            .windows
-            .iter()
-            .map(window_definition_count)
-            .try_fold(0_u64, |total, count| total.checked_add(count))
+            .max_new_records
             .ok_or(IngestionError::RecordIdOverflow)?;
         if self.next_record_id > u64::MAX.saturating_sub(max_new_records) {
             return Err(IngestionError::RecordIdOverflow);
@@ -887,15 +904,21 @@ impl<T> EventPipeline<T> {
         for active in self.active.values() {
             TemporalRange::new(active.start.clone(), event_point.clone())?;
         }
-        self.preflight_segment_projections(&event)?;
+        let mut observations = std::mem::take(&mut self.observation_buffer);
+        if let Err(error) = self.observe_event(&event, &mut observations) {
+            observations.clear();
+            self.observation_buffer = observations;
+            return Err(error);
+        }
         self.position = next_position;
         let mut emissions = Vec::new();
         let windows = std::mem::take(&mut self.windows);
         let mut ingestion_error = None;
-        for definition in &windows {
+        for (definition, observation) in windows.iter().zip(observations.drain(..)) {
             if let Err(error) = self.ingest_definition(
                 definition,
                 &event,
+                observation,
                 event_point.clone(),
                 source,
                 partition,
@@ -906,6 +929,7 @@ impl<T> EventPipeline<T> {
             }
         }
         self.windows = windows;
+        self.observation_buffer = observations;
         if let Some(error) = ingestion_error {
             return Err(error);
         }
@@ -918,9 +942,15 @@ impl<T> EventPipeline<T> {
         })
     }
 
-    fn preflight_segment_projections(&self, event: &T) -> Result<(), IngestionError> {
+    fn observe_event(
+        &self,
+        event: &T,
+        observations: &mut Vec<EventWindowObservation>,
+    ) -> Result<(), IngestionError> {
+        observations.clear();
         for definition in &self.windows {
-            let segments = if (definition.is_active)(event) {
+            let is_active = (definition.is_active)(event);
+            let segments = if is_active {
                 definition
                     .segments
                     .as_ref()
@@ -928,7 +958,12 @@ impl<T> EventPipeline<T> {
             } else {
                 Vec::new()
             };
-            preflight_rollup_projections(&definition.rollups, &segments)?;
+            let rollups = observe_rollup_projections(&definition.rollups, &segments)?;
+            observations.push(EventWindowObservation {
+                is_active,
+                segments,
+                rollups,
+            });
         }
         Ok(())
     }
@@ -953,25 +988,23 @@ impl<T> EventPipeline<T> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn ingest_definition(
         &mut self,
         definition: &WindowDefinition<T>,
         event: &T,
+        observation: EventWindowObservation,
         event_point: TemporalPoint,
         source: Option<&str>,
         partition: Option<&str>,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
+        let EventWindowObservation {
+            is_active,
+            segments,
+            rollups,
+        } = observation;
         let key = (definition.key)(event);
-        let is_active = (definition.is_active)(event);
-        let segments = if is_active {
-            definition
-                .segments
-                .as_ref()
-                .map_or_else(Vec::new, |selector| selector(event))
-        } else {
-            Vec::new()
-        };
         let tags = if is_active {
             definition
                 .tags
@@ -1004,6 +1037,7 @@ impl<T> EventPipeline<T> {
             self.sync_rollups(
                 &definition.rollups,
                 event,
+                Some(rollups),
                 source,
                 partition,
                 ChildContext {
@@ -1021,6 +1055,7 @@ impl<T> EventPipeline<T> {
             self.sync_rollups(
                 &definition.rollups,
                 event,
+                None,
                 source,
                 partition,
                 ChildContext {
@@ -1038,6 +1073,7 @@ impl<T> EventPipeline<T> {
             self.sync_rollups(
                 &definition.rollups,
                 event,
+                None,
                 source,
                 partition,
                 ChildContext {
@@ -1055,19 +1091,23 @@ impl<T> EventPipeline<T> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn sync_rollups(
         &mut self,
         definitions: &[RollUpDefinition<T>],
         event: &T,
+        observations: Option<Vec<EventRollupObservation>>,
         source: Option<&str>,
         partition: Option<&str>,
         child: ChildContext<'_>,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
+        let mut observations = observations.map(Vec::into_iter);
         for definition in definitions {
             self.sync_rollup(
                 definition,
                 event,
+                observations.as_mut().and_then(Iterator::next),
                 source,
                 partition,
                 child.clone(),
@@ -1077,17 +1117,29 @@ impl<T> EventPipeline<T> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn sync_rollup(
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
+        observation: Option<EventRollupObservation>,
         source: Option<&str>,
         partition: Option<&str>,
         child: ChildContext<'_>,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
-        let projected_segments = project_segments(&definition.segment_projection, child.segments)?;
-        let segment_context = stable_segments(&projected_segments);
+        let (projected_segments, segment_context, rollup_observations) = match observation {
+            Some(observation) => (
+                observation.segments,
+                observation.segment_context,
+                Some(observation.rollups),
+            ),
+            None => {
+                let segments = project_segments(&definition.segment_projection, child.segments)?;
+                let segment_context = stable_segments(&segments);
+                (segments, segment_context, None)
+            }
+        };
         let parent_key = (definition.key)(event);
         let rollup_lineage = format!("{}>{}", child.lineage, definition.name);
         let membership_key = (
@@ -1113,6 +1165,7 @@ impl<T> EventPipeline<T> {
                 self.update_rollup_parent(
                     definition,
                     event,
+                    None,
                     source,
                     partition,
                     &rollup_lineage,
@@ -1129,6 +1182,7 @@ impl<T> EventPipeline<T> {
             self.update_rollup_parent(
                 definition,
                 event,
+                rollup_observations,
                 source,
                 partition,
                 &rollup_lineage,
@@ -1144,6 +1198,7 @@ impl<T> EventPipeline<T> {
             self.update_rollup_parent(
                 definition,
                 event,
+                None,
                 source,
                 partition,
                 &rollup_lineage,
@@ -1163,6 +1218,7 @@ impl<T> EventPipeline<T> {
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
+        observations: Option<Vec<EventRollupObservation>>,
         source: Option<&str>,
         partition: Option<&str>,
         rollup_lineage: &str,
@@ -1221,6 +1277,7 @@ impl<T> EventPipeline<T> {
         self.sync_rollups(
             &definition.rollups,
             event,
+            observations,
             source,
             partition,
             ChildContext {
@@ -1408,20 +1465,16 @@ fn window_metadata<T>(definition: &WindowDefinition<T>) -> WindowMetadata {
     }
 }
 
-fn window_definition_count<T>(definition: &WindowDefinition<T>) -> u64 {
-    1 + definition
-        .rollups
-        .iter()
-        .map(rollup_definition_count)
-        .sum::<u64>()
+fn window_definition_count<T>(definition: &WindowDefinition<T>) -> Option<u64> {
+    definition.rollups.iter().try_fold(1_u64, |total, rollup| {
+        total.checked_add(rollup_definition_count(rollup)?)
+    })
 }
 
-fn rollup_definition_count<T>(definition: &RollUpDefinition<T>) -> u64 {
-    1 + definition
-        .rollups
-        .iter()
-        .map(rollup_definition_count)
-        .sum::<u64>()
+fn rollup_definition_count<T>(definition: &RollUpDefinition<T>) -> Option<u64> {
+    definition.rollups.iter().try_fold(1_u64, |total, rollup| {
+        total.checked_add(rollup_definition_count(rollup)?)
+    })
 }
 
 fn rollup_metadata<T>(definition: &RollUpDefinition<T>) -> WindowMetadata {
@@ -1603,15 +1656,22 @@ fn project_segments(
     Ok(projected)
 }
 
-fn preflight_rollup_projections<T>(
+fn observe_rollup_projections<T>(
     definitions: &[RollUpDefinition<T>],
     child_segments: &[WindowSegment],
-) -> Result<(), IngestionError> {
+) -> Result<Vec<EventRollupObservation>, IngestionError> {
+    let mut observations = Vec::with_capacity(definitions.len());
     for definition in definitions {
-        let projected = project_segments(&definition.segment_projection, child_segments)?;
-        preflight_rollup_projections(&definition.rollups, &projected)?;
+        let segments = project_segments(&definition.segment_projection, child_segments)?;
+        let segment_context = stable_segments(&segments);
+        let rollups = observe_rollup_projections(&definition.rollups, &segments)?;
+        observations.push(EventRollupObservation {
+            segments,
+            segment_context,
+            rollups,
+        });
     }
-    Ok(())
+    Ok(observations)
 }
 
 fn should_keep_segment(projection: &RollUpSegmentProjection, name: &str) -> bool {
