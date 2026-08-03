@@ -27,7 +27,8 @@ The benchmark project covers:
 - segment-filtered residual execution
 - `Any()` and `AtLeast(n)` cohort residual execution
 - live segment/cohort residual execution
-- JSON and Markdown export overhead
+- JSON and Markdown export overhead, plus scaled Rust result export
+  materialization and streaming throughput
 - deterministic Episode formation across geometric history sizes
 - sparse Episode relation-graph construction across geometric episode counts
 - reference-scorecard interpretation from an already materialized comparison
@@ -504,6 +505,50 @@ This reuse is bounded to source membership during comparison alignment. It does
 not remove the contractually required per-segment source vector or record-ID
 materialization, change comparator grouping, optimize direct history queries, or
 address result/export materialization.
+
+## Rust result export materialization
+
+The permanent reporting-boundary workload starts from an already materialized,
+valid comparison result containing 4,096 lead/lag rows, 4,096 as-of rows, and
+8,192 matching finality records. Result construction is outside measurement.
+Untimed assertions check the public pretty-JSON schema and typed row counts, the
+8,193-line JSON Lines shape, and exact line bytes between the public materialized
+`export_result_json_lines` and streaming `write_result_json_lines` APIs. The
+timed routines exercise only public exports and include their required output
+allocation.
+
+The measurements were taken on 2026-08-04 on an Apple M4 Pro (12 physical and
+logical cores), macOS 26.5.2 (25F84), using rustc and Cargo 1.95.0 for
+`aarch64-apple-darwin` and Criterion 0.8.2. Criterion used its default 3-second
+warmup and 100 samples. The estimated measurement intervals were 8.0140 seconds
+for pretty JSON, 5.5938 seconds for materialized JSON Lines, and 5.0523 seconds
+for streaming JSON Lines. From `packages/rust`, the exact command was:
+
+```bash
+cargo bench --bench spanfold_benchmarks -- result_export_materialization
+```
+
+| Export | Output size | Time | Throughput |
+| --- | ---: | ---: | ---: |
+| Pretty JSON | 25,445,651 bytes | 81.386 ms `[80.717, 82.174]` | 298.17 MiB/s `[295.31, 300.64]` |
+| Materialized JSON Lines | 5,328,949 bytes | 18.273 ms `[18.170, 18.388]` | 278.11 MiB/s `[276.38, 279.69]` |
+| Streaming JSON Lines | 5,328,949 bytes | 16.836 ms `[16.771, 16.902]` | 301.87 MiB/s `[300.69, 303.02]` |
+
+The existing streaming JSON Lines writer is 1.09x faster than materializing a
+`Vec<String>` for the same exact bytes. That bounded difference confirms the
+public streaming route is the appropriate control when callers can write to a
+sink directly, without justifying a second serializer or a change to the
+materialized API. Pretty JSON has a different schema and formatting contract, so
+its time and size are not compared directly with JSON Lines.
+
+P8 is therefore closed with production code deferred. The measured exports
+sustain 278-302 MiB/s at a multi-megabyte reporting boundary, and the only
+identified duplication is already avoidable through the established public
+streaming JSON Lines API. Replacing `Value` construction with a custom pretty
+serializer would broaden ownership of field ordering, row ordering, finality and
+evidence layout, error behavior, and exact bytes for no measured user-facing
+bottleneck. Required result/export materialization remains acceptable at the
+reporting boundary and stays out of ingestion paths.
 
 ## Current Optimization Work
 
