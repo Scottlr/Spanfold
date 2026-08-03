@@ -79,7 +79,8 @@ pub use explain::ComparisonExplanationFormat;
 pub use export::{
     ComparisonDebugHtmlOptions, ComparisonExportError, ComparisonLlmContextOptions,
     export_plan_json, export_result_debug_html, export_result_json, export_result_json_lines,
-    export_result_llm_context, export_result_markdown, write_result_json_lines,
+    export_result_llm_context, export_result_markdown, write_export_files_atomically,
+    write_result_json_lines,
 };
 pub use extensions::{
     CohortEvidenceMetadata, ComparisonExtensionBuildError, ComparisonExtensionBuilder,

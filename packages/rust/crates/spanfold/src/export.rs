@@ -133,7 +133,7 @@ pub(crate) fn export_configured_bundle(
     if let (Some(path), Some(payload)) = (llm_context.path.as_deref(), llm_payload.as_ref()) {
         artifacts.push((path, payload.as_bytes()));
     }
-    write_files_atomically(&artifacts)?;
+    write_export_files_atomically(&artifacts)?;
     Ok(())
 }
 
@@ -540,8 +540,11 @@ fn escape_markdown(value: &str) -> String {
         .replace('>', "\\>")
 }
 
-/// Exports a comparison result as self-contained debug HTML.
-fn write_files_atomically(files: &[(&Path, &[u8])]) -> Result<(), std::io::Error> {
+/// Writes a set of export artifacts through sibling staging files.
+///
+/// All payloads are staged before publication begins. Existing destination
+/// files are preserved and restored if a later artifact cannot be published.
+pub fn write_export_files_atomically(files: &[(&Path, &[u8])]) -> Result<(), std::io::Error> {
     if files.is_empty() {
         return Ok(());
     }
@@ -552,6 +555,12 @@ fn write_files_atomically(files: &[(&Path, &[u8])]) -> Result<(), std::io::Error
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
                 "duplicate export destination",
+            ));
+        }
+        if path.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::IsADirectory,
+                format!("export destination is a directory: {}", path.display()),
             ));
         }
     }
@@ -585,15 +594,58 @@ fn write_files_atomically(files: &[(&Path, &[u8])]) -> Result<(), std::io::Error
         }
         staged.push((*path, temporary));
     }
-    for (path, temporary) in &staged {
-        if let Err(error) = fs::rename(temporary, path) {
-            for (_, remaining) in &staged {
-                let _ = fs::remove_file(remaining);
+    let mut published = Vec::with_capacity(staged.len());
+    for (index, (path, temporary)) in staged.iter().enumerate() {
+        let backup = if path.exists() {
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("artifact");
+            let backup = path.with_file_name(format!(
+                ".{file_name}.{}.{}.bak",
+                std::process::id(),
+                TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            if let Err(error) = fs::rename(path, &backup) {
+                rollback_published_files(&published);
+                cleanup_staged_files(&staged[index..]);
+                return Err(error);
             }
+            Some(backup)
+        } else {
+            None
+        };
+        if let Err(error) = fs::rename(temporary, path) {
+            if let Some(backup) = backup.as_ref() {
+                let _ = fs::rename(backup, path);
+            }
+            rollback_published_files(&published);
+            cleanup_staged_files(&staged[index..]);
             return Err(error);
+        }
+        published.push((*path, backup));
+    }
+    for (_, backup) in published {
+        if let Some(backup) = backup {
+            let _ = fs::remove_file(backup);
         }
     }
     Ok(())
+}
+
+fn rollback_published_files(published: &[(&Path, Option<PathBuf>)]) {
+    for (path, backup) in published.iter().rev() {
+        let _ = fs::remove_file(path);
+        if let Some(backup) = backup {
+            let _ = fs::rename(backup, path);
+        }
+    }
+}
+
+fn cleanup_staged_files(staged: &[(&Path, PathBuf)]) {
+    for (_, temporary) in staged {
+        let _ = fs::remove_file(temporary);
+    }
 }
 
 fn append_json_lines<'a, T: Serialize + 'a>(

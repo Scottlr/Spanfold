@@ -55,7 +55,41 @@ fn audit_writes_artifact_bundle() {
     assert!(
         fs::exists(out.path().join("comparison.llm.json")).expect("comparison.llm.json status")
     );
+    assert!(
+        fs::exists(out.path().join("comparison.rows.jsonl")).expect("comparison.rows.jsonl status")
+    );
     assert!(fs::exists(out.path().join("manifest.json")).expect("manifest.json status"));
+}
+
+#[test]
+fn audit_failure_does_not_partially_replace_an_existing_bundle() {
+    let out = tempdir().expect("tempdir");
+    let comparison_json = out.path().join("comparison.json");
+    fs::write(&comparison_json, "existing comparison").expect("existing comparison");
+    fs::create_dir(out.path().join("comparison.md")).expect("blocking artifact directory");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "audit",
+            fixture_path("basic-overlap.json")
+                .to_str()
+                .expect("utf8 fixture path"),
+            "--out",
+            out.path().to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("\"code\":\"io\""));
+
+    assert_eq!(
+        fs::read_to_string(comparison_json).expect("preserved comparison"),
+        "existing comparison"
+    );
+    assert!(!out.path().join("comparison.llm.json").exists());
+    assert!(!out.path().join("comparison.html").exists());
+    assert!(!out.path().join("comparison.rows.jsonl").exists());
+    assert!(!out.path().join("manifest.json").exists());
 }
 
 #[test]

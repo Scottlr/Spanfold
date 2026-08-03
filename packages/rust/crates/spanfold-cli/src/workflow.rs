@@ -11,17 +11,12 @@ pub(super) fn write_audit_bundle(
     result: &spanfold::ComparisonResult,
     out: &Path,
 ) -> Result<(), CliError> {
-    fs::create_dir_all(out).map_err(CliError::io)?;
     let json = export_result_json(result).map_err(CliError::export)?;
-    fs::write(out.join("comparison.json"), json).map_err(CliError::io)?;
     let markdown = export_result_markdown(result);
-    fs::write(out.join("comparison.md"), markdown).map_err(CliError::io)?;
     let llm = export_result_llm_context(result).map_err(CliError::export)?;
-    fs::write(out.join("comparison.llm.json"), llm).map_err(CliError::io)?;
     let html = export_result_debug_html(result);
-    fs::write(out.join("comparison.html"), html).map_err(CliError::io)?;
-    let jsonl = fs::File::create(out.join("comparison.rows.jsonl")).map_err(CliError::io)?;
-    write_result_json_lines(result, jsonl).map_err(CliError::export)?;
+    let mut jsonl = Vec::new();
+    write_result_json_lines(result, &mut jsonl).map_err(CliError::export)?;
     let manifest = serde_json::json!({
         "schema": "spanfold.audit.bundle",
         "schemaVersion": 0,
@@ -41,7 +36,23 @@ pub(super) fn write_audit_bundle(
         }
     });
     let manifest = serde_json::to_string_pretty(&manifest).map_err(CliError::export)?;
-    fs::write(out.join("manifest.json"), &manifest).map_err(CliError::io)?;
+    let paths = [
+        out.join("comparison.json"),
+        out.join("comparison.md"),
+        out.join("comparison.llm.json"),
+        out.join("comparison.html"),
+        out.join("comparison.rows.jsonl"),
+        out.join("manifest.json"),
+    ];
+    let artifacts = [
+        (paths[0].as_path(), json.as_bytes()),
+        (paths[1].as_path(), markdown.as_bytes()),
+        (paths[2].as_path(), llm.as_bytes()),
+        (paths[3].as_path(), html.as_bytes()),
+        (paths[4].as_path(), jsonl.as_slice()),
+        (paths[5].as_path(), manifest.as_bytes()),
+    ];
+    write_export_files_atomically(&artifacts).map_err(CliError::io)?;
     println!("{manifest}");
     Ok(())
 }
