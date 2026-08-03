@@ -176,6 +176,53 @@ fn import_events_accepts_csv_with_header_row() {
 }
 
 #[test]
+fn import_events_reports_missing_event_file_as_io_error() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("missing-events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    write_event_import_map(&map);
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("\"code\":\"io\""));
+}
+
+#[test]
+fn import_events_reports_malformed_json_as_input_error() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    write_event_import_files(&events, &map);
+    fs::write(&events, "{not json}\n").expect("events file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("\"code\":\"input\""));
+}
+
+#[test]
 fn audit_events_writes_artifact_bundle() {
     let workspace = tempdir().expect("tempdir");
     let events = workspace.path().join("events.jsonl");
@@ -285,6 +332,10 @@ fn write_event_import_files(events: &PathBuf, map: &PathBuf) {
         .join("\n"),
     )
     .expect("events file");
+    write_event_import_map(map);
+}
+
+fn write_event_import_map(map: &PathBuf) {
     fs::write(
         map,
         r#"{
