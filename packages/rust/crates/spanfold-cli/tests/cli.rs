@@ -257,6 +257,43 @@ fn import_events_reports_malformed_json_as_input_error() {
 }
 
 #[test]
+fn import_events_rejects_invalid_map_path_before_opening_events() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("missing-events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    fs::write(
+        &map,
+        r#"{
+  "source": "metadata[source",
+  "position": "position",
+  "windows": [{
+    "name": "Online",
+    "key": "key",
+    "active": { "field": "active", "isTrue": true }
+  }]
+}"#,
+    )
+    .expect("map file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("\"code\":\"input\""))
+        .stderr(predicate::str::contains("metadata[source"))
+        .stderr(predicate::str::contains("unmatched opening bracket"));
+}
+
+#[test]
 fn audit_events_writes_artifact_bundle() {
     let workspace = tempdir().expect("tempdir");
     let events = workspace.path().join("events.jsonl");
