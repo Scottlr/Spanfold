@@ -92,6 +92,26 @@ public sealed class LeadLagComparatorTests
     }
 
     [Fact]
+    public void EquidistantTransitionsSelectSmallestRecordId()
+    {
+        var earlier = new ClosedWindow("DeviceOffline", "device-1", 8, 20, Source: "comparison");
+        var later = new ClosedWindow("DeviceOffline", "device-1", 12, 20, Source: "comparison");
+        var expected = string.CompareOrdinal(earlier.Id.Value, later.Id.Value) <= 0
+            ? earlier.Id
+            : later.Id;
+
+        var result = InvokeRuntime(Prepared(
+            "lead-lag:Start:ProcessingPosition:5",
+            new NormalizedInput("DeviceOffline", "device-1", 10, 11, ComparisonSide.Target, "target"),
+            new NormalizedInput("DeviceOffline", "device-1", 8, 20, ComparisonSide.Against, "comparison"),
+            new NormalizedInput("DeviceOffline", "device-1", 12, 20, ComparisonSide.Against, "comparison")));
+
+        var row = Assert.Single(result.LeadLagRows);
+        Assert.Equal(expected, row.ComparisonRecordId);
+        Assert.Equal(2, Math.Abs(row.DeltaMagnitude.GetValueOrDefault()));
+    }
+
+    [Fact]
     public void BuilderRequiresExplicitLeadLagOptions()
     {
         var pipeline = EventPipeline

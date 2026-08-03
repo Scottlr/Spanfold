@@ -77,6 +77,12 @@ public sealed class AsOfComparatorTests
     [Fact]
     public void AmbiguousSameDistanceMatchIsDeterministicAndDiagnosed()
     {
+        var earlier = new ClosedWindow("Quote", "selection-1", 8, 20, Source: "quote");
+        var later = new ClosedWindow("Quote", "selection-1", 12, 20, Source: "quote");
+        var expected = string.CompareOrdinal(earlier.Id.Value, later.Id.Value) <= 0
+            ? earlier.Id
+            : later.Id;
+
         var result = InvokeRuntime(Prepared(
             "asof:Nearest:ProcessingPosition:5",
             new NormalizedInput("Quote", "selection-1", 10, 11, ComparisonSide.Target, "trade"),
@@ -86,8 +92,53 @@ public sealed class AsOfComparatorTests
         var row = Assert.Single(result.AsOfRows);
         Assert.Equal(AsOfMatchStatus.Ambiguous, row.Status);
         Assert.Equal(2, row.DistanceMagnitude);
+        Assert.Equal(expected, row.MatchedRecordId);
         Assert.Contains(result.Diagnostics, diagnostic =>
             diagnostic.Code == ComparisonPlanValidationCode.AmbiguousAsOfMatch);
+    }
+
+    [Fact]
+    public void ExactDuplicateRunSelectsSmallestRecordIdAndIsAmbiguous()
+    {
+        var first = new ClosedWindow("Quote", "selection-1", 10, 20, Source: "quote");
+        var second = new ClosedWindow("Quote", "selection-1", 10, 21, Source: "quote");
+        var expected = string.CompareOrdinal(first.Id.Value, second.Id.Value) <= 0
+            ? first.Id
+            : second.Id;
+
+        var result = InvokeRuntime(Prepared(
+            "asof:Previous:ProcessingPosition:5",
+            new NormalizedInput("Quote", "selection-1", 10, 11, ComparisonSide.Target, "trade"),
+            new NormalizedInput("Quote", "selection-1", 10, 20, ComparisonSide.Against, "quote"),
+            new NormalizedInput("Quote", "selection-1", 10, 21, ComparisonSide.Against, "quote")));
+
+        var row = Assert.Single(result.AsOfRows);
+        Assert.Equal(AsOfMatchStatus.Ambiguous, row.Status);
+        Assert.Equal(0, row.DistanceMagnitude);
+        Assert.Equal(expected, row.MatchedRecordId);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == ComparisonPlanValidationCode.AmbiguousAsOfMatch);
+    }
+
+    [Fact]
+    public void SaturatedPreviousDistancesSelectSmallestRecordIdAndAreAmbiguous()
+    {
+        var first = new ClosedWindow("Quote", "selection-1", 1, 3, Source: "quote");
+        var second = new ClosedWindow("Quote", "selection-1", 2, 4, Source: "quote");
+        var expected = string.CompareOrdinal(first.Id.Value, second.Id.Value) <= 0
+            ? first.Id
+            : second.Id;
+
+        var result = InvokeRuntime(Prepared(
+            $"asof:Previous:ProcessingPosition:{long.MaxValue}",
+            new NormalizedInput("Quote", "selection-1", 3, 5, ComparisonSide.Target, "trade", long.MaxValue, long.MaxValue),
+            new NormalizedInput("Quote", "selection-1", 1, 3, ComparisonSide.Against, "quote", long.MinValue, long.MinValue + 1),
+            new NormalizedInput("Quote", "selection-1", 2, 4, ComparisonSide.Against, "quote", long.MinValue + 1, long.MinValue + 2)));
+
+        var row = Assert.Single(result.AsOfRows);
+        Assert.Equal(AsOfMatchStatus.Ambiguous, row.Status);
+        Assert.Equal(long.MaxValue, row.DistanceMagnitude);
+        Assert.Equal(expected, row.MatchedRecordId);
     }
 
     [Fact]
@@ -137,14 +188,16 @@ public sealed class AsOfComparatorTests
                 Source: source);
 
             selected.Add(window);
+            var normalizedStart = input.NormalizedStartPosition ?? input.StartPosition;
+            var normalizedEnd = input.NormalizedEndPosition ?? input.EndPosition;
             normalized.Add(new NormalizedWindowRecord(
                 window,
                 window.Id,
                 input.SelectorName,
                 input.Side,
                 TemporalRange.Closed(
-                    TemporalPoint.ForPosition(input.StartPosition),
-                    TemporalPoint.ForPosition(input.EndPosition))));
+                    TemporalPoint.ForPosition(normalizedStart),
+                    TemporalPoint.ForPosition(normalizedEnd))));
         }
 
         return new PreparedComparison(plan, [], selected.ToArray(), [], normalized.ToArray());
@@ -166,5 +219,7 @@ public sealed class AsOfComparatorTests
         long StartPosition,
         long EndPosition,
         ComparisonSide Side,
-        string SelectorName);
+        string SelectorName,
+        long? NormalizedStartPosition = null,
+        long? NormalizedEndPosition = null);
 }

@@ -625,44 +625,75 @@ internal static class ComparisonRuntime
     {
         ambiguous = false;
         futureRejected = null;
-        TransitionPoint? best = null;
-        long? bestDistance = null;
 
-        for (var i = 0; i < candidates.Count; i++)
+        var lowerBound = LowerBound(candidates, targetPoint);
+        if (options.Direction == AsOfDirection.Previous)
         {
-            var candidate = candidates[i];
-            var comparison = candidate.Point.CompareTo(targetPoint);
-            if (options.Direction == AsOfDirection.Previous && comparison > 0)
+            var hasExactPoint = lowerBound < candidates.Count
+                && candidates[lowerBound].Point.CompareTo(targetPoint) == 0;
+            var upperBound = hasExactPoint
+                ? UpperBound(candidates, targetPoint, lowerBound)
+                : lowerBound;
+            if (upperBound == 0)
             {
-                futureRejected ??= candidate;
-                continue;
+                futureRejected = candidates[0];
+                return null;
             }
 
-            if (options.Direction == AsOfDirection.Next && comparison < 0)
-            {
-                continue;
-            }
-
-            var distance = GetAbsoluteDistance(targetPoint, candidate.Point, options.Axis);
-            if (!bestDistance.HasValue || distance < bestDistance.Value)
-            {
-                best = candidate;
-                bestDistance = distance;
-                ambiguous = false;
-                continue;
-            }
-
-            if (distance == bestDistance.Value)
-            {
-                ambiguous = true;
-                if (best.HasValue && string.CompareOrdinal(candidate.RecordId.Value, best.Value.RecordId.Value) < 0)
-                {
-                    best = candidate;
-                }
-            }
+            var runStart = hasExactPoint
+                ? lowerBound
+                : LowerBound(candidates, candidates[upperBound - 1].Point);
+            return FindClosestPrevious(candidates, targetPoint, options.Axis, runStart, upperBound, out ambiguous);
         }
 
-        return best;
+        if (options.Direction == AsOfDirection.Next)
+        {
+            return lowerBound < candidates.Count
+                ? FindClosestNext(candidates, targetPoint, options.Axis, lowerBound, out ambiguous)
+                : null;
+        }
+
+        return FindNearest(candidates, targetPoint, options.Axis, lowerBound, out ambiguous);
+    }
+
+    private static TransitionPoint FindClosestPrevious(
+        List<TransitionPoint> candidates,
+        TemporalPoint targetPoint,
+        TemporalAxis axis,
+        int runStart,
+        int upperBound,
+        out bool ambiguous)
+    {
+        var point = candidates[upperBound - 1].Point;
+        var distance = GetAbsoluteDistance(targetPoint, point, axis);
+        if (distance == long.MaxValue)
+        {
+            ambiguous = upperBound > 1;
+            return FindSmallestRecordId(candidates, 0, upperBound);
+        }
+
+        ambiguous = upperBound - runStart > 1;
+        return candidates[runStart];
+    }
+
+    private static TransitionPoint FindClosestNext(
+        List<TransitionPoint> candidates,
+        TemporalPoint targetPoint,
+        TemporalAxis axis,
+        int lowerBound,
+        out bool ambiguous)
+    {
+        var point = candidates[lowerBound].Point;
+        var runEnd = UpperBound(candidates, point, lowerBound);
+        var distance = GetAbsoluteDistance(targetPoint, point, axis);
+        if (distance == long.MaxValue)
+        {
+            ambiguous = candidates.Count - lowerBound > 1;
+            return FindSmallestRecordId(candidates, lowerBound, candidates.Count);
+        }
+
+        ambiguous = runEnd - lowerBound > 1;
+        return candidates[lowerBound];
     }
 
     private static bool TryGetTransitionPoint(
@@ -691,19 +722,141 @@ internal static class ComparisonRuntime
         TemporalPoint targetPoint,
         TemporalAxis axis)
     {
-        var best = candidates[0];
-        var bestDistance = GetAbsoluteDistance(targetPoint, best.Point, axis);
+        return FindNearest(candidates, targetPoint, axis, LowerBound(candidates, targetPoint), out _);
+    }
 
-        for (var i = 1; i < candidates.Count; i++)
+    private static TransitionPoint FindNearest(
+        List<TransitionPoint> candidates,
+        TemporalPoint targetPoint,
+        TemporalAxis axis,
+        int lowerBound,
+        out bool ambiguous)
+    {
+        if (lowerBound < candidates.Count && candidates[lowerBound].Point.CompareTo(targetPoint) == 0)
+        {
+            var runEnd = UpperBound(candidates, targetPoint, lowerBound);
+            ambiguous = runEnd - lowerBound > 1;
+            return candidates[lowerBound];
+        }
+
+        TransitionPoint? previous = null;
+        var previousRunStart = 0;
+        if (lowerBound > 0)
+        {
+            var previousPoint = candidates[lowerBound - 1].Point;
+            previousRunStart = LowerBound(candidates, previousPoint);
+            previous = candidates[previousRunStart];
+        }
+
+        TransitionPoint? next = lowerBound < candidates.Count
+            ? candidates[lowerBound]
+            : null;
+
+        var previousDistance = previous.HasValue
+            ? GetAbsoluteDistance(targetPoint, previous.Value.Point, axis)
+            : long.MaxValue;
+        var nextDistance = next.HasValue
+            ? GetAbsoluteDistance(targetPoint, next.Value.Point, axis)
+            : long.MaxValue;
+        var bestDistance = Math.Min(previousDistance, nextDistance);
+
+        // Saturation can make every candidate on an eligible side equally distant.
+        if (bestDistance == long.MaxValue)
+        {
+            ambiguous = candidates.Count > 1;
+            return FindSmallestRecordId(candidates, 0, candidates.Count);
+        }
+
+        if (!previous.HasValue)
+        {
+            var nextCandidate = next.GetValueOrDefault();
+            var nextRunEnd = UpperBound(candidates, nextCandidate.Point, lowerBound);
+            ambiguous = nextRunEnd - lowerBound > 1;
+            return nextCandidate;
+        }
+
+        if (!next.HasValue)
+        {
+            ambiguous = lowerBound - previousRunStart > 1;
+            return previous.Value;
+        }
+
+        if (previousDistance < nextDistance)
+        {
+            ambiguous = lowerBound - previousRunStart > 1;
+            return previous.Value;
+        }
+
+        if (nextDistance < previousDistance)
+        {
+            var nextRunEnd = UpperBound(candidates, next.Value.Point, lowerBound);
+            ambiguous = nextRunEnd - lowerBound > 1;
+            return next.Value;
+        }
+
+        var previousRunCount = lowerBound - previousRunStart;
+        var nextRunCount = UpperBound(candidates, next.Value.Point, lowerBound) - lowerBound;
+        ambiguous = previousRunCount + nextRunCount > 1;
+        return string.CompareOrdinal(previous.Value.RecordId.Value, next.Value.RecordId.Value) <= 0
+            ? previous.Value
+            : next.Value;
+    }
+
+    private static int LowerBound(List<TransitionPoint> candidates, TemporalPoint point)
+    {
+        var lower = 0;
+        var upper = candidates.Count;
+        while (lower < upper)
+        {
+            var middle = lower + ((upper - lower) / 2);
+            if (candidates[middle].Point.CompareTo(point) < 0)
+            {
+                lower = middle + 1;
+            }
+            else
+            {
+                upper = middle;
+            }
+        }
+
+        return lower;
+    }
+
+    private static int UpperBound(
+        List<TransitionPoint> candidates,
+        TemporalPoint point,
+        int lowerBound)
+    {
+        var lower = lowerBound;
+        var upper = candidates.Count;
+        while (lower < upper)
+        {
+            var middle = lower + ((upper - lower) / 2);
+            if (candidates[middle].Point.CompareTo(point) <= 0)
+            {
+                lower = middle + 1;
+            }
+            else
+            {
+                upper = middle;
+            }
+        }
+
+        return lower;
+    }
+
+    private static TransitionPoint FindSmallestRecordId(
+        List<TransitionPoint> candidates,
+        int startIndex,
+        int endIndex)
+    {
+        var best = candidates[startIndex];
+        for (var i = startIndex + 1; i < endIndex; i++)
         {
             var candidate = candidates[i];
-            var distance = GetAbsoluteDistance(targetPoint, candidate.Point, axis);
-            if (distance < bestDistance
-                || (distance == bestDistance
-                    && string.CompareOrdinal(candidate.RecordId.Value, best.RecordId.Value) < 0))
+            if (string.CompareOrdinal(candidate.RecordId.Value, best.RecordId.Value) < 0)
             {
                 best = candidate;
-                bestDistance = distance;
             }
         }
 
