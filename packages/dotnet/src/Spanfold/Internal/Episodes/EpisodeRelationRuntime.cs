@@ -31,11 +31,22 @@ internal static class EpisodeRelationRuntime
 
         var targetEdges = CreateEdges(targetSet.Episodes.Count);
         var againstEdges = CreateEdges(againstSet.Episodes.Count);
+        var candidatesByCompatibility = CreateCandidateIndex(
+            againstSet.Episodes,
+            targetSet.KeyComparers);
         for (var targetIndex = 0; targetIndex < targetSet.Episodes.Count; targetIndex++)
         {
             var target = targetSet.Episodes[targetIndex];
-            for (var againstIndex = 0; againstIndex < againstSet.Episodes.Count; againstIndex++)
+            if (!candidatesByCompatibility.TryGetValue(
+                CompatibilityKey.For(target),
+                out var candidateIndices))
             {
+                continue;
+            }
+
+            for (var candidateIndex = 0; candidateIndex < candidateIndices.Count; candidateIndex++)
+            {
+                var againstIndex = candidateIndices[candidateIndex];
                 var against = againstSet.Episodes[againstIndex];
                 if (!IsCompatible(target, against, targetSet.KeyComparers)
                     || !HasFragmentEdge(target, against, plan.Relation.ToleranceMagnitude))
@@ -92,6 +103,28 @@ internal static class EpisodeRelationRuntime
         }
 
         return edges;
+    }
+
+    private static Dictionary<CompatibilityKey, List<int>> CreateCandidateIndex(
+        IReadOnlyList<Episode> episodes,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
+    {
+        var index = new Dictionary<CompatibilityKey, List<int>>(
+            episodes.Count,
+            new CompatibilityKeyComparer(keyComparers));
+        for (var episodeIndex = 0; episodeIndex < episodes.Count; episodeIndex++)
+        {
+            var key = CompatibilityKey.For(episodes[episodeIndex]);
+            if (!index.TryGetValue(key, out var candidates))
+            {
+                candidates = [];
+                index.Add(key, candidates);
+            }
+
+            candidates.Add(episodeIndex);
+        }
+
+        return index;
     }
 
     private static void EnsureDisjointLineage(
@@ -665,6 +698,60 @@ internal static class EpisodeRelationRuntime
     }
 
     private readonly record struct GraphNode(bool IsTarget, int Index);
+
+    private readonly record struct CompatibilityKey(
+        string WindowName,
+        object Key,
+        object? Partition,
+        TemporalAxis TimeAxis,
+        string? TimestampClock)
+    {
+        internal static CompatibilityKey For(Episode episode)
+        {
+            return new CompatibilityKey(
+                episode.WindowName,
+                episode.Key,
+                episode.Partition,
+                episode.TimeAxis,
+                episode.Envelope.Start.Clock);
+        }
+    }
+
+    private sealed class CompatibilityKeyComparer(
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
+        : IEqualityComparer<CompatibilityKey>
+    {
+        public bool Equals(CompatibilityKey x, CompatibilityKey y)
+        {
+            if (!string.Equals(x.WindowName, y.WindowName, StringComparison.Ordinal)
+                || !EqualityComparer<object?>.Default.Equals(x.Partition, y.Partition)
+                || x.TimeAxis != y.TimeAxis
+                || !string.Equals(x.TimestampClock, y.TimestampClock, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return GetKeyComparer(x.WindowName).Equals(x.Key, y.Key);
+        }
+
+        public int GetHashCode(CompatibilityKey obj)
+        {
+            var hash = new HashCode();
+            hash.Add(obj.WindowName, StringComparer.Ordinal);
+            hash.Add(obj.Key, GetKeyComparer(obj.WindowName));
+            hash.Add(obj.Partition, EqualityComparer<object?>.Default);
+            hash.Add(obj.TimeAxis);
+            hash.Add(obj.TimestampClock, StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
+
+        private IEqualityComparer<object> GetKeyComparer(string windowName)
+        {
+            return keyComparers.TryGetValue(windowName, out var configured)
+                ? configured
+                : EqualityComparer<object>.Default;
+        }
+    }
 
     private readonly record struct MagnitudeInterval(long Start, long End);
 }

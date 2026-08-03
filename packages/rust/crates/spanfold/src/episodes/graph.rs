@@ -1,4 +1,7 @@
-use std::{cmp::Ordering, collections::BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::{ComparisonFinality, TemporalAxis, TemporalPoint, WindowHistory};
 
@@ -19,8 +22,14 @@ pub(crate) fn run(
 
     let mut target_edges = vec![Vec::new(); target_set.episodes().len()];
     let mut against_edges = vec![Vec::new(); against_set.episodes().len()];
+    let candidates_by_compatibility = candidate_index(against_set.episodes());
     for (target_index, target) in target_set.episodes().iter().enumerate() {
-        for (against_index, against) in against_set.episodes().iter().enumerate() {
+        let Some(candidate_indices) = candidates_by_compatibility.get(&compatibility_key(target))
+        else {
+            continue;
+        };
+        for &against_index in candidate_indices {
+            let against = &against_set.episodes()[against_index];
             if compatible(target, against)
                 && fragments_relate(target, against, plan.relation.tolerance().magnitude())
             {
@@ -98,6 +107,38 @@ fn ensure_disjoint(
         });
     }
     Ok(())
+}
+
+type CompatibilityKey<'a> = (
+    &'a str,
+    &'a str,
+    Option<&'a str>,
+    TemporalAxis,
+    Option<&'a str>,
+);
+
+fn candidate_index(episodes: &[Episode]) -> BTreeMap<CompatibilityKey<'_>, Vec<usize>> {
+    let mut index = BTreeMap::<CompatibilityKey<'_>, Vec<usize>>::new();
+    for (episode_index, episode) in episodes.iter().enumerate() {
+        index
+            .entry(compatibility_key(episode))
+            .or_default()
+            .push(episode_index);
+    }
+    index
+}
+
+fn compatibility_key(episode: &Episode) -> CompatibilityKey<'_> {
+    let timestamp_clock = (episode.time_axis() == TemporalAxis::Timestamp)
+        .then(|| episode.envelope().start_ref().clock())
+        .flatten();
+    (
+        episode.window_name(),
+        episode.key(),
+        episode.partition(),
+        episode.time_axis(),
+        timestamp_clock,
+    )
 }
 
 fn compatible(target: &Episode, against: &Episode) -> bool {
