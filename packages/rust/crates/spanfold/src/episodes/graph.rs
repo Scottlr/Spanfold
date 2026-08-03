@@ -3,7 +3,7 @@ use std::{cmp::Ordering, collections::BTreeSet};
 use crate::{ComparisonFinality, TemporalAxis, TemporalPoint, WindowHistory};
 
 use super::{
-    Episode, EpisodeComparisonError, EpisodeComparisonPlan, EpisodeComparisonResult,
+    Episode, EpisodeComparisonError, EpisodeComparisonPlan, EpisodeComparisonResult, EpisodeError,
     EpisodeFormationPlan, EpisodeRelation, EpisodeRelationKind, EpisodeSet, formation, metrics,
 };
 
@@ -13,8 +13,8 @@ pub(crate) fn run(
 ) -> Result<EpisodeComparisonResult, EpisodeComparisonError> {
     let target_plan = formation_plan(&plan, true);
     let against_plan = formation_plan(&plan, false);
-    let target_set = formation::run(history, target_plan)?;
-    let against_set = formation::run(history, against_plan)?;
+    let target_set = formation::run(history, target_plan).map_err(comparison_formation_error)?;
+    let against_set = formation::run(history, against_plan).map_err(comparison_formation_error)?;
     ensure_disjoint(&target_set, &against_set, &plan)?;
 
     let mut target_edges = vec![Vec::new(); target_set.episodes().len()];
@@ -40,13 +40,22 @@ pub(crate) fn run(
         plan.relation.tolerance().magnitude(),
         horizon.as_ref(),
     )?;
+    let summary = super::summary::summarize_comparison(&target_set, &against_set, &relations)?;
     Ok(EpisodeComparisonResult {
         plan,
         target_episodes: target_set,
         against_episodes: against_set,
         relations,
+        summary,
         evaluation_horizon: horizon,
     })
+}
+
+fn comparison_formation_error(error: EpisodeError) -> EpisodeComparisonError {
+    match error {
+        EpisodeError::MagnitudeOverflow => EpisodeComparisonError::MagnitudeOverflow,
+        error => error.into(),
+    }
 }
 
 fn formation_plan(plan: &EpisodeComparisonPlan, target: bool) -> EpisodeFormationPlan {

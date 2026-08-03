@@ -5,7 +5,9 @@ mod graph;
 mod identity;
 mod metrics;
 mod model;
+mod queries;
 mod relation;
+mod summary;
 
 pub use formation::EpisodeFormationBuilder;
 pub use model::{
@@ -16,6 +18,10 @@ pub use relation::{
     EpisodeComparisonBuilder, EpisodeComparisonError, EpisodeComparisonPlan,
     EpisodeComparisonResult, EpisodeRelation, EpisodeRelationKind, EpisodeRelationMetrics,
     EpisodeRelationPolicy,
+};
+pub use summary::{
+    EpisodeComparisonSummary, EpisodeDistributionSummary, EpisodeReferenceScorecard,
+    EpisodeSetSummary,
 };
 
 use crate::WindowHistory;

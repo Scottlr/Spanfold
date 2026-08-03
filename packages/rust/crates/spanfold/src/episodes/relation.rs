@@ -263,6 +263,7 @@ pub struct EpisodeComparisonResult {
     pub(crate) target_episodes: EpisodeSet,
     pub(crate) against_episodes: EpisodeSet,
     pub(crate) relations: Vec<EpisodeRelation>,
+    pub(crate) summary: super::EpisodeComparisonSummary,
     pub(crate) evaluation_horizon: Option<TemporalPoint>,
 }
 
@@ -291,6 +292,11 @@ impl EpisodeComparisonResult {
     #[must_use]
     pub fn relations(&self) -> &[EpisodeRelation] {
         &self.relations
+    }
+    /// Returns the materialized neutral comparison summary.
+    #[must_use]
+    pub const fn summary(&self) -> &super::EpisodeComparisonSummary {
+        &self.summary
     }
     /// Returns the live or configured evaluation horizon, when present.
     #[must_use]

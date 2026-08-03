@@ -69,10 +69,11 @@ pub use comparison::{
 };
 pub use episodes::{
     Episode, EpisodeComparisonBuilder, EpisodeComparisonError, EpisodeComparisonPlan,
-    EpisodeComparisonResult, EpisodeError, EpisodeFormationBuilder, EpisodeFormationPlan,
-    EpisodeFormationPolicy, EpisodeFragment, EpisodeId, EpisodeNormalizationFailure,
-    EpisodeRelation, EpisodeRelationKind, EpisodeRelationMetrics, EpisodeRelationPolicy,
-    EpisodeSet, TemporalTolerance,
+    EpisodeComparisonResult, EpisodeComparisonSummary, EpisodeDistributionSummary, EpisodeError,
+    EpisodeFormationBuilder, EpisodeFormationPlan, EpisodeFormationPolicy, EpisodeFragment,
+    EpisodeId, EpisodeNormalizationFailure, EpisodeReferenceScorecard, EpisodeRelation,
+    EpisodeRelationKind, EpisodeRelationMetrics, EpisodeRelationPolicy, EpisodeSet,
+    EpisodeSetSummary, TemporalTolerance,
 };
 pub use explain::ComparisonExplanationFormat;
 pub use export::{
