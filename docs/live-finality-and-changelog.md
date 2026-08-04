@@ -48,6 +48,18 @@ view from a prior view plus its changelog entries.
 This is useful for dashboards, agents, notebooks, and audit logs that need to
 explain why a live answer changed.
 
+## Late event corrections
+
+The .NET `BoundedWatermarkTracker` can sit before an application-owned pipeline
+when a source provides trustworthy per-lane event-time progress. A corrected
+decision identifies both the replacement revision and the accepted revision to
+retract. After applying that source correction, produce a new live snapshot and
+use `ComparisonChangelog.Create(previous, current)` to derive row-level finality
+changes. The watermark tracker does not mutate comparison rows directly.
+
+See [bounded watermarks and late correction](bounded-watermarks.md) for the
+acceptance boundaries, correction horizon, and objective limitations.
+
 ## Fixture Live Horizon
 
 CLI fixture plans can include `liveHorizonPosition`:

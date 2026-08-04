@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a caller-driven .NET bounded-watermark tracker with per-lane event-time
+  progress, deterministic buffering, bounded late correction, and stable
+  revision/retraction references for downstream changelog and finality flows.
 - Add .NET and Rust episode formation with position or timestamp normalization,
   side-local gap stitching, retained fragments, envelopes, and active magnitude.
 - Add complete component-graph episode relations for one-to-one, split, merge,
