@@ -96,8 +96,8 @@ Install-Package Spanfold.Testing</code></pre>
             </article>
             <article>
               <h3>Project file</h3>
-              <pre><code>&lt;PackageReference Include="Spanfold" Version="0.1.0" /&gt;
-&lt;PackageReference Include="Spanfold.Testing" Version="0.1.0" /&gt;</code></pre>
+              <pre><code>&lt;PackageReference Include="Spanfold" Version="0.2.0-preview.1" /&gt;
+&lt;PackageReference Include="Spanfold.Testing" Version="0.2.0-preview.1" /&gt;</code></pre>
             </article>
           </div>
         </div>
@@ -110,14 +110,14 @@ cargo test --workspace</code></pre>
             </article>
             <article>
               <h3>Library</h3>
-              <pre><code>cargo add spanfold@0.1.0</code></pre>
+              <pre><code>cargo add spanfold@0.1.1</code></pre>
             </article>
             <article>
               <h3>CLI</h3>
-              <pre><code>cargo install spanfold-cli --version 0.1.0</code></pre>
+              <pre><code>cargo install spanfold-cli --version 0.1.1</code></pre>
             </article>
           </div>
-          <p class="language-note">Rust supports the core API, selector-backed comparisons, exports, audit bundles, and CLI workflows.</p>
+          <p class="language-note">Rust supports the core API, selector-backed comparisons, Episode analytics, exports, audit bundles, and CLI workflows.</p>
         </div>
       </div>
     </section>
@@ -292,9 +292,9 @@ dotnet add package Spanfold.Testing</code></pre>
             <p>`Spanfold.Testing` is optional. It provides fixtures, snapshots, and assertions for consumer tests.</p>
           </div>
           <div class="language-panel" data-language="rust">
-            <pre><code>cd packages/rust
-cargo test --workspace</code></pre>
-            <p class="language-note">The Rust package supports the core comparison API, selector-backed plans, deterministic exports, audit bundles, and CLI workflows.</p>
+            <pre><code>cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1</code></pre>
+            <p class="language-note">The Rust package supports the core comparison API, selector-backed plans, Episode analytics, deterministic exports, audit bundles, and CLI workflows.</p>
           </div>
         </article>
         <article>

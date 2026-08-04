@@ -52,8 +52,9 @@ nearest pair.
 Fragments are authoritative for active magnitude. The envelope spans elapsed
 time from the earliest fragment start to the latest fragment end. Neutral
 episode summaries keep target/against language; use `AsReference()` only when
-the target side is deliberately the reference. The episode API is a .NET
-preview surface and is not currently available in Rust.
+the target side is deliberately the reference. The API is available through
+`Spanfold.Episodes` in the .NET preview and through `WindowHistory::form_episodes`
+and `WindowHistory::compare_episodes` in Rust.
 
 ## Temporal Model
 

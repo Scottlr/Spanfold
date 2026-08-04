@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add Episode formation over normalized window evidence, same-side gap
+  stitching, exhaustive cross-side relation graphs, neutral summaries, and
+  explicit reference scorecards.
+
 ## 0.1.1
 
 - Give the library and CLI distinct crates.io documentation focused on their

@@ -14,12 +14,12 @@ When a predicate changes — a service goes down, a threshold is crossed, a stat
 
 ## Install the preview
 
-Install the current .NET preview from NuGet.org, or use the Rust crate from a
-repository checkout:
+Install the current .NET preview from NuGet.org or the Rust crate from
+crates.io:
 
 ```bash
 dotnet add package Spanfold --version 0.2.0-preview.1
-cargo add spanfold@0.1.0
+cargo add spanfold@0.1.1
 ```
 
 ## Quick Start
@@ -111,17 +111,18 @@ var result = pipeline.History
 
 ---
 
-## Predicates Are Not Limited To Booleans
+## Active Predicates Express More Than Boolean Fields
 
-A window opens when a predicate changes. The predicate can evaluate anything — the window tracks the period it held.
+A window opens when its active predicate changes from `false` to `true` and
+closes when it changes back to `false`. The predicate itself returns a boolean,
+but it can express conditions over any event data:
 
-| Predicate type   | Example                                           |
-|------------------|---------------------------------------------------|
-| Boolean          | `isUp == true`                                    |
-| Threshold        | `cpuPercent > 80`                                 |
-| Enum / status    | `status == "degraded"`                            |
-| Numeric range    | `latencyMs >= 500 && latencyMs < 2000`            |
-| Any value change | alert level changed, model output changed, annotation updated |
+| Condition type | Example |
+|----------------|---------|
+| Boolean field | `isUp == true` |
+| Threshold | `cpuPercent > 80` |
+| Enum / status | `status == "degraded"` |
+| Numeric range | `latencyMs >= 500 && latencyMs < 2000` |
 
 ---
 
@@ -175,7 +176,7 @@ Auditing a past decision means using only what was knowable at the time — not 
 
 **Comparisons** — a staged plan: target side, comparison side, scope, normalization, and comparator families. Produces structured temporal evidence.
 
-**Episodes (.NET preview)** — stitch nearby windows on each side into occurrences, then classify the complete relation graph as one-to-one, split, merge, complex, or unmatched. Fragments remain the active evidence; episode envelopes describe elapsed occurrence extent. This layer is currently .NET-only and is not part of the Rust package.
+**Episodes (.NET preview and Rust)** — stitch nearby windows on each side into occurrences, then classify the complete relation graph as one-to-one, split, merge, complex, or unmatched. Fragments remain the active evidence; episode envelopes describe elapsed occurrence extent.
 
 **Known-at safety** — separates when a state happened from when it was observable. Prevents future leakage in backtests and replays.
 
@@ -231,14 +232,15 @@ var episodes = pipeline.History
 
 ## Rust Package
 
-A Rust 2024 package and CLI that support the core comparison contract with
+A Rust 2024 library that supports the core comparison and Episode contracts,
+plus a CLI for portable comparison and audit workflows. The library provides
 idiomatic builder methods, typed temporal records, selector-backed comparison
-plans, deterministic exports, audit bundles, testing helpers, and event-driven
-window recording.
+plans, deterministic exports, testing helpers, and event-driven window
+recording.
 
 ```bash
-cargo add spanfold@0.1.0
-cargo install spanfold-cli --version 0.1.0
+cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1
 ```
 
 → [Rust package README](packages/rust/README.md)
@@ -254,11 +256,9 @@ packages/
     tests/
     samples/
     benchmarks/
-    docs/
     Spanfold.slnx
   rust/
     crates/
-    tests/
     Cargo.toml
 docs/
   index.html
