@@ -62,13 +62,38 @@
         </p>
       </div>
       <div>
-        <pre><code>.Window("DeviceOffline", window =&gt; window
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">.Window("DeviceOffline", window =&gt; window
     .Key(update =&gt; update.DeviceId)
     .ActiveWhen(update =&gt; update.IsOffline)
     .Segment("lifecycle", lifecycle =&gt; lifecycle
         .Value(update =&gt; update.Lifecycle)
         .Child("stage", stage =&gt; stage.Value(update =&gt; update.Stage)))
     .Tag("fleet", update =&gt; update.FleetId))</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::{WindowSegment, WindowTag, for_events};
+
+let pipeline = for_events::&lt;DeviceUpdate&gt;()
+    .record_windows()
+    .track_window_with_metadata(
+        "DeviceOffline",
+        |update| update.device_id.clone(),
+        |update| update.is_offline,
+        |update| vec![
+            WindowSegment::new("lifecycle", update.lifecycle.clone())
+                .expect("static segment name"),
+            WindowSegment::new("stage", update.stage.clone())
+                .and_then(|stage| stage.with_parent("lifecycle"))
+                .expect("static segment names"),
+        ],
+        |update| vec![
+            WindowTag::new("fleet", update.fleet_id.clone())
+                .expect("static tag name"),
+        ],
+    )
+    .build()?;</code></pre>
+        </div>
       </div>
     </section>
 
@@ -111,7 +136,8 @@
         </p>
       </div>
       <div>
-        <pre><code>var escalatedCritical = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var escalatedCritical = pipeline.History
     .Compare("Escalated critical fleet QA")
     .Target("primary", s =&gt; s.Source("primary"))
     .Against("backup", s =&gt; s.Source("backup"))
@@ -122,6 +148,22 @@
         .Tag("fleet", "critical"))
     .Using(c =&gt; c.Overlap().Residual().Missing())
     .Run();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">let escalated_critical = pipeline
+    .history()
+    .compare("Escalated critical fleet QA")
+    .target_source("primary")
+    .against_source("backup")
+    .scope_window("DeviceOffline")
+    .scope_segment("lifecycle", "Incident")
+    .scope_segment("stage", "Escalated")
+    .scope_tag("fleet", "critical")
+    .overlap()
+    .residual()
+    .missing()
+    .run();</code></pre>
+        </div>
       </div>
     </section>
   </main>
