@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 
+using Spanfold.Artifacts.Comparison;
+
 namespace Spanfold.Testing;
 
 /// <summary>
@@ -89,7 +91,7 @@ public static class ContractFixtureRunner
             : ComparisonScope.Window(plan.GetProperty("scopeWindow").GetString()!);
         scope = ApplyScopeFilters(plan, scope);
 
-        return new ComparisonPlan(
+        var reducedPlan = new ComparisonPlan(
             plan.GetProperty("name").GetString()!,
             ComparisonSelector.ForSource(plan.GetProperty("targetSource").GetString()!),
             against,
@@ -97,6 +99,8 @@ public static class ContractFixtureRunner
             ComparisonNormalizationPolicy.Default,
             plan.GetProperty("comparators").EnumerateArray().Select(static comparator => comparator.GetString()!),
             plan.GetProperty("strict").GetBoolean());
+
+        return ComparisonPlanDocument.FromPlan(reducedPlan).Compile();
     }
 
     private static ComparisonSelector[] ReadAgainstSelectors(JsonElement plan)

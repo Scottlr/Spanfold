@@ -5,7 +5,21 @@ namespace Spanfold.Comparison;
 /// </summary>
 public sealed record ComparisonSelectorDescriptor
 {
-    internal ComparisonSelectorDescriptor(
+    /// <summary>
+    /// Creates a descriptor for a serializable selector operation.
+    /// </summary>
+    /// <param name="kind">The stable selector operation kind.</param>
+    /// <param name="value">The single operand, when applicable.</param>
+    /// <param name="values">The multiple operands, when applicable.</param>
+    /// <param name="startPosition">The inclusive processing-position range start.</param>
+    /// <param name="endPosition">The exclusive processing-position range end.</param>
+    /// <param name="startTime">The inclusive timestamp range start.</param>
+    /// <param name="endTime">The exclusive timestamp range end.</param>
+    /// <param name="clock">The timestamp clock identity, when applicable.</param>
+    /// <param name="activity">The cohort activity rule, when applicable.</param>
+    /// <param name="count">The cohort activity count, when applicable.</param>
+    /// <param name="children">The child descriptors for composite selectors.</param>
+    public ComparisonSelectorDescriptor(
         string kind,
         object? value = null,
         IReadOnlyList<object>? values = null,
