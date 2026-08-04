@@ -38,6 +38,26 @@ body {
   line-height: 1.62;
 }
 
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  padding: 9px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--ink);
+  font-weight: 800;
+  text-decoration: none;
+  transform: translateY(-180%);
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 a {
   color: inherit;
 }
@@ -142,6 +162,24 @@ a {
 .nav a.nav-sub-item.active {
   background: color-mix(in srgb, var(--bg-card) 78%, white);
   box-shadow: inset 3px 0 0 var(--accent-forest);
+}
+
+.nav-language {
+  margin-top: auto;
+  padding: 4px 18px 0;
+}
+
+.nav-language .nav-title {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.nav-language .language-switcher {
+  justify-content: flex-start;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--rule);
+  background: var(--bg-card);
 }
 
 .summary-list a:hover strong {
@@ -1853,6 +1891,11 @@ pre .hljs-comment {
     border: 1px solid color-mix(in srgb, var(--rule) 82%, transparent);
     border-radius: 8px;
     background: color-mix(in srgb, var(--bg-panel) 52%, transparent);
+  }
+
+  .nav-language {
+    margin-top: 0;
+    padding: 6px;
   }
 
   .nav-section:has(.nav-sub-item) {
