@@ -100,6 +100,62 @@ fn direct_history_query_filters_and_aliases() {
 }
 
 #[test]
+fn query_selectors_have_the_same_intersection_across_record_adapters() {
+    let history = segmented_history();
+    let owned = WindowHistoryQuery::new(history.windows());
+
+    let borrowed_rows = history
+        .query()
+        .where_window("DeviceOffline")
+        .where_key("device-1")
+        .where_source("provider-a")
+        .where_partition("p1")
+        .where_segment("lifecycle", "Incident")
+        .where_tag("fleet", "warehouse")
+        .closed()
+        .windows();
+    let owned_rows = owned
+        .clone()
+        .where_window("DeviceOffline")
+        .where_key("device-1")
+        .where_source("provider-a")
+        .where_partition("p1")
+        .where_segment("lifecycle", "Incident")
+        .where_tag("fleet", "warehouse")
+        .closed()
+        .windows();
+
+    assert_eq!(borrowed_rows, owned_rows);
+    assert_eq!(borrowed_rows.len(), 1);
+
+    assert!(
+        history
+            .query()
+            .where_source("provider-a")
+            .where_source("provider-b")
+            .windows()
+            .is_empty()
+    );
+    assert!(owned.closed().open().windows().is_empty());
+
+    let snapshot = history
+        .snapshot_at(TemporalPoint::position(6))
+        .expect("snapshot");
+    let snapshot_rows = snapshot
+        .query()
+        .where_window("DeviceOffline")
+        .where_source("provider-a")
+        .where_partition("p1")
+        .where_segment("lifecycle", "Incident")
+        .where_tag("fleet", "warehouse")
+        .windows();
+
+    assert_eq!(snapshot_rows.len(), 2);
+    assert_eq!(snapshot_rows[0].finality, ComparisonFinality::Final);
+    assert_eq!(snapshot_rows[1].finality, ComparisonFinality::Provisional);
+}
+
+#[test]
 fn snapshot_records_include_final_and_provisional_ranges() {
     let history = segmented_history();
     let snapshot = history
