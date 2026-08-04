@@ -282,10 +282,15 @@ spanfold suite fixture.json --suite assessment-suite.json
 spanfold audit fixture.json --out artifacts/run-42
 spanfold verify-bundle artifacts/run-42
 spanfold diff artifacts/baseline artifacts/run-42
+spanfold episodes episode-plan.json windows.jsonl --format json
 ```
 
 Portable timestamp-known-at input remains intentionally deferred until the
 .NET and Rust runtimes share one explicit clock and availability contract.
+Portable Episode analysis schema version 1 is likewise processing-position
+only; see the repository's
+[portable Episode analysis](../../features/episodes/portable-analysis.md)
+contract and shared provider/detector example.
 
 ## Query Recorded Windows Directly
 

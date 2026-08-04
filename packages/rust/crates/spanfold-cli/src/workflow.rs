@@ -89,6 +89,35 @@ pub(super) fn compare_windows_jsonl(
         return Err("audit-windows requires at least one --against value".to_owned());
     }
     let comparators = parse_comparators(options.comparators)?;
+    let history = load_window_history_jsonl(path, options.default_window_name)?;
+    let plan = ComparisonPlan::new(
+        options.name,
+        options.target,
+        AgainstSelection::Sources(options.against.to_vec()),
+        comparators,
+    )
+    .with_scope_window(options.default_window_name.map(str::to_owned))
+    .with_require_closed_windows(options.live_horizon_position.is_none())
+    .with_open_window_policy(
+        if options.live_horizon_position.is_some() {
+            OpenWindowPolicy::ClipToHorizon
+        } else {
+            OpenWindowPolicy::RequireClosed
+        },
+        options.live_horizon_position.map(TemporalPoint::position),
+    )
+    .with_strict(options.strict);
+    Ok(if let Some(horizon) = options.live_horizon_position {
+        compare_live(&history, &plan, TemporalPoint::position(horizon))
+    } else {
+        compare(&history, &plan)
+    })
+}
+
+pub(super) fn load_window_history_jsonl(
+    path: &Path,
+    default_window_name: Option<&str>,
+) -> Result<spanfold::WindowHistory, String> {
     let path_label = path.display().to_string();
     let file = fs::File::open(path).map_err(|error| error.to_string())?;
     let reader = BufReader::new(file);
@@ -103,7 +132,7 @@ pub(super) fn compare_windows_jsonl(
         let window_name = row
             .window_name
             .as_deref()
-            .or(options.default_window_name)
+            .or(default_window_name)
             .ok_or_else(|| {
                 format!(
                     "{path_label}:{}: windowName missing and --window not supplied",
@@ -130,29 +159,7 @@ pub(super) fn compare_windows_jsonl(
                 .map_err(|error| error.to_string())?;
         }
     }
-    let history = builder.build();
-    let plan = ComparisonPlan::new(
-        options.name,
-        options.target,
-        AgainstSelection::Sources(options.against.to_vec()),
-        comparators,
-    )
-    .with_scope_window(options.default_window_name.map(str::to_owned))
-    .with_require_closed_windows(options.live_horizon_position.is_none())
-    .with_open_window_policy(
-        if options.live_horizon_position.is_some() {
-            OpenWindowPolicy::ClipToHorizon
-        } else {
-            OpenWindowPolicy::RequireClosed
-        },
-        options.live_horizon_position.map(TemporalPoint::position),
-    )
-    .with_strict(options.strict);
-    Ok(if let Some(horizon) = options.live_horizon_position {
-        compare_live(&history, &plan, TemporalPoint::position(horizon))
-    } else {
-        compare(&history, &plan)
-    })
+    Ok(builder.build())
 }
 
 fn parse_comparators(values: &[String]) -> Result<Vec<Comparator>, String> {

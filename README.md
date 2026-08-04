@@ -230,6 +230,12 @@ var episodes = pipeline.History
 
 → [Episode workflow and interpretation](packages/dotnet/README.md#compare-occurrences-as-episodes)
 
+The .NET and Rust CLIs can also execute the same versioned Episode analysis
+document over flat window JSON Lines and emit aligned deterministic JSON or
+Markdown. Runtime-specific Episode IDs are not part of that portable contract.
+
+→ [Portable Episode analysis](features/episodes/portable-analysis.md)
+
 ## Rust Package
 
 A Rust 2024 library that supports the core comparison and Episode contracts,

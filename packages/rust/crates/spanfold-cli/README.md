@@ -28,6 +28,7 @@ spanfold --help
 | `audit-windows` | Audit flat window records supplied as JSON Lines |
 | `import-events` | Convert mapped JSON Lines or CSV events into window records |
 | `audit-events` | Import mapped events and produce an audit bundle in one step |
+| `episodes` | Execute a versioned Episode analysis document over window JSON Lines |
 
 Run `spanfold <command> --help` for command-specific arguments.
 
@@ -57,6 +58,15 @@ spanfold audit-events events.csv \
 
 Import mappings use field paths or CSV column names and fixed comparison
 predicates; they do not execute user-supplied code.
+
+Execute the same processing-position Episode document used by the .NET CLI:
+
+```bash
+spanfold episodes episode-plan.json windows.jsonl --format json
+```
+
+Schema version 1 is processing-position only and omits runtime-specific Episode
+IDs from its deterministic JSON and Markdown results.
 
 The CLI uses the [`spanfold`](https://crates.io/crates/spanfold) library. See the
 [repository](https://github.com/Scottlr/Spanfold) and

@@ -6,8 +6,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 use spanfold::{
     AgainstSelection, Comparator, ComparisonFinality, ComparisonPlan, ContractFixture,
-    OpenWindowPolicy, PrimitiveValue, TemporalPoint, WindowHistoryFixture, compare, compare_live,
-    export_result_debug_html, export_result_json, export_result_llm_context,
+    EpisodeAnalysisDocument, OpenWindowPolicy, PrimitiveValue, TemporalPoint, WindowHistoryFixture,
+    compare, compare_live, export_result_debug_html, export_result_json, export_result_llm_context,
     export_result_markdown, write_export_files_atomically, write_result_json_lines,
 };
 use std::{
@@ -23,7 +23,7 @@ mod workflow;
 use workflow::select_field;
 use workflow::{
     WindowAuditOptions, compare_imported_windows, compare_windows_jsonl, import_events,
-    import_events_to_file, load_fixture, write_audit_bundle,
+    import_events_to_file, load_fixture, load_window_history_jsonl, write_audit_bundle,
 };
 
 /// Preview CLI for Spanfold temporal evidence workflows.
@@ -121,6 +121,16 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Execute a portable Episode analysis document over flat window JSONL.
+    Episodes {
+        /// Episode analysis document path.
+        plan: PathBuf,
+        /// Window JSONL path.
+        windows: PathBuf,
+        /// Output format.
+        #[arg(long, default_value = "json")]
+        format: EpisodeOutputFormat,
+    },
 }
 
 /// Supported comparison output formats.
@@ -132,6 +142,15 @@ enum OutputFormat {
     Markdown,
     /// Deterministic LLM context JSON.
     LlmContext,
+}
+
+/// Supported portable Episode output formats.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum EpisodeOutputFormat {
+    /// Deterministic JSON.
+    Json,
+    /// Deterministic Markdown.
+    Markdown,
 }
 
 fn main() -> ExitCode {
@@ -318,6 +337,27 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             } else {
                 ExitCode::from(1)
             })
+        }
+        Command::Episodes {
+            plan,
+            windows,
+            format,
+        } => {
+            let json = fs::read_to_string(&plan).map_err(CliError::io)?;
+            let document =
+                EpisodeAnalysisDocument::parse_json(&json).map_err(|error| error.to_string())?;
+            let history = load_window_history_jsonl(&windows, Some(document.window_name()))?;
+            let result = document
+                .execute(&history)
+                .map_err(|error| error.to_string())?;
+            let output = match format {
+                EpisodeOutputFormat::Json => {
+                    result.export_json().map_err(|error| error.to_string())?
+                }
+                EpisodeOutputFormat::Markdown => result.export_markdown(),
+            };
+            println!("{output}");
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
