@@ -474,6 +474,13 @@ internal static class ComparisonExporter
         ComparisonSelectorDescriptor descriptor)
     {
         writer.WritePropertyName("descriptor");
+        WriteSelectorDescriptorObject(writer, descriptor);
+    }
+
+    private static void WriteSelectorDescriptorObject(
+        Utf8JsonWriter writer,
+        ComparisonSelectorDescriptor descriptor)
+    {
         writer.WriteStartObject();
         writer.WriteString("kind", descriptor.Kind);
         if (descriptor.Value is not null)
@@ -508,7 +515,7 @@ internal static class ComparisonExporter
             writer.WriteStartArray("children");
             for (var i = 0; i < descriptor.Children.Count; i++)
             {
-                WriteSelectorDescriptor(writer, descriptor.Children[i]);
+                WriteSelectorDescriptorObject(writer, descriptor.Children[i]);
             }
 
             writer.WriteEndArray();
