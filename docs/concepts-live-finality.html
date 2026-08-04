@@ -43,7 +43,8 @@
         </p>
       </div>
       <div>
-        <pre><code>var live = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var live = pipeline.History
     .Compare("Live Provider QA")
     .Target("provider-a", selector =&gt; selector.Source("provider-a"))
     .Against("provider-b", selector =&gt; selector.Source("provider-b"))
@@ -51,7 +52,31 @@
     .Using(comparators =&gt; comparators.Overlap().Residual())
     .RunLive(TemporalPoint.ForPosition(100));
 
-var provisional = live.ProvisionalRowFinalities();</code></pre>
+var provisional = live.ProvisionalRowFinalities();
+var provisionalResiduals = live.ResidualRowsWithFinality()
+    .Where(entry =&gt;
+        entry.Metadata.Finality == ComparisonFinality.Provisional);</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::{ComparisonFinality, TemporalPoint};
+
+let live = pipeline
+    .history()
+    .compare("Live Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .run_live(TemporalPoint::position(100));
+
+let provisional = live.provisional_row_finalities();
+let provisional_residuals = live
+    .residual_rows_with_finality()?
+    .filter(|entry| {
+        entry.metadata.finality == ComparisonFinality::Provisional
+    });</code></pre>
+        </div>
       </div>
     </section>
 

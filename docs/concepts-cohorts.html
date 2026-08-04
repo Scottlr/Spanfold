@@ -49,7 +49,8 @@
         </p>
       </div>
       <div>
-        <pre><code>var result = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var result = pipeline.History
     .Compare("Source A vs quorum")
     .Target("source-a", selector =&gt; selector.Source("source-a"))
     .AgainstCohort("quorum", cohort =&gt; cohort
@@ -62,6 +63,29 @@
 var uncovered = result
     .CohortEvidence()
     .Where(evidence =&gt; !evidence.IsActive);</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::CohortActivity;
+
+let result = pipeline
+    .history()
+    .compare("Source A vs quorum")
+    .target_source("source-a")
+    .against_cohort(
+        "quorum",
+        ["source-b", "source-c", "source-d"],
+        CohortActivity::AtLeast { count: 2 },
+    )
+    .scope_window("DeviceOffline")
+    .residual()
+    .coverage()
+    .run();
+
+let uncovered = result
+    .cohort_evidence()
+    .into_iter()
+    .filter(|evidence| !evidence.is_active);</code></pre>
+        </div>
       </div>
     </section>
 
@@ -121,7 +145,8 @@ var uncovered = result
         </p>
       </div>
       <div>
-        <pre><code>var inactiveSegments = result.CohortEvidence()
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var inactiveSegments = result.CohortEvidence()
     .Where(evidence =&gt; !evidence.IsActive)
     .Select(evidence =&gt; new
     {
@@ -131,6 +156,20 @@ var uncovered = result
         evidence.ActiveSources
     })
     .ToArray();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">let inactive_segments = result
+    .cohort_evidence()
+    .into_iter()
+    .filter(|evidence| !evidence.is_active)
+    .map(|evidence| (
+        evidence.rule,
+        evidence.required_count,
+        evidence.active_count,
+        evidence.active_sources,
+    ))
+    .collect::&lt;Vec&lt;_&gt;&gt;();</code></pre>
+        </div>
       </div>
     </section>
 
