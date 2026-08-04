@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Spanfold Rust API reference for pipelines, history, comparisons, episodes, exports, liveness, testing, and CLI workflows.">
+  <title>Spanfold Rust API reference</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="rust" data-language-route="rust" data-csharp-href="api-csharp.html" data-rust-href="api-rust.html">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <nav class="journey-switch" aria-label="API reference language">
+      <a href="api-csharp.html">C#</a>
+      <a href="api-rust.html" aria-current="page">Rust</a>
+    </nav>
+    <section class="api-hero">
+      <p class="eyebrow">Rust API reference</p>
+      <h1>The <code>spanfold</code> crate.</h1>
+      <p>Public Rust items for recording temporal state, querying evidence, comparing histories, analysing episodes, exporting artifacts, and testing temporal contracts. Fallible builders and ingestion return typed <code>Result</code> values.</p>
+      <pre><code class="language-bash">cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1</code></pre>
+      <p class="language-note">The crate is pre-1.0 and may change between minor releases.</p>
+    </section>
+
+    <section class="api-reference-layout">
+      <aside class="api-tree" aria-label="Rust API item tree">
+        <div class="api-tree-title">Crate items</div>
+        <details open>
+          <summary>Pipeline and recording</summary>
+          <a class="type-link" href="#Pipeline">for_events, EventPipelineBuilder</a>
+          <a class="type-link" href="#EventPipeline">EventPipeline</a>
+          <a class="type-link" href="#WindowHistory">WindowHistory and queries</a>
+          <a class="type-link" href="#Fixture">WindowHistoryFixture</a>
+        </details>
+        <details open>
+          <summary>Comparison</summary>
+          <a class="type-link" href="#ComparisonBuilder">WindowComparisonBuilder</a>
+          <a class="type-link" href="#Selectors">Selectors and scope</a>
+          <a class="type-link" href="#Comparators">Comparators</a>
+          <a class="type-link" href="#ComparisonResult">ComparisonResult and rows</a>
+          <a class="type-link" href="#AdvancedAnalytics">Source matrix and hierarchy</a>
+        </details>
+        <details open>
+          <summary>Episodes and sequences</summary>
+          <a class="type-link" href="#Episodes">Episode builders</a>
+          <a class="type-link" href="#EpisodeResults">Episode results and queries</a>
+          <a class="type-link" href="#Sequences">WindowSequenceBuilder</a>
+        </details>
+        <details>
+          <summary>Operations</summary>
+          <a class="type-link" href="#Exports">Exports and changelogs</a>
+          <a class="type-link" href="#Temporal">Temporal types and liveness</a>
+          <a class="type-link" href="#Testing">Testing helpers</a>
+          <a class="type-link" href="#Cli">spanfold-cli</a>
+        </details>
+      </aside>
+
+      <div class="api-reference-content">
+        <section class="api-member" id="Pipeline">
+          <p class="member-kind">spanfold::pipeline · crate-root re-exports</p>
+          <h2>Pipeline builders</h2>
+          <p><code>for_events::&lt;T&gt;()</code> starts an <code>EventPipelineBuilder&lt;T&gt;</code>. Recording must be enabled before history-dependent APIs are useful.</p>
+          <pre><code class="language-rust">let mut pipeline = spanfold::for_events::&lt;DeviceStatus&gt;()
+    .record_windows()
+    .with_event_time(|event| event.observed_at)
+    .track_window(
+        "DeviceOffline",
+        |event| event.device_id.clone(),
+        |event| !event.is_online,
+    )
+    .build()?;</code></pre>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>for_events::&lt;T&gt;()</code></td><td>Creates the typed entry builder.</td></tr>
+            <tr><td><code>record_windows()</code></td><td>Keeps open and closed records in <code>WindowHistory</code>.</td></tr>
+            <tr><td><code>with_event_time(...)</code></td><td>Supplies timestamps alongside processing positions.</td></tr>
+            <tr><td><code>track_window(...)</code></td><td>Adds one key selector and active predicate, then returns a buildable window pipeline.</td></tr>
+            <tr><td><code>window(...)</code></td><td>Adds another definition while retaining builder configuration.</td></tr>
+            <tr><td><code>track_window_with_options(...)</code>, <code>window_with_options(...)</code></td><td>Configure callbacks through <code>WindowOptions</code>.</td></tr>
+            <tr><td><code>build()</code>, <code>try_build()</code></td><td>Return <code>Result&lt;EventPipeline&lt;T&gt;, EventPipelineBuildError&gt;</code>.</td></tr>
+            <tr><td><code>build_or_panic()</code></td><td>Explicit panic-on-invalid-definition convenience.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="EventPipeline">
+          <p class="member-kind">struct</p>
+          <h2>EventPipeline&lt;T&gt;</h2>
+          <p>Owns window runtime state and the recorded history.</p>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>ingest(event, source, partition)</code></td><td>Advances processing position and returns <code>Result&lt;IngestionResult, IngestionError&gt;</code>.</td></tr>
+            <tr><td><code>ingest_many(...)</code></td><td>Processes an iterator through the same ingestion contract.</td></tr>
+            <tr><td><code>history()</code></td><td>Borrows the authoritative <code>WindowHistory</code>.</td></tr>
+            <tr><td><code>metadata()</code></td><td>Returns <code>EventPipelineMetadata</code> and its window definitions.</td></tr>
+            <tr><td><code>IngestionResult</code>, <code>WindowEmission</code></td><td>Expose transition emissions and whether an ingest changed a window.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="WindowHistory">
+          <p class="member-kind">spanfold::records</p>
+          <h2>WindowHistory and query types</h2>
+          <p>The history owns <code>ClosedWindow</code>, <code>OpenWindow</code>, annotations, and borrowed query access. <code>WindowRecord</code> is the common enum view.</p>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>closed_windows()</code>, <code>open_windows()</code>, <code>windows()</code></td><td>Read recorded evidence.</td></tr>
+            <tr><td><code>query()</code></td><td>Starts <code>WindowHistoryRefQuery</code> without cloning the history.</td></tr>
+            <tr><td><code>where_window(...)</code>, <code>where_key(...)</code>, <code>where_source(...)</code>, <code>where_partition(...)</code></td><td>Filter record identity.</td></tr>
+            <tr><td><code>where_segment(...)</code>, <code>where_tag(...)</code></td><td>Filter structured metadata.</td></tr>
+            <tr><td><code>closed()</code>, <code>open()</code>, <code>latest()</code></td><td>Choose window state or most recent evidence.</td></tr>
+            <tr><td><code>snapshot_at(...)</code></td><td>Creates a known-at <code>WindowHistorySnapshot</code> with its own query API.</td></tr>
+            <tr><td><code>annotate(...)</code>, <code>annotations_for(...)</code>, <code>annotations_known_at(...)</code></td><td>Add and query append-only annotations.</td></tr>
+            <tr><td><code>summarize_by_segment(...)</code>, <code>summarize_by_tag(...)</code></td><td>Aggregate record groups.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Fixture">
+          <p class="member-kind">spanfold::records</p>
+          <h2>WindowHistoryFixture</h2>
+          <p>Constructs compact histories for examples and contract tests.</p>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>closed_window(...)</code></td><td>Adds a closed fixture window.</td></tr>
+            <tr><td><code>open_window(...)</code></td><td>Adds an open fixture window.</td></tr>
+            <tr><td><code>WindowHistoryFixtureWindow</code></td><td>Configures source, partition, known-at position, segments, and tags.</td></tr>
+            <tr><td><code>build()</code></td><td>Returns a <code>WindowHistory</code>.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="ComparisonBuilder">
+          <p class="member-kind">crate-root builder</p>
+          <h2>WindowComparisonBuilder</h2>
+          <p><code>WindowHistory::compare(name)</code> starts the fluent comparison path.</p>
+          <pre><code class="language-rust">let result = history
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .run();</code></pre>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>target_source(...)</code>, <code>against_source(...)</code>, <code>against_sources(...)</code></td><td>Select common source-based sides.</td></tr>
+            <tr><td><code>target_selector(...)</code>, <code>against_selector(...)</code>, <code>against_cohort(...)</code></td><td>Use explicit selector or cohort contracts.</td></tr>
+            <tr><td><code>scope_window(...)</code>, <code>scope_key(...)</code>, <code>scope_partition(...)</code>, <code>scope_segment(...)</code>, <code>scope_tag(...)</code></td><td>Narrow comparison scope.</td></tr>
+            <tr><td><code>known_at_position(...)</code>, <code>clip_open_windows_to_position(...)</code></td><td>Control observable evidence and open-window evaluation.</td></tr>
+            <tr><td><code>normalization(...)</code>, <code>coalesce_adjacent_windows()</code>, <code>reject_duplicate_windows()</code></td><td>Set normalization policy.</td></tr>
+            <tr><td><code>validate()</code>, <code>prepare()</code>, <code>align()</code>, <code>run()</code>, <code>run_live(...)</code></td><td>Inspect or execute comparison stages.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Selectors">
+          <p class="member-kind">comparison plan types</p>
+          <h2>ComparisonSelector, ComparisonScope, and normalization</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>ComparisonSelector::for_source(...)</code>, <code>for_sources(...)</code></td><td>Create serializable source selectors.</td></tr>
+            <tr><td><code>for_window_name(...)</code>, <code>for_key(...)</code>, <code>for_partition(...)</code></td><td>Select identity fields.</td></tr>
+            <tr><td><code>and(...)</code></td><td>Compose selector predicates.</td></tr>
+            <tr><td><code>serializable(name, description)</code></td><td>Create a portable descriptor that matches every window.</td></tr>
+            <tr><td><code>runtime_only(name, description, predicate)</code></td><td>Create a process-local custom predicate. Portable exports reject plans that use it.</td></tr>
+            <tr><td><code>ComparisonScope</code>, <code>WindowFilter</code></td><td>Represent named-window, identity, metadata, and temporal constraints.</td></tr>
+            <tr><td><code>ComparisonNormalizationPolicy</code></td><td>Controls axis, open windows, null timestamps, known-at filtering, adjacency, and duplicates.</td></tr>
+            <tr><td><code>ComparisonPlan</code></td><td>Portable description consumed by <code>prepare</code>, <code>align</code>, and <code>compare</code>.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Comparators">
+          <p class="member-kind">enum and builder methods</p>
+          <h2>Comparator</h2>
+          <table class="member-table">
+            <tr><th>Builder item</th><th>Result</th></tr>
+            <tr><td><code>overlap()</code></td><td>Intervals active on both sides.</td></tr>
+            <tr><td><code>residual()</code>, <code>missing()</code></td><td>Target-only and against-only intervals.</td></tr>
+            <tr><td><code>coverage()</code></td><td>Segment-level coverage rows and grouped summaries.</td></tr>
+            <tr><td><code>gap()</code>, <code>symmetric_difference()</code>, <code>containment()</code></td><td>Difference shape and containment results.</td></tr>
+            <tr><td><code>use_comparator(Comparator::LeadLag { ... })</code></td><td>Transition timing differences.</td></tr>
+            <tr><td><code>use_comparator(Comparator::AsOf { ... })</code></td><td>Point-in-time matching.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="ComparisonResult">
+          <p class="member-kind">comparison output</p>
+          <h2>ComparisonResult and typed rows</h2>
+          <p><code>rows</code> is the canonical grouped collection. Family fields are zero-copy compatibility views. Row IDs are opaque values assigned by the producing result.</p>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>overlap_rows</code>, <code>residual_rows</code>, <code>missing_rows</code></td><td>Core typed row families.</td></tr>
+            <tr><td><code>coverage_rows</code>, <code>gap_rows</code>, <code>symmetric_difference_rows</code></td><td>Additional interval result families.</td></tr>
+            <tr><td><code>containment_rows</code>, <code>lead_lag_rows</code>, <code>as_of_rows</code></td><td>Relationship and point-in-time families.</td></tr>
+            <tr><td><code>diagnostics</code>, <code>comparator_summaries</code>, <code>coverage_summaries</code></td><td>Execution diagnostics and aggregates.</td></tr>
+            <tr><td><code>*_rows_with_finality()</code></td><td>Borrow typed rows with authoritative row ID, finality, version, reason, and supersession metadata.</td></tr>
+            <tr><td><code>trace_row(...)</code>, <code>trace_typed(...)</code></td><td>Trace a result row to contributing records, normalized windows, aligned segments, and exclusions.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="AdvancedAnalytics">
+          <p class="member-kind">crate-root functions</p>
+          <h2>Source matrix and hierarchy analytics</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>compare_sources(...)</code></td><td>Produces a <code>SourceMatrixResult</code> across several sources.</td></tr>
+            <tr><td><code>SourceMatrixResult::get_cell(...)</code>, <code>try_get_cell(...)</code></td><td>Read a directed source-pair cell.</td></tr>
+            <tr><td><code>compare_hierarchy(...)</code></td><td>Produces parent and child comparison rows in <code>HierarchyComparisonResult</code>.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Episodes">
+          <p class="member-kind">spanfold::episodes · crate-root re-exports</p>
+          <h2>Episode formation and comparison</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>WindowHistory::form_episodes(name)</code></td><td>Starts <code>EpisodeFormationBuilder</code>.</td></tr>
+            <tr><td><code>from(selector)</code>, <code>scope(...)</code>, <code>normalization(...)</code></td><td>Select and normalize one evidence side.</td></tr>
+            <tr><td><code>stitch_gaps_up_to(TemporalTolerance)</code></td><td>Sets axis-safe fragment stitching.</td></tr>
+            <tr><td><code>WindowHistory::compare_episodes(name)</code></td><td>Starts <code>EpisodeComparisonBuilder</code>.</td></tr>
+            <tr><td><code>target(name, selector)</code>, <code>against(name, selector)</code></td><td>Define the two episode sides.</td></tr>
+            <tr><td><code>relate_within(TemporalTolerance)</code></td><td>Sets the cross-side relation tolerance.</td></tr>
+            <tr><td><code>build()</code>, <code>run()</code>, <code>run_live(...)</code></td><td>Return typed <code>Result</code> values for plans and results.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="EpisodeResults">
+          <p class="member-kind">episode domain</p>
+          <h2>Episode results, relations, and summaries</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>Episode</code>, <code>EpisodeFragment</code>, <code>EpisodeSet</code></td><td>Occurrence identity, evidence fragments, envelope, magnitude, finality, and set summary.</td></tr>
+            <tr><td><code>EpisodeRelationKind</code></td><td><code>OneToOne</code>, <code>Split</code>, <code>Merge</code>, <code>Complex</code>, and unmatched classifications.</td></tr>
+            <tr><td><code>EpisodeComparisonResult</code></td><td>Owns both sets, exhaustive relations, summary, and optional live horizon.</td></tr>
+            <tr><td><code>relations_of_kind(...)</code>, <code>unmatched_target_episodes()</code>, <code>unmatched_against_episodes()</code></td><td>Query relation outcomes.</td></tr>
+            <tr><td><code>as_reference()</code></td><td>Interprets target as reference and against as detection through <code>EpisodeReferenceScorecard</code>.</td></tr>
+            <tr><td><code>EpisodeAnalysisDocument::parse_json(...)</code>, <code>execute(...)</code></td><td>Run a portable processing-position Episode document.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Sequences">
+          <p class="member-kind">spanfold::sequences</p>
+          <h2>WindowSequenceBuilder</h2>
+          <p><code>WindowHistory::match_sequence(name)</code> matches ordered, non-overlapping windows for the same lane identity.</p>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>step(window_name)</code>, <code>then(window_name)</code></td><td>Declare the ordered pattern.</td></tr>
+            <tr><td><code>run()</code></td><td>Returns <code>Result&lt;Vec&lt;WindowSequenceMatch&gt;, WindowSequenceError&gt;</code>.</td></tr>
+            <tr><td><code>run_live(evaluation_horizon)</code></td><td>Evaluates open evidence at an explicit horizon.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Exports">
+          <p class="member-kind">spanfold::export and crate-root functions</p>
+          <h2>Exports, explain output, and changelogs</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>export_plan_json(...)</code>, <code>export_result_json(...)</code></td><td>Deterministic JSON artifacts.</td></tr>
+            <tr><td><code>export_result_json_lines(...)</code>, <code>write_result_json_lines(...)</code></td><td>Materialized or streamed JSON Lines.</td></tr>
+            <tr><td><code>export_result_markdown(...)</code>, <code>export_result_debug_html(...)</code></td><td>Human-readable and self-contained visual output.</td></tr>
+            <tr><td><code>export_result_llm_context(...)</code></td><td>Structured context for agent-assisted auditing.</td></tr>
+            <tr><td><code>write_export_files_atomically(...)</code></td><td>Writes a set of export files atomically.</td></tr>
+            <tr><td><code>run_with_exports(...)</code>, <code>run_live_with_exports(...)</code></td><td>Execute and write configured artifacts from the comparison builder.</td></tr>
+            <tr><td><code>create_changelog(...)</code>, <code>replay_changelog(...)</code></td><td>Create and replay deterministic row-change entries.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Temporal">
+          <p class="member-kind">spanfold::temporal and liveness</p>
+          <h2>Temporal types and lane liveness</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>TemporalAxis</code>, <code>TemporalPoint</code>, <code>TemporalRange</code></td><td>Axis-safe processing-position and event-time coordinates.</td></tr>
+            <tr><td><code>LaneKey::new(...)</code>, <code>LaneKey::with_partition(...)</code></td><td>Identify one expected reporting lane.</td></tr>
+            <tr><td><code>LaneLivenessTracker::for_lanes(...)</code></td><td>Create a deterministic liveness tracker.</td></tr>
+            <tr><td><code>observe(...)</code>, <code>observe_partition(...)</code>, <code>observe_key(...)</code></td><td>Record lane observations.</td></tr>
+            <tr><td><code>check(horizon)</code></td><td>Emit <code>LaneLivenessSignal</code> values for silence and recovery.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Testing">
+          <p class="member-kind">crate-root testing helpers</p>
+          <h2>SpanfoldAssert, SpanfoldSnapshot, and VirtualComparisonClock</h2>
+          <table class="member-table">
+            <tr><th>Item</th><th>Purpose</th></tr>
+            <tr><td><code>SpanfoldAssert::is_valid(...)</code>, <code>has_no_diagnostics(...)</code>, <code>has_diagnostic(...)</code></td><td>Assert result validity and diagnostics.</td></tr>
+            <tr><td><code>has_row_count(...)</code></td><td>Assert a typed row-family count.</td></tr>
+            <tr><td><code>has_no_provisional_rows(...)</code>, <code>has_provisional_rows(...)</code></td><td>Assert live finality.</td></tr>
+            <tr><td><code>SpanfoldSnapshot::normalize(...)</code>, <code>assert_equal(...)</code></td><td>Compare deterministic text artifacts.</td></tr>
+            <tr><td><code>VirtualComparisonClock::new(...)</code>, <code>advance_by(...)</code>, <code>advance_to(...)</code></td><td>Control processing-position horizons in tests.</td></tr>
+          </table>
+        </section>
+
+        <section class="api-member" id="Cli">
+          <p class="member-kind">spanfold-cli crate · spanfold command</p>
+          <h2>Command-line workflows</h2>
+          <table class="member-table">
+            <tr><th>Command</th><th>Purpose</th></tr>
+            <tr><td><code>validate-plan</code>, <code>compare</code>, <code>explain</code></td><td>Validate and execute comparison fixtures.</td></tr>
+            <tr><td><code>audit</code>, <code>audit-windows</code></td><td>Produce reproducible audit artifacts from fixtures or JSON Lines windows.</td></tr>
+            <tr><td><code>import-events</code>, <code>audit-events</code></td><td>Map JSON Lines or CSV events into windows and audit output.</td></tr>
+            <tr><td><code>episodes</code></td><td>Execute a versioned Episode analysis document over window JSON Lines.</td></tr>
+          </table>
+          <p class="language-note">Run <code>spanfold &lt;command&gt; --help</code> for command-specific arguments.</p>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="https://github.com/Scottlr/spanfold">GitHub repository</a></footer>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+  <script src="syntax.js"></script>
+  <script src="site-shell.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>

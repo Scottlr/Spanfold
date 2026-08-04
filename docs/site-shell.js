@@ -54,6 +54,8 @@
     ["visualiser.html", "visual-auditing"],
     ["llm-context.html", "agentic-auditing"],
     ["api.html", "api"],
+    ["api-csharp.html", "api"],
+    ["api-rust.html", "api"],
   ]);
 
   function currentPageKey() {

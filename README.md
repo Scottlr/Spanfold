@@ -298,5 +298,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [Use cases](docs/use-cases.html)
 - [Visual Auditing](docs/visualiser.html)
 - [API reference](docs/api.html)
+- [C# API reference](docs/api-csharp.html)
+- [Rust API reference](docs/api-rust.html)
 - [Comparator reference](docs/comparator-reference.md)
 - [Comparison guide](docs/comparison-guide.md)

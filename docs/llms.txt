@@ -25,6 +25,8 @@ Overlap, Residual (target-only), Missing (comparison-only), Gap, Coverage, Symme
 - [Use cases](https://scottlr.github.io/Spanfold/use-cases.html)
 - [Concepts](https://scottlr.github.io/Spanfold/concepts.html)
 - [API reference](https://scottlr.github.io/Spanfold/api.html)
+- [C# API reference](https://scottlr.github.io/Spanfold/api-csharp.html)
+- [Rust API reference](https://scottlr.github.io/Spanfold/api-rust.html)
 - [Visual Auditing](https://scottlr.github.io/Spanfold/visualiser.html)
 - [Agentic Auditing](https://scottlr.github.io/Spanfold/llm-context.html)
 - [Comparator reference](https://github.com/Scottlr/Spanfold/blob/main/docs/comparator-reference.md)
