@@ -151,7 +151,8 @@
           <p><code>RunLive(horizon)</code> preserves provisional finality for horizon-dependent episodes and relations. It makes no watermark or late-record completeness promise.</p>
         </article>
       </div>
-      <pre><code>using Spanfold.Episodes;
+      <div class="language-panel" data-language="csharp">
+        <pre><code class="language-csharp">using Spanfold.Episodes;
 
 var episodes = pipeline.History
     .CompareEpisodes("Provider QA")
@@ -162,6 +163,28 @@ var episodes = pipeline.History
     .StitchGapsUpTo(TimeSpan.FromMinutes(2))
     .RelateWithin(TimeSpan.FromSeconds(30))
     .Run();</code></pre>
+      </div>
+      <div class="language-panel" data-language="rust">
+        <pre><code class="language-rust">use spanfold::{
+    ComparisonNormalizationPolicy, ComparisonScope, ComparisonSelector,
+    TemporalTolerance,
+};
+
+let episodes = pipeline
+    .history()
+    .compare_episodes("Provider QA")
+    .target("reference", ComparisonSelector::for_source("provider-a"))
+    .against("detector", ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline").on_event_time())
+    .normalization(ComparisonNormalizationPolicy::event_time())
+    .stitch_gaps_up_to(TemporalTolerance::timestamp_ticks(
+        2 * 60 * 10_000_000,
+    )?)
+    .relate_within(TemporalTolerance::timestamp_ticks(
+        30 * 10_000_000,
+    )?)
+    .run()?;</code></pre>
+      </div>
       <p>
         For a reference outage <code>[10:00, 10:30)</code> and detector windows
         <code>[10:02, 10:10)</code> and <code>[10:12, 10:28)</code>, a two-minute
@@ -177,8 +200,8 @@ var episodes = pipeline.History
         <p class="eyebrow">Hard examples</p>
         <h2>Four real audits that combine several concepts.</h2>
         <p>
-          Each example is a single Compare plan that layers normalization,
-          exclusion, segment filters, and comparator rows. Read them as
+          Each example combines explicit eligibility, selectors and scope,
+          normalization, comparator rows, or live finality. Read them as
           templates — the shape is the contribution, not the provider names.
         </p>
       </div>
@@ -189,41 +212,75 @@ var episodes = pipeline.History
             Payments outages must be covered by backup at 99.5%, but scheduled
             maintenance is excluded — <em>unless</em> the incident has already
             escalated, in which case the exclusion no longer applies.
+            Model that eligibility upstream as a derived window containing
+            ordinary outages plus escalated maintenance.
           </p>
-          <pre><code>var maintenance = pipeline.History
-    .Query()
-    .Window("MaintenanceWindow")
-    .Tag("tier", "business-hours")
-    .Windows();
-
+          <div class="language-panel" data-language="csharp">
+            <pre><code class="language-csharp">// Derived upstream from ordinary outages plus escalated maintenance.
 var sla = pipeline.History
     .Compare("Payment coverage SLA")
     .Target("primary", s =&gt; s.Source("primary"))
     .Against("backup", s =&gt; s.Source("backup"))
-    .Within(scope =&gt; scope
-        .Window("PaymentOutage")
-        .Axis(TemporalAxis.EventTime)
-        .Segment("lifecycle", "Incident", "Escalated"))
-    .Normalize(n =&gt; n
-        .RequireClosedWindows()
-        .ExcludeRanges(maintenance,
-            when: ctx =&gt; !ctx.Target.Segment("lifecycle").Equals("Escalated")))
-    .Using(c =&gt; c
-        .Coverage()
-        .Gap(minimumMagnitude: TimeSpan.FromSeconds(30))
-        .Containment(ContainmentPolicy.ExcludeFromDenominator))
+    .Within(scope =&gt; scope.Window(
+        "PaymentOutageSlaEligible",
+        TemporalAxis.Timestamp))
+    .Normalize(n =&gt; n.OnEventTime().RequireClosedWindows())
+    .Using(c =&gt; c.Coverage().Residual().Containment())
     .Run();
 
-var eligible = sla.CoverageRows.TotalTargetMagnitude();
-var covered  = sla.CoverageRows.TotalCoveredMagnitude();
-var ratio    = eligible == TimeSpan.Zero
+var targetMagnitude = sla.CoverageSummaries
+    .Sum(summary =&gt; summary.TargetMagnitudeExact);
+var coveredMagnitude = sla.CoverageSummaries
+    .Sum(summary =&gt; summary.CoveredMagnitudeExact);
+var ratio = targetMagnitude == 0
     ? 1d
-    : covered / eligible;
+    : (double)coveredMagnitude / targetMagnitude;
 
-var breaches = sla.GapRows
-    .Where(g =&gt; g.Range.Duration &gt; TimeSpan.FromMinutes(5))
-    .OrderByDescending(g =&gt; g.Range.Duration)
+var breaches = sla.ResidualRows
+    .Where(row =&gt; row.Range.GetTimeDuration() &gt; TimeSpan.FromMinutes(5))
+    .OrderByDescending(row =&gt; row.Range.GetTimeDuration())
     .ToArray();</code></pre>
+          </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code class="language-rust">use spanfold::{ComparisonNormalizationPolicy, ComparisonScope};
+
+// Derived upstream from ordinary outages plus escalated maintenance.
+let sla = pipeline
+    .history()
+    .compare("Payment coverage SLA")
+    .target_source("primary")
+    .against_source("backup")
+    .scope(
+        ComparisonScope::window("PaymentOutageSlaEligible")
+            .on_event_time(),
+    )
+    .normalization(ComparisonNormalizationPolicy::event_time())
+    .coverage()
+    .residual()
+    .containment()
+    .run();
+
+let target_magnitude: i128 = sla.coverage_summaries
+    .iter()
+    .map(|summary| summary.target_magnitude_exact)
+    .sum();
+let covered_magnitude: i128 = sla.coverage_summaries
+    .iter()
+    .map(|summary| summary.covered_magnitude_exact)
+    .sum();
+let ratio = if target_magnitude == 0 {
+    1.0
+} else {
+    covered_magnitude as f64 / target_magnitude as f64
+};
+
+let mut breaches: Vec&lt;_&gt; = sla
+    .residual_rows
+    .iter()
+    .filter(|row| row.range.end - row.range.start &gt; 5 * 60 * 10_000_000)
+    .collect();
+breaches.sort_by_key(|row| std::cmp::Reverse(row.range.end - row.range.start));</code></pre>
+          </div>
         </article>
 
         <article>
@@ -231,39 +288,99 @@ var breaches = sla.GapRows
           <p>
             Two providers should open their outage windows within 500&nbsp;ms
             of each other. Bucket the signed deltas into 100&nbsp;ms buckets
-            and flag any bucket that holds more than 5% of the population.
+            and flag buckets whose out-of-tolerance rows exceed 5% of the
+            population.
           </p>
-          <pre><code>var drift = pipeline.History
+          <div class="language-panel" data-language="csharp">
+            <pre><code class="language-csharp">var periodEnd = DateTimeOffset.UtcNow;
+var periodStart = periodEnd.AddDays(-30);
+
+var drift = pipeline.History
     .Compare("Provider start-drift")
-    .Target("primary", s =&gt; s.Source("primary"))
-    .Against("secondary", s =&gt; s.Source("secondary"))
-    .Within(scope =&gt; scope
-        .Window("DeviceOffline")
-        .Axis(TemporalAxis.EventTime)
-        .Since(DateTimeOffset.UtcNow.AddDays(-30)))
+    .Target("primary", s =&gt; s.Source("primary")
+        .And(s.TimeRange(periodStart, periodEnd)))
+    .Against("secondary", s =&gt; s.Source("secondary")
+        .And(s.TimeRange(periodStart, periodEnd)))
+    .Within(scope =&gt; scope.Window("DeviceOffline", TemporalAxis.Timestamp))
+    .Normalize(n =&gt; n.OnEventTime())
     .Using(c =&gt; c.LeadLag(
         LeadLagTransition.Start,
-        TemporalAxis.EventTime,
-        toleranceMagnitude: TimeSpan.FromMilliseconds(500)))
+        TemporalAxis.Timestamp,
+        toleranceMagnitude: TimeSpan.FromMilliseconds(500).Ticks))
     .Run();
 
 var buckets = drift.LeadLagRows
-    .GroupBy(row =&gt; (long)Math.Round(row.Delta.TotalMilliseconds / 100d) * 100)
+    .Where(row =&gt; row.DeltaMagnitude.HasValue)
+    .GroupBy(row =&gt; (long)Math.Round(
+        TimeSpan.FromTicks(row.DeltaMagnitude!.Value).TotalMilliseconds / 100d) * 100)
     .Select(g =&gt; new
     {
         BucketMs       = g.Key,
         Count          = g.Count(),
-        OutOfTolerance = g.Count(r =&gt; r.Direction != LeadLagDirection.WithinTolerance)
+        OutOfTolerance = g.Count(r =&gt; !r.IsWithinTolerance)
     })
     .OrderBy(b =&gt; b.BucketMs)
     .ToArray();
 
-var total    = drift.LeadLagRows.Count;
-var hot      = buckets.Where(b =&gt; b.OutOfTolerance &gt; total * 0.05).ToArray();
-var p95Drift = drift.LeadLagRows
-    .OrderBy(r =&gt; Math.Abs(r.Delta.TotalMilliseconds))
-    .ElementAt((int)(total * 0.95))
-    .Delta;</code></pre>
+var total = drift.LeadLagRows.Count;
+var hot = buckets.Where(b =&gt; b.OutOfTolerance &gt; total * 0.05).ToArray();
+var absoluteDriftTicks = drift.LeadLagRows
+    .Where(r =&gt; r.DeltaMagnitude.HasValue)
+    .Select(r =&gt; Math.Abs(r.DeltaMagnitude!.Value))
+    .OrderBy(magnitude =&gt; magnitude)
+    .ToArray();
+var p95AbsoluteDriftTicks = absoluteDriftTicks.Length == 0
+    ? (long?)null
+    : absoluteDriftTicks[(int)((absoluteDriftTicks.Length - 1) * 0.95)];</code></pre>
+          </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code class="language-rust">use std::collections::BTreeMap;
+use spanfold::{
+    Comparator, ComparisonNormalizationPolicy, ComparisonScope,
+    ComparisonSelector, LeadLagTransition, TemporalAxis,
+};
+
+let period = ComparisonSelector::for_time_range(
+    period_start_ticks,
+    Some(period_end_ticks),
+)?;
+let drift = pipeline
+    .history()
+    .compare("Provider start-drift")
+    .target_selector(ComparisonSelector::for_source("primary").and(period.clone()))
+    .against_selector(ComparisonSelector::for_source("secondary").and(period))
+    .scope(ComparisonScope::window("DeviceOffline").on_event_time())
+    .normalization(ComparisonNormalizationPolicy::event_time())
+    .use_comparator(Comparator::LeadLag {
+        transition: LeadLagTransition::Start,
+        axis: TemporalAxis::Timestamp,
+        tolerance_magnitude: 500 * 10_000,
+    })
+    .run();
+
+let mut buckets = BTreeMap::new();
+for row in drift.lead_lag_rows.iter().filter(|row| row.delta_magnitude.is_some()) {
+    let delta_ms = row.delta_magnitude.expect("filtered") / 10_000;
+    let bucket_ms = ((delta_ms as f64 / 100.0).round() as i64) * 100;
+    let counts = buckets.entry(bucket_ms).or_insert((0_usize, 0_usize));
+    counts.0 += 1;
+    counts.1 += usize::from(!row.is_within_tolerance);
+}
+
+let total = drift.lead_lag_rows.len();
+let hot: Vec&lt;_&gt; = buckets
+    .iter()
+    .filter(|(_, (_, outside))| *outside as f64 &gt; total as f64 * 0.05)
+    .collect();
+let mut absolute_deltas: Vec&lt;_&gt; = drift.lead_lag_rows
+    .iter()
+    .filter_map(|row| row.delta_magnitude.map(i64::unsigned_abs))
+    .collect();
+absolute_deltas.sort_unstable();
+let p95_absolute_drift_ticks = absolute_deltas
+    .get(absolute_deltas.len().saturating_sub(1) * 95 / 100)
+    .copied();</code></pre>
+          </div>
         </article>
 
         <article>
@@ -273,34 +390,81 @@ var p95Drift = drift.LeadLagRows
             late-arriving events? Regenerate the view at both known-at horizons
             and diff window identities and ranges.
           </p>
-          <pre><code>var earlier = pipeline.History
+          <div class="language-panel" data-language="csharp">
+            <pre><code class="language-csharp">var earlierPlan = pipeline.History
     .Compare("Risk view @ 12,000")
     .Target("risk",   s =&gt; s.Source("risk-service"))
     .Against("market", s =&gt; s.Source("market-feed"))
     .Within(scope =&gt; scope.Window("HighRisk"))
     .Normalize(n =&gt; n.KnownAtPosition(12_000))
-    .Using(c =&gt; c.Overlap().Residual().Missing())
-    .Run();
+    .Using(c =&gt; c.Overlap().Residual().Missing());
 
-var later = pipeline.History
+var laterPlan = pipeline.History
     .Compare("Risk view @ 12,847")
     .Target("risk",   s =&gt; s.Source("risk-service"))
     .Against("market", s =&gt; s.Source("market-feed"))
     .Within(scope =&gt; scope.Window("HighRisk"))
     .Normalize(n =&gt; n.KnownAtPosition(12_847))
-    .Using(c =&gt; c.Overlap().Residual().Missing())
-    .Run();
+    .Using(c =&gt; c.Overlap().Residual().Missing());
 
-var retroactive = later.AllWindows()
-    .Except(earlier.AllWindows(), WindowIdentityComparer.Default)
+var earlier = earlierPlan.Prepare().NormalizedWindows;
+var later = laterPlan.Prepare().NormalizedWindows;
+var earlierById = earlier.ToDictionary(window =&gt; window.RecordId);
+
+var retroactive = later
+    .Where(window =&gt; !earlierById.ContainsKey(window.RecordId))
     .ToArray();
 
-var restated = later.AllWindows()
-    .Join(earlier.AllWindows(),
-        nw =&gt; nw.WindowId, ow =&gt; ow.WindowId,
-        (nw, ow) =&gt; new { nw.WindowId, Before = ow.Range, After = nw.Range })
-    .Where(x =&gt; x.Before != x.After)
+var restated = later
+    .Where(window =&gt; earlierById.TryGetValue(window.RecordId, out var before)
+        &amp;&amp; before.Range != window.Range)
     .ToArray();</code></pre>
+          </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code class="language-rust">use std::collections::BTreeMap;
+
+let earlier = pipeline
+    .history()
+    .compare("Risk view @ 12,000")
+    .target_source("risk-service")
+    .against_source("market-feed")
+    .scope_window("HighRisk")
+    .known_at_position(12_000)
+    .overlap()
+    .residual()
+    .missing()
+    .prepare();
+
+let later = pipeline
+    .history()
+    .compare("Risk view @ 12,847")
+    .target_source("risk-service")
+    .against_source("market-feed")
+    .scope_window("HighRisk")
+    .known_at_position(12_847)
+    .overlap()
+    .residual()
+    .missing()
+    .prepare();
+
+let earlier_by_id: BTreeMap&lt;_, _&gt; = earlier
+    .normalized_windows()
+    .iter()
+    .map(|window| (window.record_id.as_str(), &amp;window.range))
+    .collect();
+let retroactive: Vec&lt;_&gt; = later
+    .normalized_windows()
+    .iter()
+    .filter(|window| !earlier_by_id.contains_key(window.record_id.as_str()))
+    .collect();
+let restated: Vec&lt;_&gt; = later
+    .normalized_windows()
+    .iter()
+    .filter(|window| earlier_by_id
+        .get(window.record_id.as_str())
+        .is_some_and(|before| *before != &amp;window.range))
+    .collect();</code></pre>
+          </div>
         </article>
 
         <article>
@@ -310,26 +474,31 @@ var restated = later.AllWindows()
             number is what survives replay. Keep both, and compute how much of
             the live number is still provisional.
           </p>
-          <pre><code>var horizon = TemporalPoint.ForPosition(currentPosition);
+          <div class="language-panel" data-language="csharp">
+            <pre><code class="language-csharp">var horizon = TemporalPoint.ForPosition(currentPosition);
 
 var live = pipeline.History
     .Compare("Live coverage")
     .Target("primary", s =&gt; s.Source("primary"))
     .Against("backup",  s =&gt; s.Source("backup"))
     .Within(scope =&gt; scope.Window("PaymentOutage"))
-    .Normalize(n =&gt; n.ClipOpenWindowsTo(horizon))
     .Using(c =&gt; c.Coverage())
     .RunLive(horizon);
 
 static double Ratio(IEnumerable&lt;CoverageRow&gt; rows)
 {
-    var covered = rows.Sum(r =&gt; r.CoveredMagnitude.Value);
-    var target  = rows.Sum(r =&gt; r.TargetMagnitude.Value);
+    var covered = rows.Sum(r =&gt; r.CoveredMagnitude);
+    var target  = rows.Sum(r =&gt; r.TargetMagnitude);
     return target == 0 ? 1d : covered / target;
 }
 
-var final       = live.CoverageRows.Where(r =&gt; r.Finality == RowFinality.Final);
-var provisional = live.CoverageRows.Where(r =&gt; r.Finality == RowFinality.Provisional);
+var coverage = live.CoverageRowsWithFinality().ToArray();
+var final = coverage
+    .Where(entry =&gt; entry.Metadata.Finality == ComparisonFinality.Final)
+    .Select(entry =&gt; entry.Row);
+var provisional = coverage
+    .Where(entry =&gt; entry.Metadata.Finality == ComparisonFinality.Provisional)
+    .Select(entry =&gt; entry.Row);
 
 var finalRatio    = Ratio(final);
 var liveRatio     = Ratio(final.Concat(provisional));
@@ -340,6 +509,55 @@ dashboard.Render(
     liveRatio:  liveRatio,
     provisionalBanding: provisionalPp,
     horizon:    horizon);</code></pre>
+          </div>
+          <div class="language-panel" data-language="rust">
+            <pre><code class="language-rust">use spanfold::{ComparisonFinality, CoverageRow, TemporalPoint};
+
+let horizon = TemporalPoint::position(current_position);
+let live = pipeline
+    .history()
+    .compare("Live coverage")
+    .target_source("primary")
+    .against_source("backup")
+    .scope_window("PaymentOutage")
+    .coverage()
+    .run_live(horizon.clone());
+
+fn ratio&lt;'a&gt;(rows: impl IntoIterator&lt;Item = &amp;'a CoverageRow&gt;) -&gt; f64 {
+    let (covered, target) = rows.into_iter().fold((0_i128, 0_i128), |totals, row| {
+        (
+            totals.0 + i128::from(row.covered_magnitude),
+            totals.1 + i128::from(row.target_magnitude),
+        )
+    });
+    if target == 0 { 1.0 } else { covered as f64 / target as f64 }
+}
+
+let coverage: Vec&lt;_&gt; = live.coverage_rows_with_finality()?.collect();
+let final_rows: Vec&lt;_&gt; = coverage
+    .iter()
+    .filter(|entry| entry.metadata.finality == ComparisonFinality::Final)
+    .map(|entry| entry.row)
+    .collect();
+let provisional_rows: Vec&lt;_&gt; = coverage
+    .iter()
+    .filter(|entry| entry.metadata.finality == ComparisonFinality::Provisional)
+    .map(|entry| entry.row)
+    .collect();
+
+let final_ratio = ratio(final_rows.iter().copied());
+let live_ratio = ratio(
+    final_rows.iter().chain(&amp;provisional_rows).copied(),
+);
+let provisional_pp = live_ratio - final_ratio;
+
+dashboard.render(
+    final_ratio,
+    live_ratio,
+    provisional_pp,
+    horizon,
+);</code></pre>
+          </div>
         </article>
       </div>
     </section>

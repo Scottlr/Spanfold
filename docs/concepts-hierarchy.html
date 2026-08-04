@@ -63,7 +63,8 @@
         </p>
       </div>
       <div>
-        <pre><code>var hierarchy = pipeline.History.CompareHierarchy(
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var hierarchy = pipeline.History.CompareHierarchy(
     "Region explanation",
     parentWindowName: "RegionImpacted",
     childWindowName: "DeviceOffline");
@@ -75,6 +76,30 @@ var unexplained = hierarchy.Rows
 var orphanedChildren = hierarchy.Rows
     .Where(row =&gt; row.Kind == HierarchyComparisonRowKind.OrphanChild)
     .ToArray();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::HierarchyComparisonRowKind;
+
+let hierarchy = pipeline.history().compare_hierarchy(
+    "Region explanation",
+    "RegionImpacted",
+    "DeviceOffline",
+);
+
+let unexplained: Vec&lt;_&gt; = hierarchy
+    .rows
+    .iter()
+    .filter(|row| {
+        row.kind == HierarchyComparisonRowKind::UnexplainedParent
+    })
+    .collect();
+
+let orphaned_children: Vec&lt;_&gt; = hierarchy
+    .rows
+    .iter()
+    .filter(|row| row.kind == HierarchyComparisonRowKind::OrphanChild)
+    .collect();</code></pre>
+        </div>
       </div>
     </section>
 
