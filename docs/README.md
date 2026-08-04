@@ -56,3 +56,22 @@ Register new primary destinations in `site-shell.js`. Detail pages should be
 linked from their overview or guide rather than adding every page to the main
 navigation. Shared conceptual prose remains visible in both language modes;
 use language panels for code, commands, and genuinely language-specific notes.
+
+## Dedicated language routes
+
+When a guide has complete language-specific journeys, give each journey its own
+URL and connect the header switcher to its counterpart:
+
+```html
+<body
+  data-language="csharp"
+  data-language-route="csharp"
+  data-csharp-href="get-started-csharp.html"
+  data-rust-href="get-started-rust.html">
+```
+
+`data-language-route` makes the URL authoritative when the page opens. The two
+route attributes let `language.js` navigate between equivalent C# and Rust
+pages while preserving the selected language elsewhere in the site. A neutral
+chooser can omit `data-language-route` and keep both route attributes so either
+header language control opens the corresponding journey.

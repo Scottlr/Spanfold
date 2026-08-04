@@ -36,11 +36,21 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    setLanguage(localStorage.getItem(storageKey) || document.body.dataset.language);
+    const routeLanguage = supported.has(document.body.dataset.languageRoute)
+      ? document.body.dataset.languageRoute
+      : null;
+    setLanguage(routeLanguage || localStorage.getItem(storageKey) || document.body.dataset.language);
 
     document.querySelectorAll("[data-language-toggle]").forEach((button) => {
       button.addEventListener("click", () => {
-        setLanguage(button.dataset.languageToggle);
+        const selected = resolveLanguage(button.dataset.languageToggle);
+        const destination = document.body.dataset[`${selected}Href`];
+        if (destination && selected !== routeLanguage) {
+          localStorage.setItem(storageKey, selected);
+          window.location.assign(destination);
+          return;
+        }
+        setLanguage(selected);
       });
     });
 

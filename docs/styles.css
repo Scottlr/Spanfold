@@ -448,6 +448,103 @@ li,
   gap: 10px;
 }
 
+.journey-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.journey-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 250px;
+  padding: 24px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.journey-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.journey-card.rust:hover {
+  border-color: var(--accent-forest);
+}
+
+.journey-card h2 {
+  margin-top: 6px;
+}
+
+.journey-card p {
+  flex: 1;
+}
+
+.journey-label {
+  color: var(--accent) !important;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.journey-card.rust .journey-label {
+  color: var(--accent-forest) !important;
+}
+
+.journey-switch {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  background: var(--bg-card);
+}
+
+.journey-switch a {
+  padding: 7px 12px;
+  border-radius: 6px;
+  color: var(--ink-muted);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.journey-switch a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.step-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+  counter-reset: journey-step;
+  list-style: none;
+}
+
+.step-list li {
+  padding: 18px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg-card);
+  counter-increment: journey-step;
+}
+
+.step-list li::before {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  content: "0" counter(journey-step);
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -1784,6 +1881,8 @@ pre .hljs-comment {
   .use-case-list article,
   .summary-list.grid,
   .preview-card-grid,
+  .journey-grid,
+  .step-list,
   .api-reference-layout {
     grid-template-columns: 1fr;
   }
@@ -1821,6 +1920,16 @@ pre .hljs-comment {
 }
 
 @media (max-width: 760px) {
+  .journey-switch {
+    display: flex;
+    width: 100%;
+  }
+
+  .journey-switch a {
+    flex: 1;
+    text-align: center;
+  }
+
   .site-header {
     position: sticky;
     top: 0;

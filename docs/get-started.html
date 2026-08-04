@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Get started with Spanfold in C# or Rust by recording temporal windows, comparing two sources, and reading the expected output.">
+  <meta name="description" content="Choose the C# or Rust getting-started journey for Spanfold and build your first temporal comparison.">
   <title>Get started with Spanfold</title>
   <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body data-language="csharp">
+<body data-language="csharp" data-csharp-href="get-started-csharp.html" data-rust-href="get-started-rust.html">
   <header class="site-header">
     <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
     <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
@@ -27,211 +27,61 @@
   </header>
 
   <main>
-    <div class="content-header">
-      <div class="language-control">
-        <span>Code</span>
-        <div class="language-switcher" aria-label="Code language">
-          <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-          <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
-        </div>
-      </div>
-    </div>
     <section class="page-hero compact">
       <p class="eyebrow">Get started</p>
-      <h1>Record two source histories, then compare what they saw.</h1>
+      <h1>Choose your language, then build the same first comparison.</h1>
       <p class="lead">
-        The shortest useful path: define one state window, ingest events from
-        two sources, compare the recorded windows, and inspect the output.
+        Each journey starts from an empty console project and ends with two
+        source histories split into overlap and source-only segments.
       </p>
     </section>
 
-    <section class="doc-section" id="install">
+    <section class="doc-section" aria-labelledby="choose-language">
       <div class="section-heading">
-        <p class="eyebrow">Mental model</p>
-        <h2>Start with one question: when was this state active?</h2>
+        <p class="eyebrow">Choose a journey</p>
+        <h2 id="choose-language">Follow one complete, language-native path.</h2>
+        <p>No tab switching or translated fragments: installation, code, output, and next steps stay together.</p>
+      </div>
+      <div class="journey-grid">
+        <a class="journey-card" href="get-started-csharp.html">
+          <span class="journey-label">.NET 10 · NuGet</span>
+          <h2>C#</h2>
+          <p>Build a top-level console application with records, fluent builders, and the .NET package.</p>
+          <strong>Start the C# journey →</strong>
+        </a>
+        <a class="journey-card rust" href="get-started-rust.html">
+          <span class="journey-label">Rust 2024 · crates.io</span>
+          <h2>Rust</h2>
+          <p>Build a small binary with explicit error handling, Rust-native types, and the crate.</p>
+          <strong>Start the Rust journey →</strong>
+        </a>
+      </div>
+    </section>
+
+    <section class="doc-section" aria-labelledby="shared-model">
+      <div class="section-heading">
+        <p class="eyebrow">Shared mental model</p>
+        <h2 id="shared-model">Ask when a state was active.</h2>
         <p>
           A window opens when your predicate becomes true for a key and source.
-          It closes when the predicate becomes false. Once those windows are
-          recorded, compare sources without hand-written interval joins.
+          It closes when the predicate becomes false. Spanfold compares those
+          recorded windows without hand-written interval joins.
         </p>
       </div>
-
       <div data-fig="D_GetStarted"></div>
     </section>
 
-    <section class="doc-section" id="minimal-implementation">
+    <section class="doc-section" aria-labelledby="first-result">
       <div class="section-heading">
-        <p class="eyebrow">1. Install</p>
-        <h2>Add the package to your project.</h2>
+        <p class="eyebrow">What you will build</p>
+        <h2 id="first-result">One small example, four useful steps.</h2>
       </div>
-      <div class="language-panel" data-language="csharp">
-        <pre><code>dotnet add package Spanfold</code></pre>
-      </div>
-      <div class="language-panel" data-language="rust">
-        <pre><code>cargo add spanfold@0.1.1
-cargo install spanfold-cli --version 0.1.1</code></pre>
-        <p class="language-note">The Rust package includes the core runtime, selector-backed comparison API, Episode analytics, deterministic exports, audit bundles, testing helpers, and CLI surfaces.</p>
-      </div>
-    </section>
-
-    <section class="doc-section">
-      <div class="section-heading">
-        <p class="eyebrow">2. Minimal implementation</p>
-        <h2>A complete first example.</h2>
-        <p>
-          This example uses processing positions rather than timestamps so the
-          output is easy to inspect. Position 1 is the first ingested event,
-          position 2 is the second, and so on.
-        </p>
-      </div>
-
-      <div class="wide-example">
-        <div class="language-panel" data-language="csharp">
-          <pre><code>using Spanfold;
-
-var pipeline = EventPipeline
-    .For&lt;DeviceStatus&gt;()
-    .RecordWindows()
-    .TrackWindow(
-        "DeviceOffline",
-        key: status =&gt; status.DeviceId,
-        isActive: status =&gt; !status.IsOnline);
-
-Ingest("provider-a", isOnline: true);  // position 1
-Ingest("provider-b", isOnline: true);  // position 2
-Ingest("provider-a", isOnline: false); // position 3, provider-a opens
-Ingest("provider-b", isOnline: false); // position 4, provider-b opens
-Ingest("provider-b", isOnline: true);  // position 5, provider-b closes
-Ingest("provider-a", isOnline: true);  // position 6, provider-a closes
-
-var result = pipeline.History
-    .Compare("Provider comparison")
-    .Target("provider-a", selector =&gt; selector.Source("provider-a"))
-    .Against("provider-b", selector =&gt; selector.Source("provider-b"))
-    .Within(scope =&gt; scope.Window("DeviceOffline"))
-    .Using(comparators =&gt; comparators.Overlap().Residual().Missing())
-    .Run();
-
-Console.WriteLine($"closed windows: {pipeline.History.ClosedWindows.Count}");
-Console.WriteLine($"overlap rows: {result.OverlapRows.Count}");
-Console.WriteLine($"provider-a-only rows: {result.ResidualRows.Count}");
-Console.WriteLine($"provider-b-only rows: {result.MissingRows.Count}");
-
-foreach (var row in result.OverlapRows)
-{
-    Console.WriteLine($"overlap {row.Key}: {row.Range.Start.Position}..{row.Range.End!.Value.Position}");
-}
-
-foreach (var row in result.ResidualRows)
-{
-    Console.WriteLine($"a-only {row.Key}: {row.Range.Start.Position}..{row.Range.End!.Value.Position}");
-}
-
-void Ingest(string source, bool isOnline)
-{
-    pipeline.Ingest(new DeviceStatus("device-17", isOnline), source);
-}
-
-public sealed record DeviceStatus(string DeviceId, bool IsOnline);</code></pre>
-        </div>
-        <div class="language-panel" data-language="rust">
-          <pre><code>use spanfold::for_events;
-
-#[derive(Clone)]
-struct DeviceStatus {
-    device_id: String,
-    is_online: bool,
-}
-
-let mut pipeline = for_events::&lt;DeviceStatus&gt;()
-    .record_windows()
-    .track_window(
-        "DeviceOffline",
-        |status| status.device_id.clone(),
-        |status| !status.is_online,
-    )
-    .build();
-
-fn status(is_online: bool) -&gt; DeviceStatus {
-    DeviceStatus { device_id: "device-17".into(), is_online }
-}
-
-pipeline.ingest(status(true), Some("provider-a"), None);  // position 1
-pipeline.ingest(status(true), Some("provider-b"), None);  // position 2
-pipeline.ingest(status(false), Some("provider-a"), None); // position 3, provider-a opens
-pipeline.ingest(status(false), Some("provider-b"), None); // position 4, provider-b opens
-pipeline.ingest(status(true), Some("provider-b"), None);  // position 5, provider-b closes
-pipeline.ingest(status(true), Some("provider-a"), None);  // position 6, provider-a closes
-
-let result = pipeline
-    .history()
-    .compare("Provider comparison")
-    .target_source("provider-a")
-    .against_source("provider-b")
-    .scope_window("DeviceOffline")
-    .overlap()
-    .residual()
-    .missing()
-    .run();
-
-println!("closed windows: {}", pipeline.history().closed_windows().len());
-println!("overlap rows: {}", result.overlap_rows.len());
-println!("provider-a-only rows: {}", result.residual_rows.len());
-println!("provider-b-only rows: {}", result.missing_rows.len());</code></pre>
-        </div>
-      </div>
-    </section>
-
-    <section class="doc-section two-col" id="expected-output">
-      <div>
-        <p class="eyebrow">3. Expected output</p>
-        <h2>The result should show one shared segment and two target-only segments.</h2>
-      </div>
-      <div class="expected-output">
-        <pre><code>closed windows: 2
-overlap rows: 1
-provider-a-only rows: 2
-provider-b-only rows: 0
-overlap device-17: 4..5
-a-only device-17: 3..4
-a-only device-17: 5..6</code></pre>
-        <p>
-          Provider A reported the device offline from position 3 to 6. Provider B
-          reported it offline from position 4 to 5. Spanfold turns that into
-          structured comparison rows: A-only before B saw it, overlap while both
-          saw it, and A-only after B recovered.
-        </p>
-      </div>
-    </section>
-
-    <section class="doc-section">
-      <div class="section-heading">
-        <p class="eyebrow">4. What to try next</p>
-        <h2>Move from the smallest case to useful diagnostics.</h2>
-      </div>
-
-      <div class="summary-list grid">
-        <a href="visualiser.html">
-          <strong>Open visual auditing examples</strong>
-          <span>See the same overlap and residual rows rendered as interactive timelines.</span>
-        </a>
-        <a href="llm-context.html">
-          <strong>Export agentic auditing context</strong>
-          <span>Generate agent-readable JSON with full result data and row-level evidence.</span>
-        </a>
-        <a href="use-cases.html">
-          <strong>Browse use cases</strong>
-          <span>Map temporal windows to monitoring, IoT, payments, logistics, and data pipelines.</span>
-        </a>
-        <a href="api.html">
-          <strong>Use the API reference</strong>
-          <span>Look up builders, comparison rows, exports, liveness, and testing helpers.</span>
-        </a>
-        <a href="https://github.com/Scottlr/spanfold/tree/main/packages/dotnet/samples">
-          <strong>Run the samples</strong>
-          <span>Start with the single-lane device monitoring sample, then scale up to multi-source scenarios.</span>
-        </a>
-      </div>
+      <ol class="step-list">
+        <li><strong>Define</strong><br>Track when a device is offline.</li>
+        <li><strong>Ingest</strong><br>Record status events from two providers.</li>
+        <li><strong>Compare</strong><br>Find overlap and source-only intervals.</li>
+        <li><strong>Inspect</strong><br>Read deterministic rows and ranges.</li>
+      </ol>
     </section>
   </main>
 
@@ -240,9 +90,6 @@ a-only device-17: 5..6</code></pre>
     <a href="https://github.com/Scottlr/spanfold">GitHub repository</a>
   </footer>
   <script src="sf-diagrams.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/languages/powershell.min.js"></script>
-  <script src="syntax.js"></script>
   <script src="site-shell.js"></script>
   <script src="language.js"></script>
 </body>
