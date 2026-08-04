@@ -71,7 +71,8 @@
         </p>
       </div>
       <div>
-        <pre><code>var matrix = pipeline.History.CompareSources(
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var matrix = pipeline.History.CompareSources(
     "Provider matrix",
     "DeviceOffline",
     ["provider-a", "provider-b", "provider-c"]);
@@ -80,6 +81,29 @@ var weakCells = matrix.Cells
     .Where(cell =&gt; !cell.IsDiagonal)
     .Where(cell =&gt; cell.CoverageRatio.GetValueOrDefault(1) &lt; 0.95)
     .ToArray();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">let sources = vec![
+    "provider-a".to_owned(),
+    "provider-b".to_owned(),
+    "provider-c".to_owned(),
+];
+let matrix = pipeline.history().compare_sources(
+    "Provider matrix",
+    "DeviceOffline",
+    &amp;sources,
+);
+
+let weak_cells: Vec&lt;_&gt; = matrix
+    .cells
+    .iter()
+    .filter(|cell| !cell.is_diagonal)
+    .filter(|cell| cell.coverage_ratio.unwrap_or(1.0) &lt; 0.95)
+    .collect();
+
+let a_against_b = matrix
+    .get_cell("provider-a", "provider-b");</code></pre>
+        </div>
       </div>
     </section>
 

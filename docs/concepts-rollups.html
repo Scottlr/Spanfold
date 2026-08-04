@@ -68,7 +68,8 @@
         </p>
       </div>
       <div>
-        <pre><code>var pipeline = EventPipeline
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var pipeline = EventPipeline
     .For&lt;DeviceStateChanged&gt;()
     .RecordWindows()
     .Window("DeviceOffline", window =&gt; window
@@ -85,6 +86,35 @@
         update =&gt; update.RegionId,
         children =&gt; children.ActiveCount &gt; 0)
     .Build();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::{WindowSegment, for_events};
+
+let pipeline = for_events::&lt;DeviceStateChanged&gt;()
+    .record_windows()
+    .window_with_metadata(
+        "DeviceOffline",
+        |update| update.device_id.clone(),
+        |update| update.is_offline,
+        |update| vec![
+            WindowSegment::new("lifecycle", update.lifecycle.clone())
+                .expect("valid segment"),
+        ],
+        |_| Vec::new(),
+    )
+    .roll_up_with_segment_projection(
+        "ZoneOffline",
+        |update| update.zone_id.clone(),
+        |children| children.any_active(),
+        |segments| segments.preserve("lifecycle"),
+    )
+    .roll_up(
+        "RegionOffline",
+        |update| update.region_id.clone(),
+        |children| children.any_active(),
+    )
+    .build()?;</code></pre>
+        </div>
       </div>
     </section>
 
