@@ -2,14 +2,15 @@
 
 `spanfold` is a Rust library for recording temporal state windows and comparing
 their histories. It provides typed recording pipelines, deterministic alignment,
-temporal comparators, audit exports, and helpers for live and known-at analysis.
+temporal comparators, Episode analysis, audit exports, and helpers for live and
+known-at analysis.
 
 The API is pre-1.0 and may change between minor releases.
 
 ## Install
 
 ```bash
-cargo add spanfold
+cargo add spanfold@0.1.1
 ```
 
 ## Example
@@ -96,6 +97,7 @@ aligned target segment and is normally wholly covered or uncovered; use
 - Deterministic normalization and alignment of temporal histories
 - Overlap, residual, missing, coverage, containment, lead/lag, and as-of analysis
 - Cohort, source-matrix, hierarchy, and nested roll-up analytics
+- Episode formation, relation graphs, neutral summaries, and reference scorecards
 - JSON, JSON Lines, Markdown, debug HTML, LLM-context, and audit-bundle exports
 - Known-at filtering, live horizons, finality, liveness, and testing helpers
 - Borrowed typed row/finality views with authoritative opaque row IDs

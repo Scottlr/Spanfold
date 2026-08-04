@@ -1,5 +1,9 @@
 # Episodes Tasks
 
+> **Historical planning record:** This bundle preserves the original .NET-only
+> Episode rollout scope and acceptance decisions. Rust Episode support was
+> implemented later; use the root and package READMEs for current availability.
+
 ## Discovery Summary
 
 The plan was grounded in the current .NET reference implementation under

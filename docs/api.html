@@ -71,18 +71,17 @@
       <h1>Spanfold API reference.</h1>
       <p>
         Static reference for the public package surface across C# and Rust.
-        Rust exposes idiomatic builders, selector-backed
-        comparison plans, deterministic exports, audit bundles, and CLI workflows.
+        Rust exposes idiomatic builders, selector-backed comparison plans,
+        Episode analytics, deterministic exports, audit bundles, and CLI workflows.
       </p>
       <div class="language-panel" data-language="csharp">
         <pre><code>dotnet add package Spanfold
 dotnet add package Spanfold.Testing</code></pre>
       </div>
       <div class="language-panel" data-language="rust">
-        <pre><code>cd packages/rust
-cargo test --workspace
-cargo run -p spanfold-cli -- --help</code></pre>
-        <p class="language-note">The Rust package includes the core runtime, selector-backed comparison API, deterministic exports, testing helpers, audit bundles, and CLI surfaces.</p>
+        <pre><code>cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1</code></pre>
+        <p class="language-note">The Rust package includes the core runtime, selector-backed comparison API, Episode analytics, deterministic exports, testing helpers, audit bundles, and CLI surfaces.</p>
       </div>
     </section>
 
@@ -179,7 +178,7 @@ cargo run -p spanfold-cli -- --help</code></pre>
           <a class="member-link" href="#ComparisonResult">Rows</a>
         </details>
         <details open>
-          <summary>Spanfold.Episodes (.NET preview)</summary>
+          <summary>Episode analytics (.NET preview and Rust)</summary>
           <a class="type-link" href="#EpisodeBuilders">Episode builders and extensions</a>
           <a class="member-link" href="#EpisodeBuilders">FormEpisodes(...)</a>
           <a class="member-link" href="#EpisodeBuilders">CompareEpisodes(...)</a>
@@ -550,12 +549,14 @@ let result = history
         </section>
 
         <section class="api-member" id="EpisodeBuilders">
-          <p class="member-kind">Spanfold.Episodes · .NET preview</p>
+          <p class="member-kind">Spanfold.Episodes · .NET preview and Rust</p>
           <h2>Episode builders and extensions</h2>
           <p>
             Forms occurrence sets from recorded windows or compares two formed
-            sets. This namespace is currently .NET-only and is not exposed by
-            the Rust package.
+            sets. Rust exposes the corresponding builders from
+            <code>WindowHistory::form_episodes</code> and
+            <code>WindowHistory::compare_episodes</code>, with Episode types
+            available from <code>spanfold::episodes</code> and the crate root.
           </p>
           <table class="member-table">
             <tr><th>Public type or member</th><th>Purpose</th></tr>
@@ -574,6 +575,14 @@ let result = history
             <tr><td><code>EpisodeComparisonBuilder.RelateWithin(long)</code> / <code>RelateWithin(TimeSpan)</code></td><td>Sets the cross-side relation tolerance.</td></tr>
             <tr><td><code>EpisodeComparisonBuilder.Build()</code>, <code>Run()</code>, <code>RunLive(TemporalPoint)</code></td><td>Builds a plan or materializes an <code>EpisodeComparisonResult</code>.</td></tr>
           </table>
+          <p class="language-note">
+            Rust uses the equivalent snake-case builder members
+            <code>from</code>, <code>target</code>, <code>against</code>,
+            <code>scope</code>, <code>normalization</code>,
+            <code>stitch_gaps_up_to</code>, <code>relate_within</code>,
+            <code>run</code>, and <code>run_live</code>. Axis-safe tolerances are
+            represented by <code>TemporalTolerance</code>.
+          </p>
         </section>
 
         <section class="api-member" id="EpisodePlans">

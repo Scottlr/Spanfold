@@ -6,15 +6,14 @@ is intentionally pre-1.0 and may change between minor releases.
 The Rust package now covers the main comparison contract: typed temporal
 primitives, window histories, fixture parsing, staged preparation/alignment,
 core and advanced comparators, cohort/source-matrix/hierarchy analytics,
-deterministic exports, audit bundles, liveness helpers, and testing utilities.
-
-Implementation planning specs live under `packages/rust/specs/`.
+Episode formation and relation analysis, deterministic exports, audit bundles,
+liveness helpers, and testing utilities.
 
 ## Install
 
 ```bash
-cargo add spanfold@0.1.0
-cargo install spanfold-cli --version 0.1.0
+cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1
 ```
 
 The library crate is `spanfold`. The installed CLI command is also `spanfold`.
@@ -107,6 +106,7 @@ cargo bench -p spanfold --bench spanfold_benchmarks
 | Containment, lead/lag, as-of | Implemented |
 | Known-at filtering, live horizons, row finality, changelog | Implemented |
 | Cohorts, source matrix, hierarchy, nested roll-ups | Implemented |
+| Episode formation, relation graphs, summaries, reference scorecards | Implemented |
 | JSON, JSON Lines, Markdown, debug HTML, LLM context exports and configured run exports | Implemented; conformance gate pending |
 | Fixture CLI, window JSONL audit CLI, audit bundles | Implemented |
 | Event JSONL/CSV import and audit CLI | Implemented |

@@ -11,8 +11,8 @@ dotnet pack src/Spanfold/Spanfold.csproj -c Release -o artifacts/package # Build
 Inspect the package contents:
 
 ```bash
-unzip -l artifacts/package/Spanfold.0.1.0-preview.2.nupkg # Inspect library package contents.
-unzip -l artifacts/package/Spanfold.0.1.0-preview.2.snupkg # Inspect symbol package contents.
+unzip -l artifacts/package/Spanfold.0.2.0-preview.1.nupkg # Inspect library package contents.
+unzip -l artifacts/package/Spanfold.0.2.0-preview.1.snupkg # Inspect symbol package contents.
 ```
 
 Expected package contents include:
@@ -24,9 +24,9 @@ Expected package contents include:
 Verify the package contract directly from the archive:
 
 ```bash
-unzip -Z1 artifacts/package/Spanfold.0.1.0-preview.2.nupkg | grep -Fx 'README.md'
-unzip -Z1 artifacts/package/Spanfold.0.1.0-preview.2.nupkg | grep -Fx 'lib/net10.0/Spanfold.dll'
-unzip -Z1 artifacts/package/Spanfold.0.1.0-preview.2.nupkg | grep -Fx 'lib/net10.0/Spanfold.xml'
+unzip -Z1 artifacts/package/Spanfold.0.2.0-preview.1.nupkg | grep -Fx 'README.md'
+unzip -Z1 artifacts/package/Spanfold.0.2.0-preview.1.nupkg | grep -Fx 'lib/net10.0/Spanfold.dll'
+unzip -Z1 artifacts/package/Spanfold.0.2.0-preview.1.nupkg | grep -Fx 'lib/net10.0/Spanfold.xml'
 ```
 
 The same package-content and dependency checks run in CI. Package validation is

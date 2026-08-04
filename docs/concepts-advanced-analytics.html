@@ -145,13 +145,14 @@
 
     <section class="doc-section">
       <div class="section-heading">
-        <p class="eyebrow">Episode analytics · .NET preview</p>
+        <p class="eyebrow">Episode analytics · .NET preview and Rust</p>
         <h2>Move from exact spans to occurrence structure.</h2>
         <p>
           Episode analysis layers on recorded windows when the analytical unit
           is an outage, downtime event, detection, or session-like occurrence.
-          The API is currently available in <code>Spanfold.Episodes</code> for
-          .NET and is not part of the Rust package.
+          The API is available in <code>Spanfold.Episodes</code> for .NET and
+          through <code>WindowHistory::form_episodes</code> and
+          <code>WindowHistory::compare_episodes</code> in Rust.
         </p>
       </div>
       <div class="comparison-list">

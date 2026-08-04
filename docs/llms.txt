@@ -2,7 +2,7 @@
 
 > Temporal interval comparison for application state. Records when a predicate held for a key, then compares those periods across sources, providers, and pipeline stages.
 
-Spanfold is a library for recording state windows — half-open intervals where a defined condition held — and running structured temporal comparisons across multiple sources. A predicate can be any condition: a boolean flag, a threshold crossing, a status code change, or any value transition. Spanfold tracks the period it held and closes the window when it no longer does.
+Spanfold is a library for recording state windows — half-open intervals where a defined condition held — and running structured temporal comparisons across multiple sources. An active predicate returns a boolean, but it can express a flag, threshold, status, or range condition over an event. Spanfold opens a window when that result becomes true and closes it when it becomes false.
 
 It is designed for problems where the question is not "what is the current value?" but "when did each source believe this condition was true, and where did they differ?"
 
@@ -31,7 +31,7 @@ Overlap, Residual (target-only), Missing (comparison-only), Gap, Coverage, Symme
 ## Packages
 
 - [.NET / C#](https://github.com/Scottlr/Spanfold/blob/main/packages/dotnet/README.md): C# API surface, CLI, testing helpers, samples, benchmarks
-- [Rust](https://github.com/Scottlr/Spanfold/blob/main/packages/rust/README.md): Rust 2024 core API, selector-backed comparisons, deterministic exports, audit bundles, testing helpers, benchmarks, and CLI workflows
+- [Rust](https://github.com/Scottlr/Spanfold/blob/main/packages/rust/README.md): Rust 2024 core API, selector-backed comparisons, Episode analytics, deterministic exports, audit bundles, testing helpers, benchmarks, and CLI workflows
 
 ## Repository
 

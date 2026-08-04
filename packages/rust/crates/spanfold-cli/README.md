@@ -7,7 +7,7 @@ audit artifacts.
 ## Install
 
 ```bash
-cargo install spanfold-cli
+cargo install spanfold-cli --version 0.1.1
 ```
 
 Confirm the installation:

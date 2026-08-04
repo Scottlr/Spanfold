@@ -170,9 +170,10 @@ appeared, and whether live rows are still provisional.
 
 Exact comparison answers where active coverage differed. Episode analysis adds
 an occurrence-level question: did both sides observe the same incident, even
-when one side reported it as several fragments? The episode API is currently a
-.NET preview surface in `Spanfold.Episodes`; it is not available in the Rust
-package.
+when one side reported it as several fragments? The .NET preview surface lives
+in `Spanfold.Episodes`; the Rust library provides the corresponding Episode
+formation, relation, summary, and reference-scorecard capabilities through its
+idiomatic API.
 
 ```csharp
 using Spanfold.Episodes;

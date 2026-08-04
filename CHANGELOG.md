@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add .NET episode formation with position or timestamp normalization,
+- Add .NET and Rust episode formation with position or timestamp normalization,
   side-local gap stitching, retained fragments, envelopes, and active magnitude.
 - Add complete component-graph episode relations for one-to-one, split, merge,
   complex, and unmatched occurrences.
@@ -10,8 +10,8 @@
   episode analysis without claiming watermark or late-record completeness.
 - Add neutral episode summaries and explicit reference-oriented recall and
   precision through `AsReference()`.
-- Episode APIs are currently available only in the .NET preview package, not in
-  the Rust package.
+- Expose Episode formation, exhaustive relation graphs, summaries, and explicit
+  reference scorecards through both the .NET and Rust library APIs.
 
 ## 0.2.0-preview.1
 
