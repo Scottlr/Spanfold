@@ -5,15 +5,15 @@ use super::*;
 /// Exports a self-contained comparison debug page as deterministic HTML.
 pub fn export_result_debug_html(result: &ComparisonResult) -> String {
     let mut html = String::with_capacity(32 * 1024);
-    let row_count = result.overlap_rows.len()
-        + result.residual_rows.len()
-        + result.missing_rows.len()
-        + result.coverage_rows.len()
-        + result.gap_rows.len()
-        + result.symmetric_difference_rows.len()
-        + result.containment_rows.len()
-        + result.lead_lag_rows.len()
-        + result.as_of_rows.len();
+    let mut row_count = 0;
+    macro_rules! count_rows {
+        ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+            $(
+                row_count += result.$compat.len();
+            )*
+        };
+    }
+    crate::comparison::for_each_comparison_row_family!(count_rows);
     let provisional_rows = result
         .row_finalities
         .iter()
@@ -253,19 +253,14 @@ fn append_debug_metadata(html: &mut String, result: &ComparisonResult) {
 
 fn append_debug_rows(html: &mut String, result: &ComparisonResult) {
     html.push_str("<section class=\"panel\"><h2>Comparator Rows</h2>");
-    append_debug_row_table(html, "overlap", &result.overlap_rows);
-    append_debug_row_table(html, "residual", &result.residual_rows);
-    append_debug_row_table(html, "missing", &result.missing_rows);
-    append_debug_row_table(html, "coverage", &result.coverage_rows);
-    append_debug_row_table(html, "gap", &result.gap_rows);
-    append_debug_row_table(
-        html,
-        "symmetric-difference",
-        &result.symmetric_difference_rows,
-    );
-    append_debug_row_table(html, "containment", &result.containment_rows);
-    append_debug_row_table(html, "lead-lag", &result.lead_lag_rows);
-    append_debug_row_table(html, "as-of", &result.as_of_rows);
+    macro_rules! append_tables {
+        ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+            $(
+                append_debug_row_table(html, $debug, &result.$compat);
+            )*
+        };
+    }
+    crate::comparison::for_each_comparison_row_family!(append_tables);
     if result.row_finalities.is_empty() {
         html.push_str("<div class=\"empty\" style=\"margin-top:18px\">No row finalities.</div>");
     } else {

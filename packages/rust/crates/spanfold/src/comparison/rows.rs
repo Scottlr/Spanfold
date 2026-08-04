@@ -944,20 +944,14 @@ impl ComparisonResult {
     }
 
     fn row_family_layouts(&self) -> [(ComparisonRowKind, usize); 9] {
-        [
-            (ComparisonRowKind::Overlap, self.rows.overlap.len()),
-            (ComparisonRowKind::Residual, self.rows.residual.len()),
-            (ComparisonRowKind::Missing, self.rows.missing.len()),
-            (ComparisonRowKind::Coverage, self.rows.coverage.len()),
-            (ComparisonRowKind::Gap, self.rows.gap.len()),
-            (
-                ComparisonRowKind::SymmetricDifference,
-                self.rows.symmetric_difference.len(),
-            ),
-            (ComparisonRowKind::Containment, self.rows.containment.len()),
-            (ComparisonRowKind::LeadLag, self.rows.lead_lag.len()),
-            (ComparisonRowKind::AsOf, self.rows.as_of.len()),
-        ]
+        macro_rules! layouts {
+            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+                [$(
+                    (ComparisonRowKind::$kind, self.rows.$rows.len()),
+                )*]
+            };
+        }
+        for_each_comparison_row_family!(layouts)
     }
 
     fn row_family_bounds(&self, kind: ComparisonRowKind) -> (usize, usize) {
