@@ -321,13 +321,6 @@ impl_lineage!(
     )
 );
 
-/// Immutable typed preparation/alignment evidence retained by a result.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct ComparisonTraceContext {
-    pub(super) prepared: PreparedComparison,
-    pub(super) aligned: AlignedComparison,
-}
-
 impl ComparisonResult {
     /// Traces a canonical row reference through retained preparation evidence.
     pub fn trace_row(
@@ -433,30 +426,26 @@ fn build_trace<R>(
 where
     R: ComparisonRowTraceLineage,
 {
-    let Some(context) = result.trace_context.as_ref() else {
+    let (Some(prepared), Some(aligned)) = (result.state.prepared(), result.state.aligned()) else {
         return Err(ComparisonRowTraceError::MissingContext);
     };
     let ids = row.record_ids().into_iter().collect::<BTreeSet<_>>();
     let (window_name, key, partition) = row.trace_scope();
 
-    let mut contributing_records = context
-        .prepared
+    let mut contributing_records = prepared
         .selected_windows
         .iter()
         .filter(|window| ids.contains(&window.record_id))
         .cloned()
         .collect::<Vec<_>>();
     contributing_records.sort_by(|left, right| {
-        record_order_key(left, &context.prepared.normalized_windows).cmp(&record_order_key(
-            right,
-            &context.prepared.normalized_windows,
-        ))
+        record_order_key(left, &prepared.normalized_windows)
+            .cmp(&record_order_key(right, &prepared.normalized_windows))
     });
     let mut seen_records = BTreeSet::new();
     contributing_records.retain(|record| seen_records.insert(record.record_id.clone()));
 
-    let mut normalized_windows = context
-        .prepared
+    let mut normalized_windows = prepared
         .normalized_windows
         .iter()
         .filter(|window| {
@@ -470,8 +459,7 @@ where
         .collect::<Vec<_>>();
     normalized_windows.sort_by(normalized_order);
 
-    let mut aligned_segments = context
-        .aligned
+    let mut aligned_segments = aligned
         .segments
         .iter()
         .filter(|segment| {
@@ -497,8 +485,7 @@ where
             .then_with(|| left.segment_id.cmp(&right.segment_id))
     });
 
-    let mut relevant_exclusions = context
-        .prepared
+    let mut relevant_exclusions = prepared
         .excluded_windows
         .iter()
         .filter(|exclusion| {

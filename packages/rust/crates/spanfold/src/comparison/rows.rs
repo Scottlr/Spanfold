@@ -687,6 +687,23 @@ impl Default for ComparisonRows {
     }
 }
 
+impl ComparisonRows {
+    pub(super) fn family_layouts(&self) -> [(ComparisonRowKind, usize); 9] {
+        macro_rules! layouts {
+            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+                [$(
+                    (ComparisonRowKind::$kind, self.$rows.len()),
+                )*]
+            };
+        }
+        for_each_comparison_row_family!(layouts)
+    }
+
+    pub(super) fn total_count(&self) -> usize {
+        self.family_layouts().iter().map(|(_, count)| count).sum()
+    }
+}
+
 #[derive(Default)]
 pub(super) struct RowAccumulator {
     pub(super) overlap: Vec<OverlapRow>,
@@ -718,9 +735,10 @@ impl RowAccumulator {
 
 /// Structured comparison result.
 ///
-/// [`Self::rows`] is the canonical grouped row storage. For genuine,
-/// unmodified Spanfold results, [`Self::row_finalities`] is partitioned in the
-/// same family order and remains parallel to row order within each family.
+/// [`Self::rows`] and [`Self::row_finalities`] are compatibility projections of
+/// canonical typed internal state. For genuine, unmodified Spanfold results,
+/// finality metadata is partitioned in the same family order and remains
+/// parallel to row order within each family.
 /// The typed `*_rows_with_finality` views validate detectable count and kind
 /// corruption before exposing that association.
 ///
@@ -803,10 +821,18 @@ pub struct ComparisonResult {
     #[serde(rename = "extensionMetadata")]
     pub extension_metadata: Vec<ComparisonExtensionMetadata>,
     #[serde(skip)]
-    pub(super) trace_context: Option<Arc<super::trace::ComparisonTraceContext>>,
+    pub(super) state: Arc<super::state::ComparisonResultState>,
 }
 
 impl ComparisonResult {
+    pub(crate) fn canonical_rows(&self) -> &ComparisonRows {
+        self.state.rows()
+    }
+
+    pub(crate) fn canonical_row_finalities(&self) -> impl Iterator<Item = &ComparisonRowFinality> {
+        self.state.finalities()
+    }
+
     /// Returns overlap rows paired with their authoritative result metadata.
     ///
     /// Returns an error if the result's metadata count/kind layout is inconsistent.
@@ -819,7 +845,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Overlap,
-            self.rows.overlap.as_slice(),
+            self.state.rows().overlap.as_slice(),
         )
     }
 
@@ -835,7 +861,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Residual,
-            self.rows.residual.as_slice(),
+            self.state.rows().residual.as_slice(),
         )
     }
 
@@ -851,7 +877,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Missing,
-            self.rows.missing.as_slice(),
+            self.state.rows().missing.as_slice(),
         )
     }
 
@@ -867,7 +893,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Coverage,
-            self.rows.coverage.as_slice(),
+            self.state.rows().coverage.as_slice(),
         )
     }
 
@@ -880,7 +906,11 @@ impl ComparisonResult {
         impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, GapRow>>,
         ComparisonRowMetadataError,
     > {
-        row_finality_pairs(self, ComparisonRowKind::Gap, self.rows.gap.as_slice())
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::Gap,
+            self.state.rows().gap.as_slice(),
+        )
     }
 
     /// Returns symmetric-difference rows paired with their authoritative result metadata.
@@ -895,7 +925,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::SymmetricDifference,
-            self.rows.symmetric_difference.as_slice(),
+            self.state.rows().symmetric_difference.as_slice(),
         )
     }
 
@@ -911,7 +941,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Containment,
-            self.rows.containment.as_slice(),
+            self.state.rows().containment.as_slice(),
         )
     }
 
@@ -927,7 +957,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::LeadLag,
-            self.rows.lead_lag.as_slice(),
+            self.state.rows().lead_lag.as_slice(),
         )
     }
 
@@ -940,18 +970,15 @@ impl ComparisonResult {
         impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, AsOfRow>>,
         ComparisonRowMetadataError,
     > {
-        row_finality_pairs(self, ComparisonRowKind::AsOf, self.rows.as_of.as_slice())
+        row_finality_pairs(
+            self,
+            ComparisonRowKind::AsOf,
+            self.state.rows().as_of.as_slice(),
+        )
     }
 
     fn row_family_layouts(&self) -> [(ComparisonRowKind, usize); 9] {
-        macro_rules! layouts {
-            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
-                [$(
-                    (ComparisonRowKind::$kind, self.rows.$rows.len()),
-                )*]
-            };
-        }
-        for_each_comparison_row_family!(layouts)
+        self.rows.family_layouts()
     }
 
     fn row_family_bounds(&self, kind: ComparisonRowKind) -> (usize, usize) {
@@ -1022,6 +1049,58 @@ impl ComparisonResult {
             });
         }
 
+        self.validate_compatibility_projections()
+    }
+
+    fn validate_compatibility_projections(&self) -> Result<(), ComparisonRowMetadataError> {
+        let mut start = 0;
+        macro_rules! validate_rows {
+            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+                $(
+                    let canonical = &self.state.rows().$rows;
+                    if self.rows.$rows != *canonical || self.$compat != *canonical {
+                        return Err(ComparisonRowMetadataError {
+                            family: ComparisonRowKind::$kind,
+                            metadata_index: start,
+                            expected_count: canonical.len(),
+                            actual_count: self.rows.$rows.len(),
+                            expected_kind: ComparisonRowKind::$kind,
+                            actual_kind: Some("compatibility projection diverged".to_owned()),
+                        });
+                    }
+                    start += canonical.len();
+                )*
+            };
+        }
+        for_each_comparison_row_family!(validate_rows);
+
+        if !self.row_finalities.iter().eq(self.state.finalities()) {
+            let mismatch = self
+                .row_finalities
+                .iter()
+                .zip(self.state.finalities())
+                .position(|(compatibility, canonical)| compatibility != canonical)
+                .unwrap_or(self.row_finalities.len());
+            let (family, _, expected_count) = self
+                .row_family_layouts()
+                .into_iter()
+                .scan(0, |offset, (kind, count)| {
+                    let start = *offset;
+                    *offset += count;
+                    Some((kind, start, count))
+                })
+                .find(|(_, family_start, count)| mismatch < family_start + count)
+                .unwrap_or((ComparisonRowKind::AsOf, start, 0));
+            return Err(ComparisonRowMetadataError {
+                family,
+                metadata_index: mismatch,
+                expected_count,
+                actual_count: expected_count,
+                expected_kind: family,
+                actual_kind: Some("compatibility projection diverged".to_owned()),
+            });
+        }
+
         Ok(())
     }
 }
@@ -1035,9 +1114,9 @@ fn row_finality_pairs<'a, R>(
     ComparisonRowMetadataError,
 > {
     result.validate_row_metadata_layout()?;
-    let (start, count) = result.row_family_bounds(kind);
+    let (_, count) = result.row_family_bounds(kind);
     debug_assert_eq!(rows.len(), count);
-    let metadata = &result.row_finalities[start..start + count];
+    let metadata = result.state.family_finalities(kind);
     Ok(rows
         .iter()
         .zip(metadata)

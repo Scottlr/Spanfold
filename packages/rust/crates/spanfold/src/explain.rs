@@ -181,32 +181,32 @@ impl ComparisonResult {
         write_item(
             &mut out,
             "overlap rows",
-            &self.overlap_rows.len().to_string(),
+            &self.canonical_rows().overlap.len().to_string(),
         );
         write_item(
             &mut out,
             "residual rows",
-            &self.residual_rows.len().to_string(),
+            &self.canonical_rows().residual.len().to_string(),
         );
         write_item(
             &mut out,
             "missing rows",
-            &self.missing_rows.len().to_string(),
+            &self.canonical_rows().missing.len().to_string(),
         );
         write_item(
             &mut out,
             "coverage rows",
-            &self.coverage_rows.len().to_string(),
+            &self.canonical_rows().coverage.len().to_string(),
         );
         write_item(
             &mut out,
             "extension metadata",
             &self.extension_metadata.len().to_string(),
         );
-        for (index, finality) in self.row_finalities.iter().enumerate() {
+        for (index, finality) in self.canonical_row_finalities().enumerate() {
             write_finality(&mut out, index, finality);
         }
-        for (index, row) in self.overlap_rows.iter().enumerate() {
+        for (index, row) in self.canonical_rows().overlap.iter().enumerate() {
             write_item(
                 &mut out,
                 &format!("overlap[{index}]"),
@@ -221,7 +221,7 @@ impl ComparisonResult {
                 ),
             );
         }
-        for (index, row) in self.residual_rows.iter().enumerate() {
+        for (index, row) in self.canonical_rows().residual.iter().enumerate() {
             write_item(
                 &mut out,
                 &format!("residual[{index}]"),
@@ -247,16 +247,14 @@ impl ComparisonResult {
     /// Returns whether any emitted row is provisional.
     #[must_use]
     pub fn has_provisional_rows(&self) -> bool {
-        self.row_finalities
-            .iter()
+        self.canonical_row_finalities()
             .any(|row| row.finality == crate::ComparisonFinality::Provisional)
     }
 
     /// Returns only provisional row-finality metadata.
     #[must_use]
     pub fn provisional_row_finalities(&self) -> Vec<&crate::ComparisonRowFinality> {
-        self.row_finalities
-            .iter()
+        self.canonical_row_finalities()
             .filter(|row| row.finality == crate::ComparisonFinality::Provisional)
             .collect()
     }
@@ -264,8 +262,7 @@ impl ComparisonResult {
     /// Returns only final row-finality metadata.
     #[must_use]
     pub fn final_row_finalities(&self) -> Vec<&crate::ComparisonRowFinality> {
-        self.row_finalities
-            .iter()
+        self.canonical_row_finalities()
             .filter(|row| row.finality == crate::ComparisonFinality::Final)
             .collect()
     }
