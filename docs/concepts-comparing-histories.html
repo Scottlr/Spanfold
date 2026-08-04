@@ -58,14 +58,31 @@
         </p>
       </div>
       <div>
-        <pre><code>var result = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var result = pipeline.History
     .Compare("Provider QA")
     .Target("provider-a", s =&gt; s.Source("provider-a"))
     .Against("provider-b", s =&gt; s.Source("provider-b"))
     .Within(scope =&gt; scope.Window("DeviceOffline"))
-    .Normalize(n =&gt; n.RequireClosedWindows().HalfOpen())
+    .Normalize(n =&gt; n.RequireClosedWindows())
     .Using(c =&gt; c.Overlap().Residual().Missing())
     .Run();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::ComparisonNormalizationPolicy;
+
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .normalization(ComparisonNormalizationPolicy::require_closed())
+    .overlap()
+    .residual()
+    .missing()
+    .run();</code></pre>
+        </div>
       </div>
     </section>
 

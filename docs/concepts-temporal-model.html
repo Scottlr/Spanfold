@@ -66,7 +66,8 @@
         <h2>Make time explicit in the plan.</h2>
       </div>
       <div>
-        <pre><code>var audit = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var audit = pipeline.History
     .Compare("Decision audit")
     .Target("decision", s =&gt; s.Source("decision-service"))
     .Against("risk", s =&gt; s.Source("risk-provider"))
@@ -77,6 +78,24 @@
         TemporalAxis.ProcessingPosition,
         toleranceMagnitude: 10))
     .Run();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::{AsOfDirection, Comparator, TemporalAxis};
+
+let audit = pipeline
+    .history()
+    .compare("Decision audit")
+    .target_source("decision-service")
+    .against_source("risk-provider")
+    .scope_window("HighRisk")
+    .known_at_position(42)
+    .use_comparator(Comparator::AsOf {
+        direction: AsOfDirection::Previous,
+        axis: TemporalAxis::ProcessingPosition,
+        tolerance_magnitude: 10,
+    })
+    .run();</code></pre>
+        </div>
       </div>
     </section>
   </main>
