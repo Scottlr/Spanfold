@@ -119,15 +119,20 @@ internal static class EpisodeFormationRuntime
         IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
     {
         var groups = new List<FormationGroup>();
+        var groupIndex = new Dictionary<FormationGroupKey, FormationGroup>(
+            new FormationGroupKeyComparer(keyComparers));
         for (var i = 0; i < fragments.Count; i++)
         {
             var fragment = fragments[i];
             var window = fragment.Window;
-            var comparer = keyComparers.TryGetValue(window.WindowName, out var configured)
-                ? configured
-                : EqualityComparer<object>.Default;
-            var group = FindGroup(groups, fragment, comparer);
-            if (group is null)
+            var groupKey = new FormationGroupKey(
+                window.WindowName,
+                window.Key,
+                window.Source,
+                window.Partition,
+                fragment.Range.Axis,
+                fragment.Range.Start.Clock);
+            if (!groupIndex.TryGetValue(groupKey, out var group))
             {
                 group = new FormationGroup(
                     window.WindowName,
@@ -137,35 +142,13 @@ internal static class EpisodeFormationRuntime
                     fragment.Range.Axis,
                     fragment.Range.Start.Clock);
                 groups.Add(group);
+                groupIndex.Add(groupKey, group);
             }
 
             group.Fragments.Add(fragment);
         }
 
         return groups;
-    }
-
-    private static FormationGroup? FindGroup(
-        List<FormationGroup> groups,
-        EpisodeFragment fragment,
-        IEqualityComparer<object> keyComparer)
-    {
-        var window = fragment.Window;
-        for (var i = 0; i < groups.Count; i++)
-        {
-            var group = groups[i];
-            if (string.Equals(group.WindowName, window.WindowName, StringComparison.Ordinal)
-                && keyComparer.Equals(group.Key, window.Key)
-                && EqualityComparer<object?>.Default.Equals(group.Source, window.Source)
-                && EqualityComparer<object?>.Default.Equals(group.Partition, window.Partition)
-                && group.TimeAxis == fragment.Range.Axis
-                && string.Equals(group.TimestampClock, fragment.Range.Start.Clock, StringComparison.Ordinal))
-            {
-                return group;
-            }
-        }
-
-        return null;
     }
 
     private static void AddEpisodes(
@@ -383,6 +366,53 @@ internal static class EpisodeFormationRuntime
         return string.CompareOrdinal(
             CanonicalValueFormatter.Format(left),
             CanonicalValueFormatter.Format(right));
+    }
+
+    private readonly record struct FormationGroupKey(
+        string WindowName,
+        object Key,
+        object? Source,
+        object? Partition,
+        TemporalAxis TimeAxis,
+        string? TimestampClock);
+
+    private sealed class FormationGroupKeyComparer(
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
+        : IEqualityComparer<FormationGroupKey>
+    {
+        public bool Equals(FormationGroupKey left, FormationGroupKey right)
+        {
+            if (!string.Equals(left.WindowName, right.WindowName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var keyComparer = GetKeyComparer(left.WindowName);
+            return keyComparer.Equals(left.Key, right.Key)
+                && EqualityComparer<object?>.Default.Equals(left.Source, right.Source)
+                && EqualityComparer<object?>.Default.Equals(left.Partition, right.Partition)
+                && left.TimeAxis == right.TimeAxis
+                && string.Equals(left.TimestampClock, right.TimestampClock, StringComparison.Ordinal);
+        }
+
+        public int GetHashCode(FormationGroupKey key)
+        {
+            var hash = new HashCode();
+            hash.Add(key.WindowName, StringComparer.Ordinal);
+            hash.Add(GetKeyComparer(key.WindowName).GetHashCode(key.Key));
+            hash.Add(key.Source, EqualityComparer<object?>.Default);
+            hash.Add(key.Partition, EqualityComparer<object?>.Default);
+            hash.Add(key.TimeAxis);
+            hash.Add(key.TimestampClock, StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
+
+        private IEqualityComparer<object> GetKeyComparer(string windowName)
+        {
+            return keyComparers.TryGetValue(windowName, out var configured)
+                ? configured
+                : EqualityComparer<object>.Default;
+        }
     }
 
     private sealed class FormationGroup(
