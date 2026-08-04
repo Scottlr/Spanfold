@@ -59,6 +59,28 @@ let result = pipeline
     .run();
 ```
 
+### Stabilize noisy window transitions
+
+Configure consecutive entry and exit confirmation on the typed source-window builder:
+
+```rust
+let mut pipeline = for_events::<DeviceStatus>()
+    .record_windows()
+    .window(
+        "DeviceOffline",
+        |event| event.device_id.clone(),
+        |event| !event.is_online,
+    )
+    .stabilize(|event| event.is_online, 2, 3)
+    .build()?;
+```
+
+Counts are independent per window key, source, and partition, and a false
+observation resets the applicable count. The confirming event supplies the
+transition boundary and opening metadata. Pending exits preserve the committed
+window and roll-up membership. Without `stabilize`, transitions remain
+immediate and exit when the active predicate becomes false.
+
 ## Rust Selectors
 
 Rust supports selector-backed comparison plans as first-class API. Selectors can

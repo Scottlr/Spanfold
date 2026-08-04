@@ -316,6 +316,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: None,
             tags: None,
             rollups: Vec::new(),
@@ -344,6 +347,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: None,
             tags: None,
             rollups: Vec::new(),
@@ -373,6 +379,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: Some(Arc::new(segments)),
             tags: Some(Arc::new(tags)),
             rollups: Vec::new(),
@@ -405,6 +414,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: Some(Arc::new(segments)),
             tags: Some(Arc::new(tags)),
             rollups: Vec::new(),
@@ -430,6 +442,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: None,
             tags: None,
             rollups: Vec::new(),
@@ -461,6 +476,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: None,
             tags: None,
             rollups: Vec::new(),
@@ -493,6 +511,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: Some(Arc::new(segments)),
             tags: Some(Arc::new(tags)),
             rollups: Vec::new(),
@@ -528,6 +549,9 @@ impl<T> EventPipelineBuilder<T> {
             name: name.into(),
             key: Arc::new(move |event| key(event).into()),
             is_active: Arc::new(is_active),
+            exit_when: None,
+            enter_after: 1,
+            exit_after: 1,
             segments: Some(Arc::new(segments)),
             tags: Some(Arc::new(tags)),
             rollups: Vec::new(),
@@ -575,6 +599,7 @@ impl<T> EventPipelineBuilder<T> {
                 record_windows: self.record_windows,
                 history: WindowHistory::new(),
                 active: HashMap::new(),
+                pending_confirmations: HashMap::new(),
                 parents: HashMap::new(),
                 rollup_memberships: HashMap::new(),
                 position: 0,
@@ -586,6 +611,29 @@ impl<T> EventPipelineBuilder<T> {
 }
 
 impl<T> WindowPipelineBuilder<T> {
+    /// Requires consecutive source-window observations before transitions commit.
+    ///
+    /// The source window's active predicate is the enter predicate. The event
+    /// reaching each configured count becomes that transition's boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either confirmation count is zero.
+    #[must_use]
+    pub fn stabilize<P>(mut self, exit_when: P, enter_after: usize, exit_after: usize) -> Self
+    where
+        P: Fn(&T) -> bool + Send + Sync + 'static,
+    {
+        assert!(enter_after > 0, "enter confirmation count must be positive");
+        assert!(exit_after > 0, "exit confirmation count must be positive");
+
+        let source = &mut self.builder.windows[self.path[0]];
+        source.exit_when = Some(Arc::new(exit_when));
+        source.enter_after = enter_after;
+        source.exit_after = exit_after;
+        self
+    }
+
     /// Registers a callback invoked for every emitted transition.
     #[must_use]
     pub fn on_emission<F>(mut self, callback: F) -> Self
@@ -831,7 +879,9 @@ impl PipelineRuntime {
             TemporalRange::new(active.start.clone(), event_point.clone())?;
         }
         let mut observations = std::mem::take(&mut self.observation_buffer);
-        if let Err(error) = Self::observe_event(definitions, &event, &mut observations) {
+        if let Err(error) =
+            self.observe_event(definitions, &event, source, partition, &mut observations)
+        {
             observations.clear();
             self.observation_buffer = observations;
             return Err(error);
@@ -864,14 +914,58 @@ impl PipelineRuntime {
     }
 
     fn observe_event<T>(
+        &self,
         definitions: &PipelineDefinitions<T>,
         event: &T,
+        source: Option<&str>,
+        partition: Option<&str>,
         observations: &mut Vec<EventWindowObservation>,
     ) -> Result<(), IngestionError> {
         observations.clear();
         for definition in &definitions.windows {
-            let is_active = (definition.is_active)(event);
-            let segments = if is_active {
+            let key = (definition.key)(event);
+            let state_key = (
+                definition.name.clone(),
+                key.clone(),
+                source.map(str::to_owned),
+                partition.map(str::to_owned),
+                String::new(),
+            );
+            let was_active = self.active.contains_key(&state_key);
+            let predicate_matches = if was_active {
+                definition.exit_when.as_ref().map_or_else(
+                    || !(definition.is_active)(event),
+                    |predicate| predicate(event),
+                )
+            } else {
+                (definition.is_active)(event)
+            };
+            let lifecycle = if predicate_matches {
+                let next_confirmation = self
+                    .pending_confirmations
+                    .get(&state_key)
+                    .copied()
+                    .unwrap_or_default()
+                    .saturating_add(1);
+                let required = if was_active {
+                    definition.exit_after
+                } else {
+                    definition.enter_after
+                };
+                if next_confirmation < required {
+                    SourceWindowLifecycle::Pending(next_confirmation)
+                } else if was_active {
+                    SourceWindowLifecycle::Closing
+                } else {
+                    SourceWindowLifecycle::Active
+                }
+            } else if was_active {
+                SourceWindowLifecycle::Active
+            } else {
+                SourceWindowLifecycle::Inactive
+            };
+            let has_active_metadata = matches!(lifecycle, SourceWindowLifecycle::Active);
+            let segments = if has_active_metadata {
                 definition
                     .segments
                     .as_ref()
@@ -879,10 +973,25 @@ impl PipelineRuntime {
             } else {
                 Vec::new()
             };
-            let rollups = observe_rollup_projections(&definition.rollups, &segments)?;
+            let tags = if has_active_metadata {
+                definition
+                    .tags
+                    .as_ref()
+                    .map_or_else(Vec::new, |selector| selector(event))
+            } else {
+                Vec::new()
+            };
+            let rollups = if has_active_metadata {
+                observe_rollup_projections(&definition.rollups, &segments)?
+            } else {
+                Vec::new()
+            };
             observations.push(EventWindowObservation {
-                is_active,
+                state_key,
+                key,
+                lifecycle,
                 segments,
+                tags,
                 rollups,
             });
         }
@@ -901,27 +1010,22 @@ impl PipelineRuntime {
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
         let EventWindowObservation {
-            is_active,
+            state_key,
+            key,
+            lifecycle,
             segments,
+            tags,
             rollups,
         } = observation;
-        let key = (definition.key)(event);
-        let tags = if is_active {
-            definition
-                .tags
-                .as_ref()
-                .map_or_else(Vec::new, |selector| selector(event))
-        } else {
-            Vec::new()
-        };
-        let state_key = (
-            definition.name.clone(),
-            key.clone(),
-            source.map(str::to_owned),
-            partition.map(str::to_owned),
-            String::new(),
-        );
+        if let SourceWindowLifecycle::Pending(confirmation_count) = lifecycle {
+            self.pending_confirmations
+                .insert(state_key, confirmation_count);
+            return Ok(());
+        }
+
+        self.pending_confirmations.remove(&state_key);
         let previous = self.active.get(&state_key).cloned();
+        let is_active = matches!(lifecycle, SourceWindowLifecycle::Active);
         emissions.extend(self.sync_window_state(WindowObservation {
             state_key,
             window_name: definition.name.clone(),
@@ -952,7 +1056,9 @@ impl PipelineRuntime {
                 },
                 emissions,
             )?;
-        } else if let Some(previous) = previous {
+        } else if matches!(lifecycle, SourceWindowLifecycle::Closing)
+            && let Some(previous) = previous
+        {
             self.sync_rollups(
                 &definition.rollups,
                 event,

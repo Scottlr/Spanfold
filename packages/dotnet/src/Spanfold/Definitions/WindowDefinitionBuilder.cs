@@ -14,6 +14,9 @@ public sealed class WindowDefinitionBuilder<TEvent>
     private Func<TEvent, object>? keySelector;
     private IEqualityComparer<object>? keyComparer;
     private Func<TEvent, bool>? isActiveSelector;
+    private Func<TEvent, bool>? exitSelector;
+    private int enterConfirmationCount = 1;
+    private int exitConfirmationCount = 1;
     private readonly List<SegmentBuilder<TEvent>> segments;
     private readonly List<TagDefinition<TEvent>> tags;
 
@@ -68,6 +71,32 @@ public sealed class WindowDefinitionBuilder<TEvent>
         ArgumentNullException.ThrowIfNull(isActive);
 
         this.isActiveSelector = isActive;
+        return this;
+    }
+
+    /// <summary>
+    /// Requires consecutive enter and exit observations before committing transitions.
+    /// </summary>
+    /// <param name="exitWhen">Returns true when an active window is eligible to close.</param>
+    /// <param name="enterAfter">Consecutive active observations required to open.</param>
+    /// <param name="exitAfter">Consecutive exit observations required to close.</param>
+    /// <returns>The current builder.</returns>
+    /// <remarks>
+    /// <see cref="ActiveWhen"/> supplies the enter predicate. Transitions use the
+    /// event that reaches the configured count as their boundary.
+    /// </remarks>
+    public WindowDefinitionBuilder<TEvent> Stabilize(
+        Func<TEvent, bool> exitWhen,
+        int enterAfter = 1,
+        int exitAfter = 1)
+    {
+        ArgumentNullException.ThrowIfNull(exitWhen);
+        ArgumentOutOfRangeException.ThrowIfLessThan(enterAfter, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(exitAfter, 1);
+
+        this.exitSelector = exitWhen;
+        this.enterConfirmationCount = enterAfter;
+        this.exitConfirmationCount = exitAfter;
         return this;
     }
 
@@ -155,6 +184,14 @@ public sealed class WindowDefinitionBuilder<TEvent>
             this.isActiveSelector,
             BuildSegments(),
             BuildTags());
+
+        if (this.exitSelector is not null)
+        {
+            definition.ConfigureStabilization(
+                this.exitSelector,
+                this.enterConfirmationCount,
+                this.exitConfirmationCount);
+        }
 
         definition.Callbacks.Opened.AddRange(this.callbacks.Opened);
         definition.Callbacks.Closed.AddRange(this.callbacks.Closed);

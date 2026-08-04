@@ -84,6 +84,32 @@ public sealed record DeviceSignal(string DeviceId, bool IsOnline); // Define the
 `RecordWindows()` is the important switch. It keeps the temporal evidence that
 later comparisons, exports, and tests operate on.
 
+### Stabilize noisy window transitions
+
+Use separate entry and exit observations when a noisy signal should not open or
+close a window immediately:
+
+```csharp
+var pipeline = EventPipeline
+    .For<DeviceSignal>()
+    .RecordWindows()
+    .TrackWindow(
+        "DeviceOffline",
+        signal => signal.DeviceId,
+        signal => !signal.IsOnline,
+        options => options.Stabilize(
+            exitWhen: signal => signal.IsOnline,
+            enterAfter: 2,
+            exitAfter: 3));
+```
+
+Confirmation is tracked independently for each window key, source, and
+partition. A false observation resets the applicable consecutive count. The
+event reaching the threshold supplies the transition boundary and, when
+opening, the window metadata. While an exit is pending, the committed window
+and its roll-up membership remain unchanged. Omitting `Stabilize` preserves the
+immediate active-predicate behavior.
+
 ## Compare Recorded Windows
 
 Comparison is staged in the order an analyst usually asks the question:

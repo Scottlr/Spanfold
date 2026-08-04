@@ -70,7 +70,9 @@ public sealed class EventPipelineBuilder<TEvent>
             key,
             isActive,
             comparer);
-        configure?.Invoke(new WindowOptions<TEvent, TKey>(definition.Callbacks));
+        var options = new WindowOptions<TEvent, TKey>(definition.Callbacks);
+        configure?.Invoke(options);
+        options.ApplyTo(definition);
         this.windows.Add(definition);
 
         return new WindowPipelineBuilder<TEvent>(

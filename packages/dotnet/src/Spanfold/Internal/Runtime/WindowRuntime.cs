@@ -7,12 +7,15 @@ internal sealed class WindowRuntime<TEvent>
 {
     private readonly WindowDefinition<TEvent> definition;
     private readonly Dictionary<RuntimeStateKey, ActiveWindowState> activeKeys;
+    private readonly Dictionary<RuntimeStateKey, int> pendingConfirmations;
     private readonly RollUpRuntime<TEvent>[] rollUps;
 
     public WindowRuntime(WindowDefinition<TEvent> definition)
     {
         this.definition = definition;
         this.activeKeys = new Dictionary<RuntimeStateKey, ActiveWindowState>(
+            new RuntimeStateKeyComparer(definition.KeyComparer));
+        this.pendingConfirmations = new Dictionary<RuntimeStateKey, int>(
             new RuntimeStateKeyComparer(definition.KeyComparer));
         this.rollUps = new RollUpRuntime<TEvent>[definition.RollUps.Count];
 
@@ -32,35 +35,120 @@ internal sealed class WindowRuntime<TEvent>
         ref List<WindowEmission<TEvent>>? emissions)
     {
         var key = this.definition.GetKey(@event);
-        var isActive = this.definition.IsActive(@event);
         var stateKey = new RuntimeStateKey(key, source, partition);
         var wasActive = this.activeKeys.TryGetValue(stateKey, out var previousState);
-        var changed = isActive != wasActive;
-        var currentSegments = isActive ? this.definition.GetSegments(@event) : [];
-        var currentTags = isActive ? this.definition.GetTags(@event) : [];
-        var segmentChanged = isActive
-            && wasActive
-            && previousState is not null
-            && !SegmentsEqual(previousState.Segments, currentSegments);
-        var observedRollUps = false;
 
-        if (changed && isActive)
+        if (!wasActive)
         {
-            journal.Set(this.activeKeys, stateKey, new ActiveWindowState(currentSegments, currentTags));
-            AddEmission(
-                ref emissions,
-                new WindowEmission<TEvent>(
-                    this.definition.Name,
-                    key,
-                    @event,
-                    WindowTransitionKind.Opened,
-                    source,
-                    partition,
-                    currentSegments,
-                    currentTags));
+            ObserveInactive(
+                @event,
+                source,
+                partition,
+                key,
+                stateKey,
+                journal,
+                ref emissions);
+            return;
         }
-        else if (changed && previousState is not null)
+
+        ObserveActive(
+            @event,
+            source,
+            partition,
+            key,
+            stateKey,
+            previousState!,
+            journal,
+            ref emissions);
+    }
+
+    public void TrimInactiveState()
+    {
+        foreach (var rollUp in this.rollUps)
         {
+            rollUp.TrimInactiveState();
+        }
+    }
+
+    private void ObserveInactive(
+        TEvent @event,
+        object? source,
+        object? partition,
+        object key,
+        RuntimeStateKey stateKey,
+        RuntimeMutationJournal journal,
+        ref List<WindowEmission<TEvent>>? emissions)
+    {
+        if (!this.definition.IsActive(@event))
+        {
+            journal.Remove(this.pendingConfirmations, stateKey);
+            ObserveRollUps(
+                @event,
+                source,
+                partition,
+                key,
+                childIsActive: false,
+                childChanged: false,
+                segments: [],
+                tags: [],
+                journal,
+                ref emissions);
+            return;
+        }
+
+        var confirmationCount = IncrementConfirmation(stateKey, journal);
+        if (confirmationCount < this.definition.EnterConfirmationCount)
+        {
+            return;
+        }
+
+        journal.Remove(this.pendingConfirmations, stateKey);
+        var currentSegments = this.definition.GetSegments(@event);
+        var currentTags = this.definition.GetTags(@event);
+        journal.Set(this.activeKeys, stateKey, new ActiveWindowState(currentSegments, currentTags));
+        AddEmission(
+            ref emissions,
+            new WindowEmission<TEvent>(
+                this.definition.Name,
+                key,
+                @event,
+                WindowTransitionKind.Opened,
+                source,
+                partition,
+                currentSegments,
+                currentTags));
+        ObserveRollUps(
+            @event,
+            source,
+            partition,
+            key,
+            childIsActive: true,
+            childChanged: true,
+            currentSegments,
+            currentTags,
+            journal,
+            ref emissions);
+    }
+
+    private void ObserveActive(
+        TEvent @event,
+        object? source,
+        object? partition,
+        object key,
+        RuntimeStateKey stateKey,
+        ActiveWindowState previousState,
+        RuntimeMutationJournal journal,
+        ref List<WindowEmission<TEvent>>? emissions)
+    {
+        if (this.definition.ShouldExit(@event))
+        {
+            var confirmationCount = IncrementConfirmation(stateKey, journal);
+            if (confirmationCount < this.definition.ExitConfirmationCount)
+            {
+                return;
+            }
+
+            journal.Remove(this.pendingConfirmations, stateKey);
             journal.Remove(this.activeKeys, stateKey);
             AddEmission(
                 ref emissions,
@@ -74,8 +162,27 @@ internal sealed class WindowRuntime<TEvent>
                     previousState.Segments,
                     previousState.Tags,
                     WindowBoundaryReason.ActivePredicateEnded));
+            ObserveRollUps(
+                @event,
+                source,
+                partition,
+                key,
+                childIsActive: false,
+                childChanged: true,
+                previousState.Segments,
+                previousState.Tags,
+                journal,
+                ref emissions);
+            return;
         }
-        else if (segmentChanged && previousState is not null)
+
+        journal.Remove(this.pendingConfirmations, stateKey);
+        var currentSegments = this.definition.GetSegments(@event);
+        var currentTags = this.definition.GetTags(@event);
+        var segmentChanged = !SegmentsEqual(previousState.Segments, currentSegments);
+        var observedRollUps = false;
+
+        if (segmentChanged)
         {
             var boundaryChanges = GetSegmentChanges(previousState.Segments, currentSegments);
             AddEmission(
@@ -103,7 +210,6 @@ internal sealed class WindowRuntime<TEvent>
                     partition,
                     currentSegments,
                     currentTags));
-            changed = true;
             ObserveRollUpSegmentTransitions(
                 @event,
                 source,
@@ -120,29 +226,28 @@ internal sealed class WindowRuntime<TEvent>
 
         if (!observedRollUps)
         {
-            var observedState = isActive
-                ? new ActiveWindowState(currentSegments, currentTags)
-                : previousState ?? new ActiveWindowState(Segments: [], Tags: []);
             ObserveRollUps(
                 @event,
                 source,
                 partition,
                 key,
-                isActive,
-                changed,
-                observedState.Segments,
-                observedState.Tags,
+                childIsActive: true,
+                childChanged: false,
+                currentSegments,
+                currentTags,
                 journal,
                 ref emissions);
         }
     }
 
-    public void TrimInactiveState()
+    private int IncrementConfirmation(
+        RuntimeStateKey stateKey,
+        RuntimeMutationJournal journal)
     {
-        foreach (var rollUp in this.rollUps)
-        {
-            rollUp.TrimInactiveState();
-        }
+        var current = this.pendingConfirmations.GetValueOrDefault(stateKey);
+        var next = checked(current + 1);
+        journal.Set(this.pendingConfirmations, stateKey, next);
+        return next;
     }
 
     private void ObserveRollUps(
