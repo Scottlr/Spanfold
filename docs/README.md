@@ -75,3 +75,17 @@ route attributes let `language.js` navigate between equivalent C# and Rust
 pages while preserving the selected language elsewhere in the site. A neutral
 chooser can omit `data-language-route` and keep both route attributes so either
 header language control opens the corresponding journey.
+
+The same metadata owns other paired routes, including the API references:
+
+```html
+<body
+  data-language="rust"
+  data-language-route="rust"
+  data-csharp-href="api-csharp.html"
+  data-rust-href="api-rust.html">
+```
+
+Register both dedicated routes against the same parent key in `site-shell.js`.
+The primary navigation then marks the API parent with `aria-current="location"`,
+while the page's language route selector marks the exact page.
