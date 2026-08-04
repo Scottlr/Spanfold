@@ -2,11 +2,11 @@
 
 use super::*;
 
-pub(super) fn build_row_finalities(
-    rows: &ComparisonRows,
+pub(super) fn build_row_state(
+    rows: ComparisonRows,
     provisional_record_ids: &BTreeSet<String>,
     gap_provisional_record_ids: &BTreeSet<String>,
-) -> Vec<ComparisonRowFinality> {
+) -> ComparisonRowState {
     let mut finalities = Vec::new();
     append_overlap_finalities(&mut finalities, &rows.overlap, provisional_record_ids);
     append_residual_finalities(&mut finalities, &rows.residual, provisional_record_ids);
@@ -21,7 +21,7 @@ pub(super) fn build_row_finalities(
     append_containment_finalities(&mut finalities, &rows.containment, provisional_record_ids);
     append_lead_lag_finalities(&mut finalities, &rows.lead_lag, provisional_record_ids);
     append_as_of_finalities(&mut finalities, &rows.as_of, provisional_record_ids);
-    finalities
+    ComparisonRowState::new(rows, finalities)
 }
 
 fn stable_row_id<T: Serialize>(kind: ComparisonRowKind, row: &T) -> String {

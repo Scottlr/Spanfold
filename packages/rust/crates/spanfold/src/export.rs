@@ -210,6 +210,7 @@ fn append_result_json_lines(
 }
 
 fn result_summary_json_value(result: &ComparisonResult) -> Value {
+    let rows = result.canonical_rows();
     json!({
         "schema": ROW_SCHEMA,
         "schemaVersion": SCHEMA_VERSION,
@@ -219,15 +220,15 @@ fn result_summary_json_value(result: &ComparisonResult) -> Value {
         "knownAt": result.known_at,
         "evaluationHorizon": result.evaluation_horizon,
         "diagnosticCount": result.diagnostics.len(),
-        "overlapRowCount": result.overlap_rows.len(),
-        "residualRowCount": result.residual_rows.len(),
-        "missingRowCount": result.missing_rows.len(),
-        "coverageRowCount": result.coverage_rows.len(),
-        "gapRowCount": result.gap_rows.len(),
-        "symmetricDifferenceRowCount": result.symmetric_difference_rows.len(),
-        "containmentRowCount": result.containment_rows.len(),
-        "leadLagRowCount": result.lead_lag_rows.len(),
-        "asOfRowCount": result.as_of_rows.len()
+        "overlapRowCount": rows.overlap.len(),
+        "residualRowCount": rows.residual.len(),
+        "missingRowCount": rows.missing.len(),
+        "coverageRowCount": rows.coverage.len(),
+        "gapRowCount": rows.gap.len(),
+        "symmetricDifferenceRowCount": rows.symmetric_difference.len(),
+        "containmentRowCount": rows.containment.len(),
+        "leadLagRowCount": rows.lead_lag.len(),
+        "asOfRowCount": rows.as_of.len()
     })
 }
 
@@ -334,14 +335,14 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
     macro_rules! append_row_counts {
         ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
             $(
-                text.push_str(&format!("- {}: {}\n", $count, result.$compat.len()));
+                text.push_str(&format!("- {}: {}\n", $count, result.canonical_rows().$rows.len()));
             )*
         };
     }
     crate::comparison::for_each_comparison_row_family!(append_row_counts);
     text.push_str(&format!(
         "- row finalities: {}\n\n",
-        result.row_finalities.len()
+        result.canonical_row_finalities().count()
     ));
 
     text.push_str("## Row Evidence\n\n");
@@ -351,7 +352,7 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
                 append_markdown_rows(
                     &mut text,
                     ComparisonRowKind::$kind.as_str(),
-                    &result.$compat,
+                    &result.canonical_rows().$rows,
                 );
             )*
         };
@@ -695,6 +696,7 @@ fn selector_json(selector: &ComparisonSelector) -> Value {
 }
 
 fn build_result_json_value(result: &ComparisonResult) -> Result<Value, ComparisonExportError> {
+    let row_finalities = result.canonical_row_finalities().collect::<Vec<_>>();
     Ok(json!({
         "schema": RESULT_SCHEMA,
         "schemaVersion": SCHEMA_VERSION,
@@ -718,7 +720,7 @@ fn build_result_json_value(result: &ComparisonResult) -> Result<Value, Compariso
             "leadLag": build_row_values(result.lead_lag_rows_with_finality()?)?,
             "asOf": build_row_values(result.as_of_rows_with_finality()?)?
         },
-        "rowFinalities": result.row_finalities,
+        "rowFinalities": row_finalities,
         "extensionMetadata": result.extension_metadata,
         "coverageSummaries": result.coverage_summaries,
         "leadLagSummaries": result.lead_lag_summaries
@@ -758,16 +760,17 @@ fn build_row_values<'a, T: Serialize + 'a>(
 }
 
 fn row_counts_json(result: &ComparisonResult) -> Value {
+    let rows = result.canonical_rows();
     json!({
-        "overlap": result.overlap_rows.len(),
-        "residual": result.residual_rows.len(),
-        "missing": result.missing_rows.len(),
-        "coverage": result.coverage_rows.len(),
-        "gap": result.gap_rows.len(),
-        "symmetricDifference": result.symmetric_difference_rows.len(),
-        "containment": result.containment_rows.len(),
-        "leadLag": result.lead_lag_rows.len(),
-        "asOf": result.as_of_rows.len()
+        "overlap": rows.overlap.len(),
+        "residual": rows.residual.len(),
+        "missing": rows.missing.len(),
+        "coverage": rows.coverage.len(),
+        "gap": rows.gap.len(),
+        "symmetricDifference": rows.symmetric_difference.len(),
+        "containment": rows.containment.len(),
+        "leadLag": rows.lead_lag.len(),
+        "asOf": rows.as_of.len()
     })
 }
 
@@ -1035,6 +1038,21 @@ mod tests {
         assert_eq!(error.actual_count, wrong_kind.rows.residual.len() - 1);
         assert_eq!(error.expected_kind, ComparisonRowKind::Residual);
         assert_eq!(error.actual_kind.as_deref(), Some("lead-lag"));
+
+        let mut divergent_rows = all_row_family_result();
+        std::sync::Arc::make_mut(&mut divergent_rows.rows.overlap)[0]
+            .range
+            .end += 1;
+        let divergence = export_result_json(&divergent_rows)
+            .expect_err("divergent compatibility rows must fail export");
+        let ComparisonExportError::InconsistentRowMetadata(divergence) = divergence else {
+            panic!("unexpected export error: {divergence}");
+        };
+        assert_eq!(divergence.family, ComparisonRowKind::Overlap);
+        assert_eq!(
+            divergence.actual_kind.as_deref(),
+            Some("compatibility projection diverged")
+        );
     }
 
     #[test]

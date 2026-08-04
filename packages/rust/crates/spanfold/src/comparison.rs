@@ -51,12 +51,13 @@ pub(crate) use for_each_comparison_row_family;
 mod rows;
 use rows::RowAccumulator;
 pub use rows::*;
+mod state;
+use state::{ComparisonResultState, ComparisonRowState};
 mod comparators;
 use comparators::*;
 mod finality;
 use finality::*;
 mod trace;
-use trace::ComparisonTraceContext;
 pub use trace::{
     AnyComparisonRowTrace, ComparisonRowTrace, ComparisonRowTraceError, ComparisonRowTraceLineage,
 };
@@ -1502,10 +1503,8 @@ struct ResultArtifacts {
     comparator_summaries: Vec<ComparatorSummary>,
     coverage_summaries: Vec<CoverageSummary>,
     lead_lag_summaries: Vec<LeadLagSummary>,
-    row_finalities: Vec<ComparisonRowFinality>,
     extension_metadata: Vec<ComparisonExtensionMetadata>,
-    rows: ComparisonRows,
-    trace_context: Option<Arc<ComparisonTraceContext>>,
+    state: ComparisonResultState,
 }
 
 /// Portable selected/excluded/normalized window artifact.
@@ -1734,10 +1733,12 @@ fn execute_compare(
                 comparator_summaries: Vec::new(),
                 coverage_summaries: Vec::new(),
                 lead_lag_summaries: Vec::new(),
-                row_finalities: Vec::new(),
                 extension_metadata: Vec::new(),
-                rows: ComparisonRows::default(),
-                trace_context: None,
+                state: ComparisonResultState::new(
+                    Some(prepared),
+                    None,
+                    ComparisonRowState::empty(),
+                ),
             },
         );
         result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -1745,9 +1746,6 @@ fn execute_compare(
             .as_ref()
             .or(plan.open_window_horizon.as_ref())
             .map(row_point_from_temporal_point);
-        if plan.output.include_explain_data {
-            result.prepared = Some(serde_json::to_value(prepared).expect("prepared artifact"));
-        }
         return result;
     }
 
@@ -1847,19 +1845,8 @@ fn execute_compare(
         .collect::<BTreeSet<_>>();
     let rows = rows.into_shared();
     let coverage_summaries = build_coverage_summaries(&rows.coverage);
-    let row_finalities =
-        build_row_finalities(&rows, &provisional_record_ids, &gap_provisional_record_ids);
-
-    let prepared_value = if plan.output.include_explain_data {
-        Some(serde_json::to_value(&prepared).expect("prepared artifact"))
-    } else {
-        None
-    };
-    let aligned_value = if plan.output.include_aligned_segments {
-        Some(serde_json::to_value(&aligned).expect("aligned artifact"))
-    } else {
-        None
-    };
+    let row_state = build_row_state(rows, &provisional_record_ids, &gap_provisional_record_ids);
+    let extension_metadata = build_extension_metadata(&aligned, plan);
 
     let mut result = materialize_result(
         plan,
@@ -1872,10 +1859,8 @@ fn execute_compare(
             comparator_summaries,
             coverage_summaries,
             lead_lag_summaries,
-            row_finalities,
-            extension_metadata: build_extension_metadata(&aligned, plan),
-            rows,
-            trace_context: Some(Arc::new(ComparisonTraceContext { prepared, aligned })),
+            extension_metadata,
+            state: ComparisonResultState::new(Some(prepared), Some(aligned), row_state),
         },
     );
     result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -1883,8 +1868,6 @@ fn execute_compare(
         .as_ref()
         .or(plan.open_window_horizon.as_ref())
         .map(row_point_from_temporal_point);
-    result.prepared = prepared_value;
-    result.aligned = aligned_value;
     result
 }
 
@@ -1901,10 +1884,8 @@ fn invalid_result(
             comparator_summaries: Vec::new(),
             coverage_summaries: Vec::new(),
             lead_lag_summaries: Vec::new(),
-            row_finalities: Vec::new(),
             extension_metadata: Vec::new(),
-            rows: ComparisonRows::default(),
-            trace_context: None,
+            state: ComparisonResultState::empty(),
         },
     );
     result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -2028,6 +2009,22 @@ fn materialize_result(
     diagnostics: Vec<ComparisonDiagnostic>,
     artifacts: ResultArtifacts,
 ) -> ComparisonResult {
+    let state = Arc::new(artifacts.state);
+    let rows = state.rows().clone();
+    let prepared = plan
+        .output
+        .include_explain_data
+        .then(|| state.prepared())
+        .flatten()
+        .map(|prepared| serde_json::to_value(prepared).expect("prepared artifact"));
+    let aligned = plan
+        .output
+        .include_aligned_segments
+        .then(|| state.aligned())
+        .flatten()
+        .map(|aligned| serde_json::to_value(aligned).expect("aligned artifact"));
+    let row_finalities = state.compatibility_finalities();
+
     ComparisonResult {
         schema: "spanfold.comparison.result".to_owned(),
         schema_version: 0,
@@ -2036,26 +2033,26 @@ fn materialize_result(
         plan_name: plan_name.to_owned(),
         is_valid,
         diagnostics,
-        prepared: None,
-        aligned: None,
+        prepared,
+        aligned,
         known_at: None,
         evaluation_horizon: None,
         comparator_summaries: artifacts.comparator_summaries,
         coverage_summaries: artifacts.coverage_summaries,
-        overlap_rows: Arc::clone(&artifacts.rows.overlap),
-        residual_rows: Arc::clone(&artifacts.rows.residual),
-        missing_rows: Arc::clone(&artifacts.rows.missing),
-        coverage_rows: Arc::clone(&artifacts.rows.coverage),
-        gap_rows: Arc::clone(&artifacts.rows.gap),
-        symmetric_difference_rows: Arc::clone(&artifacts.rows.symmetric_difference),
-        containment_rows: Arc::clone(&artifacts.rows.containment),
-        lead_lag_rows: Arc::clone(&artifacts.rows.lead_lag),
+        overlap_rows: Arc::clone(&rows.overlap),
+        residual_rows: Arc::clone(&rows.residual),
+        missing_rows: Arc::clone(&rows.missing),
+        coverage_rows: Arc::clone(&rows.coverage),
+        gap_rows: Arc::clone(&rows.gap),
+        symmetric_difference_rows: Arc::clone(&rows.symmetric_difference),
+        containment_rows: Arc::clone(&rows.containment),
+        lead_lag_rows: Arc::clone(&rows.lead_lag),
         lead_lag_summaries: artifacts.lead_lag_summaries,
-        as_of_rows: Arc::clone(&artifacts.rows.as_of),
-        row_finalities: artifacts.row_finalities,
+        as_of_rows: Arc::clone(&rows.as_of),
+        row_finalities,
         extension_metadata: artifacts.extension_metadata,
-        rows: artifacts.rows,
-        trace_context: artifacts.trace_context,
+        rows,
+        state,
     }
 }
 
@@ -2936,6 +2933,54 @@ mod tests {
         assert_eq!(result.overlap_rows[0].range.end, 5);
         assert_eq!(result.residual_rows[0].range.start, 1);
         assert_eq!(result.residual_rows[0].range.end, 3);
+    }
+
+    #[test]
+    fn canonical_state_preserves_direct_serialize_and_flat_compatibility_views() {
+        let fixture = ContractFixture::parse_json(include_str!(
+            "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/basic-overlap.json"
+        ))
+        .expect("fixture should parse");
+        let result = compare(fixture.history(), fixture.plan());
+
+        macro_rules! assert_shared_compatibility_rows {
+            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+                $(assert!(Arc::ptr_eq(&result.rows.$rows, &result.$compat));)*
+            };
+        }
+        for_each_comparison_row_family!(assert_shared_compatibility_rows);
+
+        assert_eq!(result.state.rows(), &result.rows);
+        assert_eq!(
+            result.state.compatibility_finalities(),
+            result.row_finalities
+        );
+        assert_eq!(
+            serde_json::to_value(result.state.prepared().expect("typed prepared"))
+                .expect("serialize typed prepared"),
+            *result
+                .prepared
+                .as_ref()
+                .expect("prepared compatibility value")
+        );
+        assert_eq!(
+            serde_json::to_value(result.state.aligned().expect("typed aligned"))
+                .expect("serialize typed aligned"),
+            *result
+                .aligned
+                .as_ref()
+                .expect("aligned compatibility value")
+        );
+
+        let serialized = serde_json::to_value(&result).expect("serialize result directly");
+        let object = serialized.as_object().expect("result object");
+        assert!(object.contains_key("prepared"));
+        assert!(object.contains_key("aligned"));
+        assert!(object.contains_key("rows"));
+        assert!(object.contains_key("rowFinalities"));
+        assert!(!object.contains_key("state"));
+        assert!(!object.contains_key("plan"));
+        assert!(!object.contains_key("overlap_rows"));
     }
 
     #[test]

@@ -9,14 +9,13 @@ pub fn export_result_debug_html(result: &ComparisonResult) -> String {
     macro_rules! count_rows {
         ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
             $(
-                row_count += result.$compat.len();
+                row_count += result.canonical_rows().$rows.len();
             )*
         };
     }
     crate::comparison::for_each_comparison_row_family!(count_rows);
     let provisional_rows = result
-        .row_finalities
-        .iter()
+        .canonical_row_finalities()
         .filter(|row| row.finality == ComparisonFinality::Provisional)
         .count();
 
@@ -256,15 +255,16 @@ fn append_debug_rows(html: &mut String, result: &ComparisonResult) {
     macro_rules! append_tables {
         ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
             $(
-                append_debug_row_table(html, $debug, &result.$compat);
+                append_debug_row_table(html, $debug, &result.canonical_rows().$rows);
             )*
         };
     }
     crate::comparison::for_each_comparison_row_family!(append_tables);
-    if result.row_finalities.is_empty() {
+    let finalities = result.canonical_row_finalities().collect::<Vec<_>>();
+    if finalities.is_empty() {
         html.push_str("<div class=\"empty\" style=\"margin-top:18px\">No row finalities.</div>");
     } else {
-        append_debug_row_table(html, "row-finality", &result.row_finalities);
+        append_debug_row_table(html, "row-finality", &finalities);
     }
     html.push_str("</section>");
 }
