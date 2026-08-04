@@ -39,6 +39,8 @@ pub mod pipeline;
 mod primitive;
 /// Window history, records, and query/summarization APIs.
 pub mod records;
+/// Ordered cross-window sequence matching over recorded history.
+pub mod sequences;
 /// Temporal axes, points, ranges, and domain validation.
 pub mod temporal;
 mod testing;
@@ -110,6 +112,7 @@ pub use records::{
     WindowSegment, WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment,
     summarize_by_tag,
 };
+pub use sequences::{WindowSequenceBuilder, WindowSequenceError, WindowSequenceMatch};
 pub use temporal::{
     TemporalAxis, TemporalPoint, TemporalPointError, TemporalRange, TemporalRangeError,
 };

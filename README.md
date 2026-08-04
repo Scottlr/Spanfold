@@ -178,6 +178,8 @@ Auditing a past decision means using only what was knowable at the time — not 
 
 **Episodes (.NET preview and Rust)** — stitch nearby windows on each side into occurrences, then classify the complete relation graph as one-to-one, split, merge, complex, or unmatched. Fragments remain the active evidence; episode envelopes describe elapsed occurrence extent.
 
+**Ordered sequences (.NET preview and Rust)** — match literal named window-family steps within one key/source/partition lane, with deterministic non-reuse, optional processing-position gaps, and provisional live evidence.
+
 **Known-at safety** — separates when a state happened from when it was observable. Prevents future leakage in backtests and replays.
 
 **Live horizons** — an explicit cutoff for evaluating still-open windows. Preserves provisional row metadata so live and final rows are distinguishable.

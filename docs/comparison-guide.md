@@ -56,6 +56,64 @@ the target side is deliberately the reference. The API is available through
 `Spanfold.Episodes` in the .NET preview and through `WindowHistory::form_episodes`
 and `WindowHistory::compare_episodes` in Rust.
 
+## Ordered Journeys Across Window Families
+
+Use an ordered sequence when each step is a different interpreted state and
+the question is whether one lane followed a journey such as `Warning` →
+`Offline` → `Recovered`. Sequence matching is deliberately narrower than a
+complex-event language: it accepts literal named window-family steps and an
+optional processing-position gap, with no branching, negation, loops, or
+causal claim.
+
+```csharp
+using Spanfold.Sequences;
+
+var matches = pipeline.History
+    .MatchSequence("incident journey")
+    .Step("Warning")
+    .Then("Offline")
+    .Then("Recovered")
+    .WithMaximumGap(5)
+    .Run()
+    .Matches;
+```
+
+```rust
+let matches = pipeline
+    .history()
+    .match_sequence("incident journey")
+    .step("Warning")
+    .then("Offline")
+    .then("Recovered")
+    .with_maximum_gap(5)
+    .run()?;
+```
+
+Steps correlate only within one key, source, and partition lane. Rust uses its
+exact string key identity. In .NET, the first step anchors the lane and its
+configured history key comparer is applied to every later step; source and
+partition still use exact equality.
+
+Ordering uses window onset, so later steps may overlap earlier evidence. A
+transition is eligible when its onset is at or after the previous step's onset.
+Its inactive gap is `max(0, next start - previous effective end)`, and
+`WithMaximumGap(...)` applies that inclusive limit to every transition. A
+match starts at the first onset and completes at the latest effective end
+across its evidence.
+
+Matching is deterministic earliest-completion greedy. Candidates for each step
+are ordered by effective end, then onset, then record ID. The first compatible
+unused candidate is selected for each later step; evidence is consumed only
+after a complete chain is found, and a committed window is never reused.
+Spanfold does not enumerate alternative matches.
+
+Historical `Run()` requires selected evidence to be closed. Use
+`RunLive(TemporalPoint.ForPosition(...))` in .NET or
+`run_live(TemporalPoint::position(...))` in Rust for current history. Live
+matching reuses history snapshots: future evidence is excluded, active evidence
+is clipped to the horizon, and a match is provisional when any selected step
+is provisional.
+
 ## Temporal Model
 
 Processing-position comparisons are the default. Positions are assigned during

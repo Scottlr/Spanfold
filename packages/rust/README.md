@@ -81,6 +81,22 @@ let result = history
     .run();
 ```
 
+## Ordered Sequences
+
+Match literal named window families in onset order within one exact
+key/source/partition lane. Complete matches consume their evidence and live
+matching preserves provisional finality.
+
+```rust
+let journeys = history
+    .match_sequence("incident journey")
+    .step("Warning")
+    .then("Offline")
+    .then("Recovered")
+    .with_maximum_gap(5)
+    .run()?;
+```
+
 ## Repository development commands
 
 ```bash
@@ -107,6 +123,7 @@ cargo bench -p spanfold --bench spanfold_benchmarks
 | Known-at filtering, live horizons, row finality, changelog | Implemented |
 | Cohorts, source matrix, hierarchy, nested roll-ups | Implemented |
 | Episode formation, relation graphs, summaries, reference scorecards | Implemented |
+| Ordered cross-window sequences with live finality | Implemented |
 | JSON, JSON Lines, Markdown, debug HTML, LLM context exports and configured run exports | Implemented; conformance gate pending |
 | Fixture CLI, window JSONL audit CLI, audit bundles | Implemented |
 | Event JSONL/CSV import and audit CLI | Implemented |
