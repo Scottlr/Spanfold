@@ -1171,10 +1171,137 @@ fn compare_window_refs(left: WindowRef<'_>, right: WindowRef<'_>) -> Ordering {
         .then_with(|| left.id().cmp(right.id()))
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct WindowQuerySpec {
+    window_names: Vec<String>,
+    keys: Vec<String>,
+    sources: Vec<String>,
+    partitions: Vec<String>,
+    segments: Vec<(String, PrimitiveValue)>,
+    tags: Vec<(String, PrimitiveValue)>,
+}
+
+impl WindowQuerySpec {
+    fn matches(&self, record: &impl WindowQueryRecord) -> bool {
+        self.window_names
+            .iter()
+            .all(|window_name| record.query_window_name() == window_name)
+            && self.keys.iter().all(|key| record.query_key() == key)
+            && self
+                .sources
+                .iter()
+                .all(|source| record.query_source() == Some(source.as_str()))
+            && self
+                .partitions
+                .iter()
+                .all(|partition| record.query_partition() == Some(partition.as_str()))
+            && self.segments.iter().all(|(name, value)| {
+                record
+                    .query_segments()
+                    .iter()
+                    .any(|segment| segment.name == *name && segment.value == *value)
+            })
+            && self.tags.iter().all(|(name, value)| {
+                record
+                    .query_tags()
+                    .iter()
+                    .any(|tag| tag.name == *name && tag.value == *value)
+            })
+    }
+}
+
+trait WindowQueryRecord {
+    fn query_window_name(&self) -> &str;
+    fn query_key(&self) -> &str;
+    fn query_source(&self) -> Option<&str>;
+    fn query_partition(&self) -> Option<&str>;
+    fn query_segments(&self) -> &[WindowSegment];
+    fn query_tags(&self) -> &[WindowTag];
+}
+
+impl WindowQueryRecord for WindowRef<'_> {
+    fn query_window_name(&self) -> &str {
+        (*self).window_name()
+    }
+
+    fn query_key(&self) -> &str {
+        (*self).key()
+    }
+
+    fn query_source(&self) -> Option<&str> {
+        (*self).source()
+    }
+
+    fn query_partition(&self) -> Option<&str> {
+        (*self).partition()
+    }
+
+    fn query_segments(&self) -> &[WindowSegment] {
+        (*self).segments()
+    }
+
+    fn query_tags(&self) -> &[WindowTag] {
+        (*self).tags()
+    }
+}
+
+impl WindowQueryRecord for WindowRecord {
+    fn query_window_name(&self) -> &str {
+        self.window_name()
+    }
+
+    fn query_key(&self) -> &str {
+        self.key()
+    }
+
+    fn query_source(&self) -> Option<&str> {
+        self.source()
+    }
+
+    fn query_partition(&self) -> Option<&str> {
+        self.partition()
+    }
+
+    fn query_segments(&self) -> &[WindowSegment] {
+        self.segments()
+    }
+
+    fn query_tags(&self) -> &[WindowTag] {
+        self.tags()
+    }
+}
+
+impl WindowQueryRecord for WindowSnapshotRecord {
+    fn query_window_name(&self) -> &str {
+        self.window.window_name()
+    }
+
+    fn query_key(&self) -> &str {
+        self.window.key()
+    }
+
+    fn query_source(&self) -> Option<&str> {
+        self.window.source()
+    }
+
+    fn query_partition(&self) -> Option<&str> {
+        self.window.partition()
+    }
+
+    fn query_segments(&self) -> &[WindowSegment] {
+        self.window.segments()
+    }
+
+    fn query_tags(&self) -> &[WindowTag] {
+        self.window.tags()
+    }
+}
+
 /// Fluent direct query API borrowing recorded windows.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WindowHistoryRefQuery<'a> {
     windows: Vec<WindowRef<'a>>,
+    spec: WindowQuerySpec,
 }
 
 impl<'a> WindowHistoryRefQuery<'a> {
@@ -1186,63 +1313,51 @@ impl<'a> WindowHistoryRefQuery<'a> {
             .chain(history.open.iter().map(WindowRef::Open))
             .collect::<Vec<_>>();
         windows.sort_by(|left, right| compare_window_refs(*left, *right));
-        Self { windows }
+        Self {
+            windows,
+            spec: WindowQuerySpec::default(),
+        }
     }
 
     /// Filters by configured window name.
     #[must_use]
     pub fn where_window(mut self, window_name: &str) -> Self {
-        self.windows
-            .retain(|window| window.window_name() == window_name);
+        self.spec.window_names.push(window_name.to_owned());
         self
     }
 
     /// Filters by logical key.
     #[must_use]
     pub fn where_key(mut self, key: &str) -> Self {
-        self.windows.retain(|window| window.key() == key);
+        self.spec.keys.push(key.to_owned());
         self
     }
 
     /// Filters by source/lane.
     #[must_use]
     pub fn where_source(mut self, source: &str) -> Self {
-        self.windows
-            .retain(|window| window.source() == Some(source));
+        self.spec.sources.push(source.to_owned());
         self
     }
 
     /// Filters by partition.
     #[must_use]
     pub fn where_partition(mut self, partition: &str) -> Self {
-        self.windows
-            .retain(|window| window.partition() == Some(partition));
+        self.spec.partitions.push(partition.to_owned());
         self
     }
 
     /// Filters by segment value.
     #[must_use]
     pub fn where_segment(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        let value = value.into();
-        self.windows.retain(|window| {
-            window
-                .segments()
-                .iter()
-                .any(|segment| segment.name == name && segment.value == value)
-        });
+        self.spec.segments.push((name.to_owned(), value.into()));
         self
     }
 
     /// Filters by tag value.
     #[must_use]
     pub fn where_tag(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        let value = value.into();
-        self.windows.retain(|window| {
-            window
-                .tags()
-                .iter()
-                .any(|tag| tag.name == name && tag.value == value)
-        });
+        self.spec.tags.push((name.to_owned(), value.into()));
         self
     }
 
@@ -1263,7 +1378,12 @@ impl<'a> WindowHistoryRefQuery<'a> {
     /// Materializes matching windows only at the result boundary.
     #[must_use]
     pub fn windows(&self) -> Vec<WindowRecord> {
-        self.windows.iter().copied().map(WindowRef::owned).collect()
+        self.windows
+            .iter()
+            .filter(|window| self.spec.matches(*window))
+            .copied()
+            .map(WindowRef::owned)
+            .collect()
     }
 
     /// Materializes matching closed windows.
@@ -1271,6 +1391,7 @@ impl<'a> WindowHistoryRefQuery<'a> {
     pub fn closed_windows(&self) -> Vec<ClosedWindow> {
         self.windows
             .iter()
+            .filter(|window| self.spec.matches(*window))
             .filter_map(|window| match window {
                 WindowRef::Closed(window) => Some((*window).clone()),
                 WindowRef::Open(_) => None,
@@ -1283,6 +1404,7 @@ impl<'a> WindowHistoryRefQuery<'a> {
     pub fn open_windows(&self) -> Vec<OpenWindow> {
         self.windows
             .iter()
+            .filter(|window| self.spec.matches(*window))
             .filter_map(|window| match window {
                 WindowRef::Closed(_) => None,
                 WindowRef::Open(window) => Some((*window).clone()),
@@ -1293,7 +1415,11 @@ impl<'a> WindowHistoryRefQuery<'a> {
     /// Returns the latest matching window.
     #[must_use]
     pub fn latest(&self) -> Option<WindowRecord> {
-        self.windows.last().copied().map(WindowRef::owned)
+        self.windows
+            .iter()
+            .rfind(|window| self.spec.matches(*window))
+            .copied()
+            .map(WindowRef::owned)
     }
 
     /// Summarizes matching windows by segment.
@@ -1310,10 +1436,25 @@ impl<'a> WindowHistoryRefQuery<'a> {
     }
 }
 
+impl std::fmt::Debug for WindowHistoryRefQuery<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let windows = self
+            .windows
+            .iter()
+            .filter(|window| self.spec.matches(*window))
+            .collect::<Vec<_>>();
+        formatter
+            .debug_struct("WindowHistoryRefQuery")
+            .field("windows", &windows)
+            .finish()
+    }
+}
+
 /// Fluent direct query API for owned window records.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct WindowHistoryQuery {
     windows: Vec<WindowRecord>,
+    spec: WindowQuerySpec,
 }
 
 impl WindowHistoryQuery {
@@ -1321,63 +1462,51 @@ impl WindowHistoryQuery {
     #[must_use]
     pub fn new(mut windows: Vec<WindowRecord>) -> Self {
         sort_window_records(&mut windows);
-        Self { windows }
+        Self {
+            windows,
+            spec: WindowQuerySpec::default(),
+        }
     }
 
     /// Filters by configured window name.
     #[must_use]
     pub fn where_window(mut self, window_name: &str) -> Self {
-        self.windows
-            .retain(|window| window.window_name() == window_name);
+        self.spec.window_names.push(window_name.to_owned());
         self
     }
 
     /// Filters by logical key.
     #[must_use]
     pub fn where_key(mut self, key: &str) -> Self {
-        self.windows.retain(|window| window.key() == key);
+        self.spec.keys.push(key.to_owned());
         self
     }
 
     /// Filters by source/lane.
     #[must_use]
     pub fn where_source(mut self, source: &str) -> Self {
-        self.windows
-            .retain(|window| window.source() == Some(source));
+        self.spec.sources.push(source.to_owned());
         self
     }
 
     /// Filters by partition.
     #[must_use]
     pub fn where_partition(mut self, partition: &str) -> Self {
-        self.windows
-            .retain(|window| window.partition() == Some(partition));
+        self.spec.partitions.push(partition.to_owned());
         self
     }
 
     /// Filters by segment value.
     #[must_use]
     pub fn where_segment(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        let value = value.into();
-        self.windows.retain(|window| {
-            window
-                .segments()
-                .iter()
-                .any(|segment| segment.name == name && segment.value == value)
-        });
+        self.spec.segments.push((name.to_owned(), value.into()));
         self
     }
 
     /// Filters by tag value.
     #[must_use]
     pub fn where_tag(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        let value = value.into();
-        self.windows.retain(|window| {
-            window
-                .tags()
-                .iter()
-                .any(|tag| tag.name == name && tag.value == value)
-        });
+        self.spec.tags.push((name.to_owned(), value.into()));
         self
     }
 
@@ -1398,7 +1527,11 @@ impl WindowHistoryQuery {
     /// Materializes matching windows.
     #[must_use]
     pub fn windows(&self) -> Vec<WindowRecord> {
-        self.windows.clone()
+        self.windows
+            .iter()
+            .filter(|window| self.spec.matches(*window))
+            .cloned()
+            .collect()
     }
 
     /// Materializes matching closed windows.
@@ -1406,6 +1539,7 @@ impl WindowHistoryQuery {
     pub fn closed_windows(&self) -> Vec<ClosedWindow> {
         self.windows
             .iter()
+            .filter(|window| self.spec.matches(*window))
             .filter_map(|window| match window {
                 WindowRecord::Closed(window) => Some(window.clone()),
                 WindowRecord::Open(_) => None,
@@ -1418,6 +1552,7 @@ impl WindowHistoryQuery {
     pub fn open_windows(&self) -> Vec<OpenWindow> {
         self.windows
             .iter()
+            .filter(|window| self.spec.matches(*window))
             .filter_map(|window| match window {
                 WindowRecord::Closed(_) => None,
                 WindowRecord::Open(window) => Some(window.clone()),
@@ -1428,7 +1563,10 @@ impl WindowHistoryQuery {
     /// Returns the latest matching window.
     #[must_use]
     pub fn latest(&self) -> Option<WindowRecord> {
-        self.windows.last().cloned()
+        self.windows
+            .iter()
+            .rfind(|window| self.spec.matches(*window))
+            .cloned()
     }
 
     /// Materializes matching snapshot records at a horizon.
@@ -1468,12 +1606,12 @@ impl WindowHistoryQuery {
         &self,
         name: &str,
     ) -> Result<Vec<WindowGroupSummary>, SummaryError> {
-        summarize_by_segment(self.windows.clone(), name)
+        summarize_by_segment(self.windows(), name)
     }
 
     /// Summarizes matching windows by tag.
     pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, SummaryError> {
-        summarize_by_tag(self.windows.clone(), name)
+        summarize_by_tag(self.windows(), name)
     }
 
     fn snapshot_at(
@@ -1481,9 +1619,8 @@ impl WindowHistoryQuery {
         horizon: TemporalPoint,
     ) -> Result<WindowHistorySnapshot, TemporalRangeError> {
         let mut records = self
-            .windows
-            .iter()
-            .cloned()
+            .windows()
+            .into_iter()
             .map(|window| snapshot_record(window, horizon.clone()))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -1491,6 +1628,21 @@ impl WindowHistoryQuery {
             .collect::<Vec<_>>();
         records.sort_by(|left, right| compare_window_records(&left.window, &right.window));
         Ok(WindowHistorySnapshot { horizon, records })
+    }
+}
+
+impl std::fmt::Debug for WindowHistoryQuery {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WindowHistoryQuery")
+            .field("windows", &self.windows())
+            .finish()
+    }
+}
+
+impl PartialEq for WindowHistoryQuery {
+    fn eq(&self, other: &Self) -> bool {
+        self.windows() == other.windows()
     }
 }
 
@@ -1503,10 +1655,11 @@ impl WindowHistorySnapshot {
 }
 
 /// Fluent direct query API for window snapshot records.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct WindowSnapshotQuery {
     horizon: TemporalPoint,
     records: Vec<WindowSnapshotRecord>,
+    spec: WindowQuerySpec,
 }
 
 impl WindowSnapshotQuery {
@@ -1514,72 +1667,63 @@ impl WindowSnapshotQuery {
     #[must_use]
     pub fn new(horizon: TemporalPoint, mut records: Vec<WindowSnapshotRecord>) -> Self {
         records.sort_by(|left, right| compare_window_records(&left.window, &right.window));
-        Self { horizon, records }
+        Self {
+            horizon,
+            records,
+            spec: WindowQuerySpec::default(),
+        }
     }
 
     /// Filters by configured window name.
     #[must_use]
     pub fn where_window(mut self, window_name: &str) -> Self {
-        self.records
-            .retain(|record| record.window.window_name() == window_name);
+        self.spec.window_names.push(window_name.to_owned());
         self
     }
 
     /// Filters by logical key.
     #[must_use]
     pub fn where_key(mut self, key: &str) -> Self {
-        self.records.retain(|record| record.window.key() == key);
+        self.spec.keys.push(key.to_owned());
         self
     }
 
     /// Filters by source/lane.
     #[must_use]
     pub fn where_source(mut self, source: &str) -> Self {
-        self.records
-            .retain(|record| record.window.source() == Some(source));
+        self.spec.sources.push(source.to_owned());
         self
     }
 
     /// Filters by partition.
     #[must_use]
     pub fn where_partition(mut self, partition: &str) -> Self {
-        self.records
-            .retain(|record| record.window.partition() == Some(partition));
+        self.spec.partitions.push(partition.to_owned());
         self
     }
 
     /// Filters by segment value.
     #[must_use]
     pub fn where_segment(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        let value = value.into();
-        self.records.retain(|record| {
-            record
-                .window
-                .segments()
-                .iter()
-                .any(|segment| segment.name == name && segment.value == value)
-        });
+        self.spec.segments.push((name.to_owned(), value.into()));
         self
     }
 
     /// Filters by tag value.
     #[must_use]
     pub fn where_tag(mut self, name: &str, value: impl Into<PrimitiveValue>) -> Self {
-        let value = value.into();
-        self.records.retain(|record| {
-            record
-                .window
-                .tags()
-                .iter()
-                .any(|tag| tag.name == name && tag.value == value)
-        });
+        self.spec.tags.push((name.to_owned(), value.into()));
         self
     }
 
     /// Materializes all matching snapshot records.
     #[must_use]
     pub fn windows(&self) -> Vec<WindowSnapshotRecord> {
-        self.records.clone()
+        self.records
+            .iter()
+            .filter(|record| self.spec.matches(*record))
+            .cloned()
+            .collect()
     }
 
     /// Materializes final snapshot records.
@@ -1587,6 +1731,7 @@ impl WindowSnapshotQuery {
     pub fn closed_windows(&self) -> Vec<WindowSnapshotRecord> {
         self.records
             .iter()
+            .filter(|record| self.spec.matches(*record))
             .filter(|record| record.finality == ComparisonFinality::Final)
             .cloned()
             .collect()
@@ -1597,6 +1742,7 @@ impl WindowSnapshotQuery {
     pub fn open_windows(&self) -> Vec<WindowSnapshotRecord> {
         self.records
             .iter()
+            .filter(|record| self.spec.matches(*record))
             .filter(|record| record.finality == ComparisonFinality::Provisional)
             .cloned()
             .collect()
@@ -1605,7 +1751,10 @@ impl WindowSnapshotQuery {
     /// Returns the latest matching snapshot record.
     #[must_use]
     pub fn latest_window(&self) -> Option<WindowSnapshotRecord> {
-        self.records.last().cloned()
+        self.records
+            .iter()
+            .rfind(|record| self.spec.matches(*record))
+            .cloned()
     }
 
     /// Summarizes matching snapshot records by segment.
@@ -1613,12 +1762,28 @@ impl WindowSnapshotQuery {
         &self,
         name: &str,
     ) -> Result<Vec<WindowGroupSummary>, SummaryError> {
-        summarize_snapshot_records(&self.records, WindowGroupKind::Segment, name)
+        summarize_snapshot_records(&self.windows(), WindowGroupKind::Segment, name)
     }
 
     /// Summarizes matching snapshot records by tag.
     pub fn summarize_by_tag(&self, name: &str) -> Result<Vec<WindowGroupSummary>, SummaryError> {
-        summarize_snapshot_records(&self.records, WindowGroupKind::Tag, name)
+        summarize_snapshot_records(&self.windows(), WindowGroupKind::Tag, name)
+    }
+}
+
+impl std::fmt::Debug for WindowSnapshotQuery {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WindowSnapshotQuery")
+            .field("horizon", &self.horizon)
+            .field("records", &self.windows())
+            .finish()
+    }
+}
+
+impl PartialEq for WindowSnapshotQuery {
+    fn eq(&self, other: &Self) -> bool {
+        self.horizon == other.horizon && self.windows() == other.windows()
     }
 }
 
