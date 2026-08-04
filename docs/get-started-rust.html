@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Build your first Spanfold temporal comparison in Rust.">
+  <title>Get started with Spanfold for Rust</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="rust" data-language-route="rust" data-csharp-href="get-started-csharp.html" data-rust-href="get-started-rust.html">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <nav class="journey-switch" aria-label="Getting started language">
+      <a href="get-started-csharp.html">C#</a>
+      <a href="get-started-rust.html" aria-current="page">Rust</a>
+    </nav>
+    <section class="page-hero compact">
+      <p class="eyebrow">Rust getting started</p>
+      <h1>Build your first temporal comparison in Rust.</h1>
+      <p class="lead">Start from an empty Cargo binary. The complete example uses Rust-native types and explicit error propagation to compare two providers' offline windows.</p>
+    </section>
+
+    <section class="doc-section" id="install">
+      <div class="section-heading">
+        <p class="eyebrow">1. Create the project</p>
+        <h2>Install Spanfold from crates.io.</h2>
+      </div>
+      <pre><code class="language-bash">cargo new spanfold-quickstart
+cd spanfold-quickstart
+cargo add spanfold@0.1.1</code></pre>
+    </section>
+
+    <section class="doc-section" id="implementation">
+      <div class="section-heading">
+        <p class="eyebrow">2. Add the example</p>
+        <h2>Replace <code>src/main.rs</code>.</h2>
+        <p>Processing positions keep the first result easy to inspect: each ingested event advances the position by one.</p>
+      </div>
+      <div class="wide-example">
+        <pre><code class="language-rust">use spanfold::for_events;
+use std::error::Error;
+
+#[derive(Clone)]
+struct DeviceStatus {
+    device_id: String,
+    is_online: bool,
+}
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn Error&gt;&gt; {
+    let mut pipeline = for_events::&lt;DeviceStatus&gt;()
+        .record_windows()
+        .track_window(
+            "DeviceOffline",
+            |status| status.device_id.clone(),
+            |status| !status.is_online,
+        )
+        .build()?;
+
+    pipeline.ingest(status(true), Some("provider-a"), None)?;  // position 1
+    pipeline.ingest(status(true), Some("provider-b"), None)?;  // position 2
+    pipeline.ingest(status(false), Some("provider-a"), None)?; // position 3, A opens
+    pipeline.ingest(status(false), Some("provider-b"), None)?; // position 4, B opens
+    pipeline.ingest(status(true), Some("provider-b"), None)?;  // position 5, B closes
+    pipeline.ingest(status(true), Some("provider-a"), None)?;  // position 6, A closes
+
+    let result = pipeline
+        .history()
+        .compare("Provider comparison")
+        .target_source("provider-a")
+        .against_source("provider-b")
+        .scope_window("DeviceOffline")
+        .overlap()
+        .residual()
+        .missing()
+        .run();
+
+    println!("closed windows: {}", pipeline.history().closed_windows().len());
+    println!("overlap rows: {}", result.overlap_rows.len());
+    println!("provider-a-only rows: {}", result.residual_rows.len());
+    println!("provider-b-only rows: {}", result.missing_rows.len());
+
+    for row in result.overlap_rows.iter() {
+        println!("overlap {}: {}..{}", row.key, row.range.start, row.range.end);
+    }
+
+    for row in result.residual_rows.iter() {
+        println!("a-only {}: {}..{}", row.key, row.range.start, row.range.end);
+    }
+
+    Ok(())
+}
+
+fn status(is_online: bool) -&gt; DeviceStatus {
+    DeviceStatus {
+        device_id: "device-17".into(),
+        is_online,
+    }
+}</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="run">
+      <div class="section-heading">
+        <p class="eyebrow">3. Run it</p>
+        <h2>Inspect the comparison rows.</h2>
+      </div>
+      <pre><code class="language-bash">cargo run</code></pre>
+      <div class="expected-output">
+        <pre><code>closed windows: 2
+overlap rows: 1
+provider-a-only rows: 2
+provider-b-only rows: 0
+overlap device-17: 4..5
+a-only device-17: 3..4
+a-only device-17: 5..6</code></pre>
+        <p>Provider A was offline from position 3 to 6; provider B from 4 to 5. The result keeps the shared interval and both A-only intervals as separate rows.</p>
+      </div>
+    </section>
+
+    <section class="doc-section">
+      <div class="section-heading">
+        <p class="eyebrow">4. Continue</p>
+        <h2>Move from the first comparison to your own history.</h2>
+      </div>
+      <div class="summary-list grid">
+        <a href="concepts.html"><strong>Learn the temporal model</strong><span>Understand windows, coordinates, queries, and comparisons.</span></a>
+        <a href="api.html"><strong>Browse the API</strong><span>Look up Rust builders, rows, exports, and testing helpers.</span></a>
+        <a href="https://github.com/Scottlr/spanfold/tree/main/packages/rust"><strong>Explore the Rust package</strong><span>Read crate documentation and source alongside the public guide.</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="https://github.com/Scottlr/spanfold">GitHub repository</a></footer>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+  <script src="syntax.js"></script>
+  <script src="site-shell.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>

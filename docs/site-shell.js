@@ -43,6 +43,8 @@
     ["index.html", "overview"],
     ["", "overview"],
     ["get-started.html", "get-started"],
+    ["get-started-csharp.html", "get-started"],
+    ["get-started-rust.html", "get-started"],
     ["concepts.html", "concepts"],
     ["use-cases.html", "use-cases"],
     ["concepts-querying-history.html", "query-history"],
@@ -64,6 +66,7 @@
 
   function buildNavigation(nav) {
     const activeKey = currentPageKey();
+    const currentFile = window.location.pathname.split("/").pop() || "";
     const fragment = document.createDocumentFragment();
 
     navigation.forEach((section) => {
@@ -81,7 +84,8 @@
         link.textContent = item.label;
         if (item.key === activeKey) {
           link.className = "active";
-          link.setAttribute("aria-current", "page");
+          const exactPage = item.href === currentFile || (item.key === "overview" && currentFile === "");
+          link.setAttribute("aria-current", exactPage ? "page" : "location");
         }
         container.appendChild(link);
       });

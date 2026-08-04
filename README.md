@@ -293,6 +293,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 - [Public site](docs/index.html)
 - [Get started](docs/get-started.html)
+- [Get started with C#](docs/get-started-csharp.html)
+- [Get started with Rust](docs/get-started-rust.html)
 - [Use cases](docs/use-cases.html)
 - [Visual Auditing](docs/visualiser.html)
 - [API reference](docs/api.html)

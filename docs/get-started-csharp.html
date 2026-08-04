@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Build your first Spanfold temporal comparison in C# with .NET 10.">
+  <title>Get started with Spanfold for C#</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="csharp" data-language-route="csharp" data-csharp-href="get-started-csharp.html" data-rust-href="get-started-rust.html">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <nav class="journey-switch" aria-label="Getting started language">
+      <a href="get-started-csharp.html" aria-current="page">C#</a>
+      <a href="get-started-rust.html">Rust</a>
+    </nav>
+    <section class="page-hero compact">
+      <p class="eyebrow">C# getting started</p>
+      <h1>Build your first temporal comparison in .NET.</h1>
+      <p class="lead">Start from an empty .NET 10 console application. The complete example records two providers' offline windows and compares them.</p>
+    </section>
+
+    <section class="doc-section" id="install">
+      <div class="section-heading">
+        <p class="eyebrow">1. Create the project</p>
+        <h2>Install Spanfold from NuGet.</h2>
+      </div>
+      <pre><code class="language-powershell">dotnet new console --framework net10.0 --name SpanfoldQuickstart
+cd SpanfoldQuickstart
+dotnet add package Spanfold --version 0.2.0-preview.1</code></pre>
+    </section>
+
+    <section class="doc-section" id="implementation">
+      <div class="section-heading">
+        <p class="eyebrow">2. Add the example</p>
+        <h2>Replace <code>Program.cs</code>.</h2>
+        <p>Processing positions keep the first result easy to inspect: each ingested event advances the position by one.</p>
+      </div>
+      <div class="wide-example">
+        <pre><code class="language-csharp">using Spanfold;
+
+var pipeline = EventPipeline
+    .For&lt;DeviceStatus&gt;()
+    .RecordWindows()
+    .TrackWindow(
+        "DeviceOffline",
+        key: status =&gt; status.DeviceId,
+        isActive: status =&gt; !status.IsOnline);
+
+Ingest("provider-a", isOnline: true);  // position 1
+Ingest("provider-b", isOnline: true);  // position 2
+Ingest("provider-a", isOnline: false); // position 3, A opens
+Ingest("provider-b", isOnline: false); // position 4, B opens
+Ingest("provider-b", isOnline: true);  // position 5, B closes
+Ingest("provider-a", isOnline: true);  // position 6, A closes
+
+var result = pipeline.History
+    .Compare("Provider comparison")
+    .Target("provider-a", selector =&gt; selector.Source("provider-a"))
+    .Against("provider-b", selector =&gt; selector.Source("provider-b"))
+    .Within(scope =&gt; scope.Window("DeviceOffline"))
+    .Using(comparators =&gt; comparators.Overlap().Residual().Missing())
+    .Run();
+
+Console.WriteLine($"closed windows: {pipeline.History.ClosedWindows.Count}");
+Console.WriteLine($"overlap rows: {result.OverlapRows.Count}");
+Console.WriteLine($"provider-a-only rows: {result.ResidualRows.Count}");
+Console.WriteLine($"provider-b-only rows: {result.MissingRows.Count}");
+
+foreach (var row in result.OverlapRows)
+{
+    Console.WriteLine($"overlap {row.Key}: {row.Range.Start.Position}..{row.Range.End!.Value.Position}");
+}
+
+foreach (var row in result.ResidualRows)
+{
+    Console.WriteLine($"a-only {row.Key}: {row.Range.Start.Position}..{row.Range.End!.Value.Position}");
+}
+
+void Ingest(string source, bool isOnline)
+{
+    pipeline.Ingest(new DeviceStatus("device-17", isOnline), source);
+}
+
+public sealed record DeviceStatus(string DeviceId, bool IsOnline);</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="run">
+      <div class="section-heading">
+        <p class="eyebrow">3. Run it</p>
+        <h2>Inspect the comparison rows.</h2>
+      </div>
+      <pre><code class="language-powershell">dotnet run</code></pre>
+      <div class="expected-output">
+        <pre><code>closed windows: 2
+overlap rows: 1
+provider-a-only rows: 2
+provider-b-only rows: 0
+overlap device-17: 4..5
+a-only device-17: 3..4
+a-only device-17: 5..6</code></pre>
+        <p>Provider A was offline from position 3 to 6; provider B from 4 to 5. The result keeps the shared interval and both A-only intervals as separate rows.</p>
+      </div>
+    </section>
+
+    <section class="doc-section">
+      <div class="section-heading">
+        <p class="eyebrow">4. Continue</p>
+        <h2>Move from the first comparison to your own history.</h2>
+      </div>
+      <div class="summary-list grid">
+        <a href="concepts.html"><strong>Learn the temporal model</strong><span>Understand windows, coordinates, queries, and comparisons.</span></a>
+        <a href="api.html"><strong>Browse the API</strong><span>Look up .NET builders, rows, exports, and testing helpers.</span></a>
+        <a href="https://github.com/Scottlr/spanfold/tree/main/packages/dotnet/samples"><strong>Run the .NET samples</strong><span>Explore larger monitoring and multi-source scenarios.</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="https://github.com/Scottlr/spanfold">GitHub repository</a></footer>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/languages/powershell.min.js"></script>
+  <script src="syntax.js"></script>
+  <script src="site-shell.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>
