@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     marker::PhantomData,
     sync::Arc,
 };
@@ -12,142 +12,14 @@ use crate::{
     WindowBoundaryReason, WindowHistory, WindowRecordId, WindowSegment, WindowTag,
 };
 
-type KeySelector<T> = Arc<dyn Fn(&T) -> String + Send + Sync + 'static>;
-type ActivePredicate<T> = Arc<dyn Fn(&T) -> bool + Send + Sync + 'static>;
-type EventTimeSelector<T> = Arc<dyn Fn(&T) -> i64 + Send + Sync + 'static>;
-type SegmentSelector<T> = Arc<dyn Fn(&T) -> Vec<WindowSegment> + Send + Sync + 'static>;
-type TagSelector<T> = Arc<dyn Fn(&T) -> Vec<WindowTag> + Send + Sync + 'static>;
-type RollupPredicate = Arc<dyn Fn(ChildActivityView) -> bool + Send + Sync + 'static>;
-type EmissionCallback = Arc<dyn Fn(&WindowEmission) + Send + Sync + 'static>;
+mod definitions;
+mod runtime;
+
+use definitions::*;
+use runtime::*;
+
 type SegmentTransform =
     Arc<dyn Fn(&crate::PrimitiveValue) -> crate::PrimitiveValue + Send + Sync + 'static>;
-type RuntimeStateKey = (String, String, Option<String>, Option<String>, String);
-type RollupMembershipKey = (String, String, Option<String>, Option<String>, String);
-
-#[derive(Clone, Default)]
-struct WindowCallbackSet {
-    opened: Vec<EmissionCallback>,
-    closed: Vec<EmissionCallback>,
-}
-
-struct RollUpDefinition<T> {
-    name: String,
-    key: KeySelector<T>,
-    is_active: RollupPredicate,
-    rollups: Vec<RollUpDefinition<T>>,
-    callbacks: WindowCallbackSet,
-    segment_projection: RollUpSegmentProjection,
-}
-
-struct WindowDefinition<T> {
-    name: String,
-    key: KeySelector<T>,
-    is_active: ActivePredicate<T>,
-    segments: Option<SegmentSelector<T>>,
-    tags: Option<TagSelector<T>>,
-    rollups: Vec<RollUpDefinition<T>>,
-    callbacks: WindowCallbackSet,
-}
-
-impl<T> Clone for RollUpDefinition<T> {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            key: Arc::clone(&self.key),
-            is_active: Arc::clone(&self.is_active),
-            rollups: self.rollups.clone(),
-            callbacks: self.callbacks.clone(),
-            segment_projection: self.segment_projection.clone(),
-        }
-    }
-}
-
-impl<T> Clone for WindowDefinition<T> {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            key: Arc::clone(&self.key),
-            is_active: Arc::clone(&self.is_active),
-            segments: self.segments.as_ref().map(Arc::clone),
-            tags: self.tags.as_ref().map(Arc::clone),
-            rollups: self.rollups.clone(),
-            callbacks: self.callbacks.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct OpenState {
-    id: WindowRecordId,
-    start: TemporalPoint,
-    source: Option<String>,
-    partition: Option<String>,
-    segments: Vec<WindowSegment>,
-    tags: Vec<WindowTag>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct ParentState {
-    active_children: HashSet<RollupChildId>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct RollupChildId {
-    key: String,
-    membership_context: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct RollupMembership {
-    parent_key: String,
-    segment_context: String,
-    segments: Vec<WindowSegment>,
-    tags: Vec<WindowTag>,
-}
-
-#[derive(Clone)]
-struct ChildContext<'a> {
-    lineage: &'a str,
-    key: &'a str,
-    membership_context: &'a str,
-    event_point: TemporalPoint,
-    is_active: bool,
-    segments: &'a [WindowSegment],
-    tags: &'a [WindowTag],
-}
-
-struct WindowObservation {
-    state_key: RuntimeStateKey,
-    window_name: String,
-    key: String,
-    event_point: TemporalPoint,
-    source: Option<String>,
-    partition: Option<String>,
-    is_active: bool,
-    segments: Vec<WindowSegment>,
-    tags: Vec<WindowTag>,
-}
-
-struct EventWindowObservation {
-    is_active: bool,
-    segments: Vec<WindowSegment>,
-    rollups: Vec<EventRollupObservation>,
-}
-
-struct EventRollupObservation {
-    segments: Vec<WindowSegment>,
-    segment_context: String,
-    rollups: Vec<EventRollupObservation>,
-}
-
-impl ParentState {
-    fn view(&self) -> ChildActivityView {
-        ChildActivityView {
-            active_count: self.active_children.len(),
-            total_count: self.active_children.len(),
-        }
-    }
-}
 
 /// Snapshot of known child activity for a roll-up parent.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -393,19 +265,8 @@ pub struct WindowPipelineBuilder<T> {
 
 /// Event ingestion pipeline that records source windows and roll-ups.
 pub struct EventPipeline<T> {
-    windows: Vec<WindowDefinition<T>>,
-    max_new_records: Option<u64>,
-    observation_buffer: Vec<EventWindowObservation>,
-    event_time: Option<EventTimeSelector<T>>,
-    emission_callbacks: Vec<EmissionCallback>,
-    window_callbacks: BTreeMap<String, WindowCallbackSet>,
-    record_windows: bool,
-    history: WindowHistory,
-    active: HashMap<RuntimeStateKey, OpenState>,
-    parents: HashMap<RuntimeStateKey, ParentState>,
-    rollup_memberships: HashMap<RollupMembershipKey, RollupMembership>,
-    position: i64,
-    next_record_id: u64,
+    definitions: PipelineDefinitions<T>,
+    runtime: PipelineRuntime,
     marker: PhantomData<T>,
 }
 
@@ -702,19 +563,23 @@ impl<T> EventPipelineBuilder<T> {
         });
         let observation_buffer = Vec::with_capacity(self.windows.len());
         Ok(EventPipeline {
-            windows: self.windows,
-            max_new_records,
-            observation_buffer,
-            event_time: self.event_time,
-            emission_callbacks: self.emission_callbacks,
-            window_callbacks,
-            record_windows: self.record_windows,
-            history: WindowHistory::new(),
-            active: HashMap::new(),
-            parents: HashMap::new(),
-            rollup_memberships: HashMap::new(),
-            position: 0,
-            next_record_id: 0,
+            definitions: PipelineDefinitions {
+                windows: self.windows,
+                max_new_records,
+                event_time: self.event_time,
+                emission_callbacks: self.emission_callbacks,
+                window_callbacks,
+            },
+            runtime: PipelineRuntime {
+                observation_buffer,
+                record_windows: self.record_windows,
+                history: WindowHistory::new(),
+                active: HashMap::new(),
+                parents: HashMap::new(),
+                rollup_memberships: HashMap::new(),
+                position: 0,
+                next_record_id: 0,
+            },
             marker: PhantomData,
         })
     }
@@ -862,13 +727,13 @@ impl<T> EventPipeline<T> {
     /// Returns the latest processing position.
     #[must_use]
     pub fn processing_position(&self) -> i64 {
-        self.position
+        self.runtime.position
     }
 
     /// Returns the recorded window history.
     #[must_use]
     pub fn history(&self) -> &WindowHistory {
-        &self.history
+        &self.runtime.history
     }
 
     /// Returns configured pipeline metadata.
@@ -876,7 +741,12 @@ impl<T> EventPipeline<T> {
     pub fn metadata(&self) -> EventPipelineMetadata {
         EventPipelineMetadata {
             event_type: Some(std::any::type_name::<T>().to_owned()),
-            windows: self.windows.iter().map(window_metadata).collect(),
+            windows: self
+                .definitions
+                .windows
+                .iter()
+                .map(window_metadata)
+                .collect(),
         }
     }
 
@@ -887,17 +757,73 @@ impl<T> EventPipeline<T> {
         source: Option<&str>,
         partition: Option<&str>,
     ) -> Result<IngestionResult, IngestionError> {
+        let result = self
+            .runtime
+            .ingest(&self.definitions, event, source, partition)?;
+        for emission in &result.emissions {
+            self.definitions.invoke_callbacks(emission);
+        }
+        Ok(result)
+    }
+
+    /// Ingests multiple events sequentially and returns all emitted transitions.
+    pub fn ingest_many<I>(
+        &mut self,
+        events: I,
+        source: Option<&str>,
+        partition: Option<&str>,
+    ) -> Result<IngestionResult, IngestionError>
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut emissions = Vec::new();
+        for event in events {
+            emissions.extend(self.ingest(event, source, partition)?.emissions);
+        }
+        Ok(IngestionResult {
+            processing_position: self.runtime.position,
+            emissions,
+        })
+    }
+}
+
+impl<T> PipelineDefinitions<T> {
+    fn invoke_callbacks(&self, emission: &WindowEmission) {
+        if let Some(callbacks) = self.window_callbacks.get(&emission.window_name) {
+            let selected = if emission.kind == WindowTransitionKind::Opened {
+                &callbacks.opened
+            } else {
+                &callbacks.closed
+            };
+            for callback in selected {
+                callback(emission);
+            }
+        }
+        for callback in &self.emission_callbacks {
+            callback(emission);
+        }
+    }
+}
+
+impl PipelineRuntime {
+    fn ingest<T>(
+        &mut self,
+        definitions: &PipelineDefinitions<T>,
+        event: T,
+        source: Option<&str>,
+        partition: Option<&str>,
+    ) -> Result<IngestionResult, IngestionError> {
         let next_position = self
             .position
             .checked_add(1)
             .ok_or(IngestionError::ProcessingPositionOverflow)?;
-        let max_new_records = self
+        let max_new_records = definitions
             .max_new_records
             .ok_or(IngestionError::RecordIdOverflow)?;
         if self.next_record_id > u64::MAX.saturating_sub(max_new_records) {
             return Err(IngestionError::RecordIdOverflow);
         }
-        let event_point = self.event_time.as_ref().map_or_else(
+        let event_point = definitions.event_time.as_ref().map_or_else(
             || TemporalPoint::position(next_position),
             |selector| TemporalPoint::timestamp_ticks(selector(&event)),
         );
@@ -905,16 +831,15 @@ impl<T> EventPipeline<T> {
             TemporalRange::new(active.start.clone(), event_point.clone())?;
         }
         let mut observations = std::mem::take(&mut self.observation_buffer);
-        if let Err(error) = self.observe_event(&event, &mut observations) {
+        if let Err(error) = Self::observe_event(definitions, &event, &mut observations) {
             observations.clear();
             self.observation_buffer = observations;
             return Err(error);
         }
         self.position = next_position;
         let mut emissions = Vec::new();
-        let windows = std::mem::take(&mut self.windows);
         let mut ingestion_error = None;
-        for (definition, observation) in windows.iter().zip(observations.drain(..)) {
+        for (definition, observation) in definitions.windows.iter().zip(observations.drain(..)) {
             if let Err(error) = self.ingest_definition(
                 definition,
                 &event,
@@ -928,13 +853,9 @@ impl<T> EventPipeline<T> {
                 break;
             }
         }
-        self.windows = windows;
         self.observation_buffer = observations;
         if let Some(error) = ingestion_error {
             return Err(error);
-        }
-        for emission in &emissions {
-            self.invoke_callbacks(emission);
         }
         Ok(IngestionResult {
             processing_position: self.position,
@@ -942,13 +863,13 @@ impl<T> EventPipeline<T> {
         })
     }
 
-    fn observe_event(
-        &self,
+    fn observe_event<T>(
+        definitions: &PipelineDefinitions<T>,
         event: &T,
         observations: &mut Vec<EventWindowObservation>,
     ) -> Result<(), IngestionError> {
         observations.clear();
-        for definition in &self.windows {
+        for definition in &definitions.windows {
             let is_active = (definition.is_active)(event);
             let segments = if is_active {
                 definition
@@ -968,28 +889,8 @@ impl<T> EventPipeline<T> {
         Ok(())
     }
 
-    /// Ingests multiple events sequentially and returns all emitted transitions.
-    pub fn ingest_many<I>(
-        &mut self,
-        events: I,
-        source: Option<&str>,
-        partition: Option<&str>,
-    ) -> Result<IngestionResult, IngestionError>
-    where
-        I: IntoIterator<Item = T>,
-    {
-        let mut emissions = Vec::new();
-        for event in events {
-            emissions.extend(self.ingest(event, source, partition)?.emissions);
-        }
-        Ok(IngestionResult {
-            processing_position: self.position,
-            emissions,
-        })
-    }
-
     #[allow(clippy::too_many_arguments)]
-    fn ingest_definition(
+    fn ingest_definition<T>(
         &mut self,
         definition: &WindowDefinition<T>,
         event: &T,
@@ -1092,7 +993,7 @@ impl<T> EventPipeline<T> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn sync_rollups(
+    fn sync_rollups<T>(
         &mut self,
         definitions: &[RollUpDefinition<T>],
         event: &T,
@@ -1118,7 +1019,7 @@ impl<T> EventPipeline<T> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn sync_rollup(
+    fn sync_rollup<T>(
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
@@ -1214,7 +1115,7 @@ impl<T> EventPipeline<T> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn update_rollup_parent(
+    fn update_rollup_parent<T>(
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
@@ -1430,22 +1331,6 @@ impl<T> EventPipeline<T> {
             });
         }
         Ok(Some(emission))
-    }
-
-    fn invoke_callbacks(&self, emission: &WindowEmission) {
-        if let Some(callbacks) = self.window_callbacks.get(&emission.window_name) {
-            let selected = if emission.kind == WindowTransitionKind::Opened {
-                &callbacks.opened
-            } else {
-                &callbacks.closed
-            };
-            for callback in selected {
-                callback(emission);
-            }
-        }
-        for callback in &self.emission_callbacks {
-            callback(emission);
-        }
     }
 
     fn next_id(&mut self) -> Result<WindowRecordId, IngestionError> {
