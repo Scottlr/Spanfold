@@ -234,6 +234,25 @@ late-record completeness.
 Call `AsReference()` only when the target side is intentionally authoritative;
 that explicit interpretation provides recall and precision.
 
+## Match Ordered Window Sequences
+
+Use `Spanfold.Sequences` when one lane must pass through literal named window
+families in onset order. Matches use earliest-completion greedy selection,
+never reuse committed evidence, and can carry provisional live windows.
+
+```csharp
+using Spanfold.Sequences;
+
+var journeys = pipeline.History
+    .MatchSequence("incident journey")
+    .Step("Warning")
+    .Then("Offline")
+    .Then("Recovered")
+    .WithMaximumGap(5)
+    .Run()
+    .Matches;
+```
+
 ## Assess, Trace, Revise, and Audit
 
 `Spanfold.Assessment` turns acceptance criteria into named, portable rules:
