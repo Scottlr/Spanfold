@@ -64,13 +64,27 @@
         </p>
       </div>
       <div>
-        <pre><code>var pipeline = EventPipeline
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var pipeline = EventPipeline
     .For&lt;DeviceSignal&gt;()
     .RecordWindows()
     .Window("DeviceOffline", window =&gt; window
         .Key(signal =&gt; signal.DeviceId)
         .ActiveWhen(signal =&gt; !signal.IsOnline))
     .Build();</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::for_events;
+
+let pipeline = for_events::&lt;DeviceSignal&gt;()
+    .record_windows()
+    .track_window(
+        "DeviceOffline",
+        |signal| signal.device_id.clone(),
+        |signal| !signal.is_online,
+    )
+    .build()?;</code></pre>
+        </div>
       </div>
     </section>
 

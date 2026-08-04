@@ -44,12 +44,28 @@
         </p>
       </div>
       <div>
-        <pre><code>var open = pipeline.History.OpenWindows
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var open = pipeline.History.OpenWindows
     .Where(window =&gt; window.WindowName == "DeviceOffline");
 
 var closedForDevice = pipeline.History.ClosedWindows
     .Where(window =&gt; window.WindowName == "DeviceOffline")
     .Where(window =&gt; Equals(window.Key, "device-17"));</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">let open = pipeline
+    .history()
+    .query()
+    .where_window("DeviceOffline")
+    .open_windows();
+
+let closed_for_device = pipeline
+    .history()
+    .query()
+    .where_window("DeviceOffline")
+    .where_key("device-17")
+    .closed_windows();</code></pre>
+        </div>
       </div>
     </section>
 
@@ -93,7 +109,8 @@ var closedForDevice = pipeline.History.ClosedWindows
         </p>
       </div>
       <div>
-        <pre><code>var incidentWindows = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">var incidentWindows = pipeline.History
     .Query()
     .Window("DeviceOffline")
     .Segment("lifecycle", "Incident")
@@ -105,6 +122,22 @@ var byLifecycle = pipeline.History
     .Window("DeviceOffline")
     .Windows()
     .SummarizeBySegment("lifecycle");</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">let incident_windows = pipeline
+    .history()
+    .query()
+    .where_window("DeviceOffline")
+    .where_segment("lifecycle", "Incident")
+    .where_tag("fleet", "critical")
+    .windows();
+
+let by_lifecycle = pipeline
+    .history()
+    .query()
+    .where_window("DeviceOffline")
+    .summarize_by_segment("lifecycle")?;</code></pre>
+        </div>
       </div>
     </section>
   </main>
