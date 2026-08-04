@@ -1,0 +1,8 @@
+{"windowName":"DeviceOffline","key":"","source":"provider-a","partition":null,"startPosition":1,"endPosition":2}
+{"windowName":"DeviceOffline","key":"","source":"detector-b","partition":null,"startPosition":1,"endPosition":2}
+{"windowName":"DeviceOffline","key":"😀","source":"provider-a","partition":"null","startPosition":3,"endPosition":4}
+{"windowName":"DeviceOffline","key":"😀","source":"detector-b","partition":"null","startPosition":3,"endPosition":4}
+{"windowName":"DeviceOffline","key":"same","source":"provider-a","partition":null,"startPosition":5,"endPosition":6}
+{"windowName":"DeviceOffline","key":"same","source":"detector-b","partition":null,"startPosition":5,"endPosition":6}
+{"windowName":"DeviceOffline","key":"same","source":"provider-a","partition":"null","startPosition":7,"endPosition":8}
+{"windowName":"DeviceOffline","key":"same","source":"detector-b","partition":"null","startPosition":7,"endPosition":8}

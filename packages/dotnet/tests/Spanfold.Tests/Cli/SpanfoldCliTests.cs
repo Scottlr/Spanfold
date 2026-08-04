@@ -29,6 +29,23 @@ public sealed class SpanfoldCliTests
     }
 
     [Fact]
+    public void EpisodesRunsPortableProviderDetectorJourney()
+    {
+        var (exitCode, output, error) = Run(
+            "episodes",
+            EpisodeFixturePath("portable-provider-detector-plan.json"),
+            EpisodeFixturePath("portable-provider-detector-windows.jsonl"),
+            "--format",
+            "json");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(
+            File.ReadAllText(EpisodeFixturePath("portable-provider-detector-result.json")).Trim(),
+            output.Trim());
+    }
+
+    [Fact]
     public void CompareRunsFixtureAndWritesLlmContext()
     {
         var (exitCode, output, error) = Run("compare", FixturePath("basic-overlap.json"), "--format", "llm-context");
@@ -515,6 +532,21 @@ public sealed class SpanfoldCliTests
             "..",
             "Comparison",
             "Fixtures",
+            name);
+    }
+
+    private static string EpisodeFixturePath(string name, [CallerFilePath] string callerFilePath = "")
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(callerFilePath)!,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "features",
+            "episodes",
+            "fixtures",
             name);
     }
 

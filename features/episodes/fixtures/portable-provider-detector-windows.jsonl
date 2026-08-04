@@ -1,0 +1,5 @@
+{"windowName":"DeviceOffline","key":"device-1","source":"provider-a","partition":"eu","startPosition":1,"endPosition":4}
+{"windowName":"DeviceOffline","key":"device-1","source":"provider-a","partition":"eu","startPosition":5,"endPosition":8}
+{"windowName":"DeviceOffline","key":"device-1","source":"detector-b","partition":"eu","startPosition":2,"endPosition":7}
+{"windowName":"DeviceOffline","key":"device-2","source":"provider-a","partition":null,"startPosition":10,"endPosition":12}
+{"windowName":"DeviceOffline","key":"device-2","source":"detector-b","partition":null,"startPosition":11,"endPosition":null}

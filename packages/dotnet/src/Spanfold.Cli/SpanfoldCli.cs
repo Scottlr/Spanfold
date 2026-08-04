@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using Spanfold.Artifacts.Episodes;
 using Spanfold.Testing;
 
 namespace Spanfold.Cli;
@@ -29,7 +30,7 @@ internal static class SpanfoldCli
         {
             if (args.Length < 2)
             {
-                WriteError(stderr, "Usage: spanfold <validate-plan|compare|explain|audit|check|suite> <fixture.json> [options], spanfold verify-bundle <directory>, or spanfold diff <baseline> <current>.");
+                WriteError(stderr, "Usage: spanfold <validate-plan|compare|explain|audit|check|suite> <fixture.json> [options], spanfold episodes <plan.json> <windows.jsonl> [--format json|markdown], spanfold verify-bundle <directory>, or spanfold diff <baseline> <current>.");
                 return 2;
             }
 
@@ -59,6 +60,11 @@ internal static class SpanfoldCli
                     ReadComparisonArtifact(args[2]));
                 stdout.Write(JsonSerializer.Serialize(revision, JsonOutputOptions));
                 return revision.IsEmpty ? 0 : 1;
+            }
+
+            if (string.Equals(command, "episodes", StringComparison.Ordinal))
+            {
+                return ExecuteEpisodes(args, stdout);
             }
 
             ValidateOptions(args, command);
@@ -146,7 +152,62 @@ internal static class SpanfoldCli
             || string.Equals(command, "check", StringComparison.Ordinal)
             || string.Equals(command, "suite", StringComparison.Ordinal)
             || string.Equals(command, "verify-bundle", StringComparison.Ordinal)
+            || string.Equals(command, "episodes", StringComparison.Ordinal)
             || string.Equals(command, "diff", StringComparison.Ordinal);
+    }
+
+    private static int ExecuteEpisodes(string[] args, TextWriter stdout)
+    {
+        if (args.Length < 3)
+        {
+            throw new ArgumentException("The episodes command requires <plan.json> <windows.jsonl>.");
+        }
+
+        for (var index = 3; index < args.Length; index++)
+        {
+            if (!string.Equals(args[index], "--format", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Unknown option: " + args[index]);
+            }
+
+            if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Option --format requires a value.");
+            }
+
+            index++;
+        }
+
+        var format = ReadEpisodeFormat(args);
+        var document = EpisodeAnalysisDocument.Read(args[1]);
+        var history = CreateHistoryFromWindowJsonLines(args[2], document.WindowName);
+        var result = document.Execute(history);
+        stdout.Write(string.Equals(format, "markdown", StringComparison.Ordinal)
+            ? result.ExportMarkdown()
+            : result.ExportJson());
+        return 0;
+    }
+
+    private static string ReadEpisodeFormat(string[] args)
+    {
+        for (var index = 3; index < args.Length - 1; index++)
+        {
+            if (!string.Equals(args[index], "--format", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var format = args[index + 1];
+            if (string.Equals(format, "json", StringComparison.Ordinal)
+                || string.Equals(format, "markdown", StringComparison.Ordinal))
+            {
+                return format;
+            }
+
+            throw new ArgumentException("Unsupported Episode format: " + format);
+        }
+
+        return "json";
     }
 
     private static void ValidateOptions(string[] args, string command)

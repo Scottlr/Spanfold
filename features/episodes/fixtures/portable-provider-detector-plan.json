@@ -1,0 +1,18 @@
+{
+  "schema": "spanfold.episode.analysis",
+  "schemaVersion": 1,
+  "name": "Provider and detector offline episodes",
+  "target": {
+    "name": "provider",
+    "source": "provider-a"
+  },
+  "against": {
+    "name": "detector",
+    "source": "detector-b"
+  },
+  "windowName": "DeviceOffline",
+  "normalizationAxis": "processingPosition",
+  "stitchTolerance": 1,
+  "relationTolerance": 0,
+  "liveHorizon": 14
+}

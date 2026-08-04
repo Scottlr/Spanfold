@@ -10,6 +10,12 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn episode_fixture_path(name: &str) -> PathBuf {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    root.join("../../../../features/episodes/fixtures")
+        .join(name)
+}
+
 #[test]
 fn compare_outputs_json_for_basic_overlap_fixture() {
     Command::cargo_bin("spanfold")
@@ -28,6 +34,30 @@ fn compare_outputs_json_for_basic_overlap_fixture() {
             "\"schema\": \"spanfold.comparison.result\"",
         ))
         .stdout(predicate::str::contains("\"rowCount\": 1"));
+}
+
+#[test]
+fn episodes_runs_portable_provider_detector_journey() {
+    let expected = fs::read_to_string(episode_fixture_path(
+        "portable-provider-detector-result.json",
+    ))
+    .expect("expected result");
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "episodes",
+            episode_fixture_path("portable-provider-detector-plan.json")
+                .to_str()
+                .expect("utf8 plan path"),
+            episode_fixture_path("portable-provider-detector-windows.jsonl")
+                .to_str()
+                .expect("utf8 windows path"),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::eq(format!("{}\n", expected.trim())));
 }
 
 #[test]

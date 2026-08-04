@@ -25,6 +25,7 @@ mod analytics;
 mod builders;
 mod changelog;
 mod comparison;
+mod episode_document;
 /// Deterministic formation of episodes from recorded window evidence.
 pub mod episodes;
 mod explain;
@@ -66,6 +67,10 @@ pub use comparison::{
     NormalizedWindowRecord, OpenWindowPolicy, OverlapRow, PreparedComparison, ResidualRow,
     RowPoint, RowRange, SymmetricDifferenceRow, WindowArtifact, WindowFilter, align, compare,
     compare_live, prepare, prepare_live,
+};
+pub use episode_document::{
+    EpisodeAnalysisDocument, EpisodeAnalysisDocumentError, EpisodeAnalysisResultDocument,
+    EpisodeAnalysisSource,
 };
 pub use episodes::{
     Episode, EpisodeComparisonBuilder, EpisodeComparisonError, EpisodeComparisonPlan,

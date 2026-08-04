@@ -1,0 +1,129 @@
+{
+  "schema": "spanfold.episode.analysis.result",
+  "schemaVersion": 1,
+  "analysisName": "Provider and detector offline episodes",
+  "windowName": "DeviceOffline",
+  "normalizationAxis": "processingPosition",
+  "stitchTolerance": 1,
+  "relationTolerance": 0,
+  "evaluationHorizon": 14,
+  "target": {
+    "name": "provider",
+    "source": "provider-a",
+    "summary": {
+      "episodeCount": 2,
+      "finalEpisodeCount": 2,
+      "provisionalEpisodeCount": 0,
+      "totalActiveMagnitude": 8,
+      "totalElapsedMagnitude": 9,
+      "totalInternalGapMagnitude": 1
+    },
+    "episodes": [
+      {
+        "index": 0,
+        "key": "device-1",
+        "partition": "eu",
+        "start": 1,
+        "end": 8,
+        "fragmentCount": 2,
+        "activeMagnitude": 6,
+        "elapsedMagnitude": 7,
+        "internalGapMagnitude": 1,
+        "finality": "final"
+      },
+      {
+        "index": 1,
+        "key": "device-2",
+        "partition": null,
+        "start": 10,
+        "end": 12,
+        "fragmentCount": 1,
+        "activeMagnitude": 2,
+        "elapsedMagnitude": 2,
+        "internalGapMagnitude": 0,
+        "finality": "final"
+      }
+    ]
+  },
+  "against": {
+    "name": "detector",
+    "source": "detector-b",
+    "summary": {
+      "episodeCount": 2,
+      "finalEpisodeCount": 1,
+      "provisionalEpisodeCount": 1,
+      "totalActiveMagnitude": 8,
+      "totalElapsedMagnitude": 8,
+      "totalInternalGapMagnitude": 0
+    },
+    "episodes": [
+      {
+        "index": 0,
+        "key": "device-1",
+        "partition": "eu",
+        "start": 2,
+        "end": 7,
+        "fragmentCount": 1,
+        "activeMagnitude": 5,
+        "elapsedMagnitude": 5,
+        "internalGapMagnitude": 0,
+        "finality": "final"
+      },
+      {
+        "index": 1,
+        "key": "device-2",
+        "partition": null,
+        "start": 11,
+        "end": 14,
+        "fragmentCount": 1,
+        "activeMagnitude": 3,
+        "elapsedMagnitude": 3,
+        "internalGapMagnitude": 0,
+        "finality": "provisional"
+      }
+    ]
+  },
+  "summary": {
+    "targetEpisodeCount": 2,
+    "againstEpisodeCount": 2,
+    "matchedTargetEpisodeCount": 2,
+    "matchedAgainstEpisodeCount": 2,
+    "unmatchedTargetEpisodeCount": 0,
+    "unmatchedAgainstEpisodeCount": 0,
+    "oneToOneRelationCount": 2,
+    "splitRelationCount": 0,
+    "mergeRelationCount": 0,
+    "complexRelationCount": 0,
+    "totalOverlapMagnitude": 5
+  },
+  "relations": [
+    {
+      "kind": "oneToOne",
+      "targetEpisodeIndexes": [
+        0
+      ],
+      "againstEpisodeIndexes": [
+        0
+      ],
+      "finality": "final",
+      "overlapMagnitude": 4,
+      "minimumGapMagnitude": 0,
+      "onsetDeltaMagnitude": 1,
+      "recoveryDeltaMagnitude": -1
+    },
+    {
+      "kind": "oneToOne",
+      "targetEpisodeIndexes": [
+        1
+      ],
+      "againstEpisodeIndexes": [
+        1
+      ],
+      "finality": "provisional",
+      "overlapMagnitude": 1,
+      "minimumGapMagnitude": 0,
+      "onsetDeltaMagnitude": 1,
+      "recoveryDeltaMagnitude": 2
+    }
+  ]
+}
