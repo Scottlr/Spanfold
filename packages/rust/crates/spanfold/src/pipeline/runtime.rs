@@ -59,9 +59,20 @@ pub(super) struct WindowObservation {
 }
 
 pub(super) struct EventWindowObservation {
-    pub(super) is_active: bool,
+    pub(super) state_key: RuntimeStateKey,
+    pub(super) key: String,
+    pub(super) lifecycle: SourceWindowLifecycle,
     pub(super) segments: Vec<WindowSegment>,
+    pub(super) tags: Vec<WindowTag>,
     pub(super) rollups: Vec<EventRollupObservation>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SourceWindowLifecycle {
+    Inactive,
+    Pending(usize),
+    Active,
+    Closing,
 }
 
 pub(super) struct EventRollupObservation {
@@ -84,6 +95,7 @@ pub(super) struct PipelineRuntime {
     pub(super) record_windows: bool,
     pub(super) history: WindowHistory,
     pub(super) active: HashMap<RuntimeStateKey, OpenState>,
+    pub(super) pending_confirmations: HashMap<RuntimeStateKey, usize>,
     pub(super) parents: HashMap<RuntimeStateKey, ParentState>,
     pub(super) rollup_memberships: HashMap<RollupMembershipKey, RollupMembership>,
     pub(super) position: i64,

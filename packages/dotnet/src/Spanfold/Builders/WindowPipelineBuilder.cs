@@ -228,7 +228,9 @@ public sealed class WindowPipelineBuilder<TEvent>
             key,
             isActive,
             comparer);
-        configure?.Invoke(new WindowOptions<TEvent, TKey>(definition.Callbacks));
+        var options = new WindowOptions<TEvent, TKey>(definition.Callbacks);
+        configure?.Invoke(options);
+        options.ApplyTo(definition);
         Windows.Add(definition);
 
         return new WindowPipelineBuilder<TEvent>(

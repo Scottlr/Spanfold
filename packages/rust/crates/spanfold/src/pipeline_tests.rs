@@ -17,6 +17,294 @@ struct PriceTick {
     observed_at: i64,
 }
 
+#[derive(Clone)]
+struct StabilizedSignal {
+    key: &'static str,
+    parent: &'static str,
+    enter: bool,
+    exit: bool,
+    segment: &'static str,
+    tag: &'static str,
+    invalid_projection: bool,
+}
+
+impl StabilizedSignal {
+    fn new(enter: bool, exit: bool) -> Self {
+        Self {
+            key: "item-1",
+            parent: "parent-1",
+            enter,
+            exit,
+            segment: "steady",
+            tag: "current",
+            invalid_projection: false,
+        }
+    }
+}
+
+#[test]
+fn stabilized_window_rejects_flapping_with_asymmetric_confirmation() {
+    let mut pipeline = for_events::<StabilizedSignal>()
+        .record_windows()
+        .window("Stable", |signal| signal.key, |signal| signal.enter)
+        .stabilize(|signal| signal.exit, 2, 3)
+        .build_or_panic();
+
+    for signal in [
+        StabilizedSignal::new(true, false),
+        StabilizedSignal::new(false, false),
+        StabilizedSignal::new(true, false),
+    ] {
+        assert!(
+            pipeline
+                .ingest(signal, None, None)
+                .unwrap()
+                .emissions
+                .is_empty()
+        );
+    }
+    let opened = pipeline
+        .ingest(StabilizedSignal::new(true, true), None, None)
+        .unwrap();
+    for signal in [
+        StabilizedSignal::new(true, true),
+        StabilizedSignal::new(false, true),
+        StabilizedSignal::new(false, false),
+        StabilizedSignal::new(false, true),
+        StabilizedSignal::new(false, true),
+    ] {
+        assert!(
+            pipeline
+                .ingest(signal, None, None)
+                .unwrap()
+                .emissions
+                .is_empty()
+        );
+    }
+    let closed = pipeline
+        .ingest(StabilizedSignal::new(false, true), None, None)
+        .unwrap();
+
+    assert_eq!(opened.emissions[0].kind, WindowTransitionKind::Opened);
+    assert_eq!(closed.emissions[0].kind, WindowTransitionKind::Closed);
+    let window = &pipeline.history().closed_windows()[0];
+    assert_eq!(window.range.start(), TemporalPoint::position(4));
+    assert_eq!(window.range.end(), TemporalPoint::position(10));
+}
+
+#[test]
+fn stabilized_window_uses_confirmation_metadata_and_preserves_pending_exit() {
+    let mut pipeline = for_events::<StabilizedSignal>()
+        .record_windows()
+        .window_with_metadata(
+            "Stable",
+            |signal| signal.key,
+            |signal| signal.enter,
+            |signal| vec![WindowSegment::new("state", signal.segment).unwrap()],
+            |signal| vec![WindowTag::new("label", signal.tag).unwrap()],
+        )
+        .stabilize(|signal| signal.exit, 2, 2)
+        .build_or_panic();
+
+    let mut candidate = StabilizedSignal::new(true, false);
+    candidate.segment = "candidate";
+    candidate.tag = "candidate";
+    pipeline.ingest(candidate, None, None).unwrap();
+    let mut confirmed = StabilizedSignal::new(true, false);
+    confirmed.segment = "confirmed";
+    confirmed.tag = "confirmed";
+    pipeline.ingest(confirmed, None, None).unwrap();
+    let mut pending_exit = StabilizedSignal::new(false, true);
+    pending_exit.segment = "ignored";
+    pending_exit.tag = "ignored";
+    pipeline.ingest(pending_exit, None, None).unwrap();
+
+    let open = &pipeline.history().open_windows()[0];
+    assert_eq!(open.segments[0].value, "confirmed".into());
+    assert_eq!(open.tags[0].value, "confirmed".into());
+
+    let mut resumed = StabilizedSignal::new(false, false);
+    resumed.segment = "resumed";
+    resumed.tag = "resumed";
+    let resumed = pipeline.ingest(resumed, None, None).unwrap();
+    assert_eq!(
+        resumed
+            .emissions
+            .iter()
+            .map(|emission| emission.kind)
+            .collect::<Vec<_>>(),
+        vec![WindowTransitionKind::Closed, WindowTransitionKind::Opened]
+    );
+    assert_eq!(
+        pipeline.history().open_windows()[0].start,
+        TemporalPoint::position(4)
+    );
+}
+
+#[test]
+fn stabilization_counts_are_scoped_by_source_and_partition() {
+    let mut pipeline = for_events::<StabilizedSignal>()
+        .window("Stable", |signal| signal.key, |signal| signal.enter)
+        .stabilize(|signal| signal.exit, 2, 1)
+        .build_or_panic();
+
+    assert!(
+        pipeline
+            .ingest(StabilizedSignal::new(true, false), Some("a"), Some("one"))
+            .unwrap()
+            .emissions
+            .is_empty()
+    );
+    assert!(
+        pipeline
+            .ingest(StabilizedSignal::new(true, false), Some("a"), Some("two"))
+            .unwrap()
+            .emissions
+            .is_empty()
+    );
+    let first = pipeline
+        .ingest(StabilizedSignal::new(true, false), Some("a"), Some("one"))
+        .unwrap();
+    let second = pipeline
+        .ingest(StabilizedSignal::new(true, false), Some("a"), Some("two"))
+        .unwrap();
+
+    assert_eq!(first.emissions[0].partition.as_deref(), Some("one"));
+    assert_eq!(second.emissions[0].partition.as_deref(), Some("two"));
+}
+
+#[test]
+fn failed_confirmation_preserves_staged_pending_state() {
+    let mut pipeline = for_events::<StabilizedSignal>()
+        .record_windows()
+        .window_with_metadata(
+            "Stable",
+            |signal| signal.key,
+            |signal| signal.enter,
+            |signal| {
+                vec![
+                    WindowSegment::new("phase", "one").unwrap(),
+                    WindowSegment::new(
+                        if signal.invalid_projection {
+                            "state"
+                        } else {
+                            "period"
+                        },
+                        "two",
+                    )
+                    .unwrap(),
+                ]
+            },
+            |_| Vec::new(),
+        )
+        .stabilize(|signal| signal.exit, 2, 1)
+        .roll_up_with_segment_projection(
+            "ProjectionRollup",
+            |signal| signal.parent,
+            |children| children.any_active(),
+            |projection| projection.rename("state", "phase"),
+        )
+        .build_or_panic();
+
+    pipeline
+        .ingest(StabilizedSignal::new(true, false), None, None)
+        .unwrap();
+    let mut invalid = StabilizedSignal::new(true, false);
+    invalid.invalid_projection = true;
+    assert!(matches!(
+        pipeline.ingest(invalid, None, None),
+        Err(IngestionError::InvalidSegmentProjection(_))
+    ));
+    assert_eq!(pipeline.processing_position(), 1);
+    assert!(pipeline.history().open_windows().is_empty());
+    let confirmed = pipeline
+        .ingest(StabilizedSignal::new(true, false), None, None)
+        .unwrap();
+
+    assert!(
+        confirmed
+            .emissions
+            .iter()
+            .any(|emission| emission.window_name == "Stable")
+    );
+}
+
+#[test]
+fn rollups_and_callbacks_observe_only_confirmed_transitions() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let lifecycle_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut pipeline = for_events::<StabilizedSignal>()
+        .record_windows()
+        .on_emission({
+            let calls = Arc::clone(&calls);
+            move |emission| calls.lock().unwrap().push(emission.window_name.clone())
+        })
+        .window_with_options("Stable", |signal| signal.key, |signal| signal.enter, {
+            let lifecycle_calls = Arc::clone(&lifecycle_calls);
+            move |options| {
+                let opened_calls = Arc::clone(&lifecycle_calls);
+                let closed_calls = Arc::clone(&lifecycle_calls);
+                options
+                    .on_opened(move |emission| {
+                        opened_calls.lock().unwrap().push(emission.kind);
+                    })
+                    .on_closed(move |emission| {
+                        closed_calls.lock().unwrap().push(emission.kind);
+                    })
+            }
+        })
+        .stabilize(|signal| signal.exit, 2, 2)
+        .roll_up(
+            "AnyStable",
+            |signal| signal.parent,
+            |children| children.any_active(),
+        )
+        .build_or_panic();
+
+    assert!(
+        pipeline
+            .ingest(StabilizedSignal::new(true, false), None, None)
+            .unwrap()
+            .emissions
+            .is_empty()
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(lifecycle_calls.lock().unwrap().is_empty());
+    pipeline
+        .ingest(StabilizedSignal::new(true, false), None, None)
+        .unwrap();
+    assert_eq!(&*calls.lock().unwrap(), &["Stable", "AnyStable"]);
+    assert!(
+        pipeline
+            .ingest(StabilizedSignal::new(false, true), None, None)
+            .unwrap()
+            .emissions
+            .is_empty()
+    );
+    pipeline
+        .ingest(StabilizedSignal::new(false, true), None, None)
+        .unwrap();
+    assert_eq!(
+        &*calls.lock().unwrap(),
+        &["Stable", "AnyStable", "Stable", "AnyStable"]
+    );
+    assert_eq!(
+        &*lifecycle_calls.lock().unwrap(),
+        &[WindowTransitionKind::Opened, WindowTransitionKind::Closed]
+    );
+}
+
+#[test]
+fn stabilization_counts_must_be_positive() {
+    let result = std::panic::catch_unwind(|| {
+        for_events::<StabilizedSignal>()
+            .window("Stable", |signal| signal.key, |signal| signal.enter)
+            .stabilize(|signal| signal.exit, 0, 1);
+    });
+
+    assert!(result.is_err());
+}
+
 #[test]
 fn track_window_records_closed_history() {
     let mut pipeline = for_events::<PriceTick>()

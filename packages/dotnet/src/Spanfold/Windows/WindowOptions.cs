@@ -11,10 +11,52 @@ public sealed class WindowOptions<TEvent, TKey>
     where TKey : notnull
 {
     private readonly WindowCallbackSet<TEvent> callbacks;
+    private Func<TEvent, bool>? exitPredicate;
+    private int enterConfirmationCount = 1;
+    private int exitConfirmationCount = 1;
 
     internal WindowOptions(WindowCallbackSet<TEvent> callbacks)
     {
         this.callbacks = callbacks;
+    }
+
+    /// <summary>
+    /// Requires consecutive enter and exit observations before committing transitions.
+    /// </summary>
+    /// <param name="exitWhen">Returns true when an active window is eligible to close.</param>
+    /// <param name="enterAfter">Consecutive active observations required to open.</param>
+    /// <param name="exitAfter">Consecutive exit observations required to close.</param>
+    /// <returns>The current options object.</returns>
+    /// <remarks>
+    /// The active predicate supplied when the window is created is the enter predicate.
+    /// Transitions use the event that reaches the configured count as their boundary.
+    /// </remarks>
+    public WindowOptions<TEvent, TKey> Stabilize(
+        Func<TEvent, bool> exitWhen,
+        int enterAfter = 1,
+        int exitAfter = 1)
+    {
+        ArgumentNullException.ThrowIfNull(exitWhen);
+        ArgumentOutOfRangeException.ThrowIfLessThan(enterAfter, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(exitAfter, 1);
+
+        this.exitPredicate = exitWhen;
+        this.enterConfirmationCount = enterAfter;
+        this.exitConfirmationCount = exitAfter;
+        return this;
+    }
+
+    internal void ApplyTo(WindowDefinition<TEvent> definition)
+    {
+        if (this.exitPredicate is null)
+        {
+            return;
+        }
+
+        definition.ConfigureStabilization(
+            this.exitPredicate,
+            this.enterConfirmationCount,
+            this.exitConfirmationCount);
     }
 
     /// <summary>

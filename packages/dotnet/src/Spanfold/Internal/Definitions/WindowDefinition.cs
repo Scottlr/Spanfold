@@ -11,6 +11,8 @@ internal abstract class WindowDefinition<TEvent> : WindowNodeDefinition<TEvent>
         Callbacks = new WindowCallbackSet<TEvent>();
         SegmentDefinitions = [];
         TagDefinitions = [];
+        EnterConfirmationCount = 1;
+        ExitConfirmationCount = 1;
     }
 
     public string Name { get; }
@@ -23,11 +25,32 @@ internal abstract class WindowDefinition<TEvent> : WindowNodeDefinition<TEvent>
 
     public IReadOnlyList<TagDefinition<TEvent>> TagDefinitions { get; private protected set; }
 
+    public int EnterConfirmationCount { get; private set; }
+
+    public int ExitConfirmationCount { get; private set; }
+
     public abstract IEqualityComparer<object> KeyComparer { get; }
 
     public abstract object GetKey(TEvent @event);
 
     public abstract bool IsActive(TEvent @event);
+
+    public Func<TEvent, bool>? ExitPredicate { get; private set; }
+
+    public bool ShouldExit(TEvent @event)
+    {
+        return ExitPredicate?.Invoke(@event) ?? !IsActive(@event);
+    }
+
+    public void ConfigureStabilization(
+        Func<TEvent, bool> exitPredicate,
+        int enterConfirmationCount,
+        int exitConfirmationCount)
+    {
+        ExitPredicate = exitPredicate;
+        EnterConfirmationCount = enterConfirmationCount;
+        ExitConfirmationCount = exitConfirmationCount;
+    }
 
     public IReadOnlyList<WindowSegment> GetSegments(TEvent @event)
     {
