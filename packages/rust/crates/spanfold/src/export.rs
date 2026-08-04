@@ -167,49 +167,24 @@ pub fn write_result_json_lines<W: Write>(
     mut writer: W,
 ) -> Result<(), ComparisonExportError> {
     ensure_exportable(&result.plan)?;
-    let overlap_rows = result.overlap_rows_with_finality()?;
-    write_json_line(&mut writer, &result_summary_json_value(result))?;
-    write_json_lines(&mut writer, ComparisonRowKind::Overlap, overlap_rows)?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::Residual,
-        result.residual_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::Missing,
-        result.missing_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::Coverage,
-        result.coverage_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::Gap,
-        result.gap_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::SymmetricDifference,
-        result.symmetric_difference_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::Containment,
-        result.containment_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::LeadLag,
-        result.lead_lag_rows_with_finality()?,
-    )?;
-    write_json_lines(
-        &mut writer,
-        ComparisonRowKind::AsOf,
-        result.as_of_rows_with_finality()?,
-    )?;
+    macro_rules! write_families {
+        (
+            ($first_kind:ident, $first_rows:ident, $first_compat:ident, $first_view:ident, $first_debug:literal, $first_count:literal),
+            $(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*
+        ) => {
+            let first_rows = result.$first_view()?;
+            write_json_line(&mut writer, &result_summary_json_value(result))?;
+            write_json_lines(&mut writer, ComparisonRowKind::$first_kind, first_rows)?;
+            $(
+                write_json_lines(
+                    &mut writer,
+                    ComparisonRowKind::$kind,
+                    result.$view()?,
+                )?;
+            )*
+        };
+    }
+    crate::comparison::for_each_comparison_row_family!(write_families);
     Ok(())
 }
 
@@ -217,50 +192,20 @@ fn append_result_json_lines(
     result: &ComparisonResult,
     lines: &mut Vec<String>,
 ) -> Result<(), ComparisonExportError> {
-    let overlap_rows = result.overlap_rows_with_finality()?;
-    lines.push(serde_json::to_string(&result_summary_json_value(result))?);
-
-    append_json_lines(lines, ComparisonRowKind::Overlap, overlap_rows)?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::Residual,
-        result.residual_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::Missing,
-        result.missing_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::Coverage,
-        result.coverage_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::Gap,
-        result.gap_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::SymmetricDifference,
-        result.symmetric_difference_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::Containment,
-        result.containment_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::LeadLag,
-        result.lead_lag_rows_with_finality()?,
-    )?;
-    append_json_lines(
-        lines,
-        ComparisonRowKind::AsOf,
-        result.as_of_rows_with_finality()?,
-    )?;
+    macro_rules! append_families {
+        (
+            ($first_kind:ident, $first_rows:ident, $first_compat:ident, $first_view:ident, $first_debug:literal, $first_count:literal),
+            $(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*
+        ) => {
+            let first_rows = result.$first_view()?;
+            lines.push(serde_json::to_string(&result_summary_json_value(result))?);
+            append_json_lines(lines, ComparisonRowKind::$first_kind, first_rows)?;
+            $(
+                append_json_lines(lines, ComparisonRowKind::$kind, result.$view()?)?;
+            )*
+        };
+    }
+    crate::comparison::for_each_comparison_row_family!(append_families);
     Ok(())
 }
 
@@ -292,44 +237,19 @@ pub fn export_result_llm_context(
 ) -> Result<String, ComparisonExportError> {
     ensure_exportable(&result.plan)?;
     let mut row_documents = vec![result_summary_json_value(result)];
-    for (kind, rows) in [
-        (
-            ComparisonRowKind::Overlap,
-            build_row_values(result.overlap_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::Residual,
-            build_row_values(result.residual_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::Missing,
-            build_row_values(result.missing_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::Coverage,
-            build_row_values(result.coverage_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::Gap,
-            build_row_values(result.gap_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::SymmetricDifference,
-            build_row_values(result.symmetric_difference_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::Containment,
-            build_row_values(result.containment_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::LeadLag,
-            build_row_values(result.lead_lag_rows_with_finality()?)?,
-        ),
-        (
-            ComparisonRowKind::AsOf,
-            build_row_values(result.as_of_rows_with_finality()?)?,
-        ),
-    ] {
+    macro_rules! materialize_row_documents {
+        ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+            [$(
+                (
+                    ComparisonRowKind::$kind,
+                    build_row_values(result.$view()?)?,
+                ),
+            )*]
+        };
+    }
+    for (kind, rows) in
+        crate::comparison::for_each_comparison_row_family!(materialize_row_documents)
+    {
         row_documents.extend(rows.into_iter().map(|row| {
             let mut object = match row {
                 Value::Object(object) => object,
@@ -411,49 +331,32 @@ pub fn export_result_markdown(result: &ComparisonResult) -> String {
     }
 
     text.push_str("## Row Counts\n\n");
-    text.push_str(&format!("- overlap rows: {}\n", result.overlap_rows.len()));
-    text.push_str(&format!(
-        "- residual rows: {}\n",
-        result.residual_rows.len()
-    ));
-    text.push_str(&format!("- missing rows: {}\n", result.missing_rows.len()));
-    text.push_str(&format!(
-        "- coverage rows: {}\n",
-        result.coverage_rows.len()
-    ));
-    text.push_str(&format!("- gap rows: {}\n", result.gap_rows.len()));
-    text.push_str(&format!(
-        "- symmetric difference rows: {}\n",
-        result.symmetric_difference_rows.len()
-    ));
-    text.push_str(&format!(
-        "- containment rows: {}\n",
-        result.containment_rows.len()
-    ));
-    text.push_str(&format!(
-        "- lead lag rows: {}\n",
-        result.lead_lag_rows.len()
-    ));
-    text.push_str(&format!("- as of rows: {}\n", result.as_of_rows.len()));
+    macro_rules! append_row_counts {
+        ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+            $(
+                text.push_str(&format!("- {}: {}\n", $count, result.$compat.len()));
+            )*
+        };
+    }
+    crate::comparison::for_each_comparison_row_family!(append_row_counts);
     text.push_str(&format!(
         "- row finalities: {}\n\n",
         result.row_finalities.len()
     ));
 
     text.push_str("## Row Evidence\n\n");
-    append_markdown_rows(&mut text, "overlap", &result.overlap_rows);
-    append_markdown_rows(&mut text, "residual", &result.residual_rows);
-    append_markdown_rows(&mut text, "missing", &result.missing_rows);
-    append_markdown_rows(&mut text, "coverage", &result.coverage_rows);
-    append_markdown_rows(&mut text, "gap", &result.gap_rows);
-    append_markdown_rows(
-        &mut text,
-        "symmetricDifference",
-        &result.symmetric_difference_rows,
-    );
-    append_markdown_rows(&mut text, "containment", &result.containment_rows);
-    append_markdown_rows(&mut text, "leadLag", &result.lead_lag_rows);
-    append_markdown_rows(&mut text, "asOf", &result.as_of_rows);
+    macro_rules! append_row_evidence {
+        ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
+            $(
+                append_markdown_rows(
+                    &mut text,
+                    ComparisonRowKind::$kind.as_str(),
+                    &result.$compat,
+                );
+            )*
+        };
+    }
+    crate::comparison::for_each_comparison_row_family!(append_row_evidence);
     text.push('\n');
 
     if !result.comparator_summaries.is_empty() {

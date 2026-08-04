@@ -17,6 +17,37 @@ use crate::{
     WindowSegment, WindowTag,
 };
 
+macro_rules! for_each_comparison_row_family {
+    ($callback:ident) => {
+        $callback! {
+            (Overlap, overlap, overlap_rows, overlap_rows_with_finality, "overlap", "overlap rows"),
+            (Residual, residual, residual_rows, residual_rows_with_finality, "residual", "residual rows"),
+            (Missing, missing, missing_rows, missing_rows_with_finality, "missing", "missing rows"),
+            (Coverage, coverage, coverage_rows, coverage_rows_with_finality, "coverage", "coverage rows"),
+            (Gap, gap, gap_rows, gap_rows_with_finality, "gap", "gap rows"),
+            (
+                SymmetricDifference,
+                symmetric_difference,
+                symmetric_difference_rows,
+                symmetric_difference_rows_with_finality,
+                "symmetric-difference",
+                "symmetric difference rows"
+            ),
+            (
+                Containment,
+                containment,
+                containment_rows,
+                containment_rows_with_finality,
+                "containment",
+                "containment rows"
+            ),
+            (LeadLag, lead_lag, lead_lag_rows, lead_lag_rows_with_finality, "lead-lag", "lead lag rows"),
+            (AsOf, as_of, as_of_rows, as_of_rows_with_finality, "as-of", "as of rows"),
+        }
+    };
+}
+pub(crate) use for_each_comparison_row_family;
+
 mod rows;
 use rows::RowAccumulator;
 pub use rows::*;
