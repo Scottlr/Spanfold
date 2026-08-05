@@ -1,10 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use super::ChildActivityView;
+use super::rollup::{ParentState, RollupMembership, RollupMembershipKey};
 use crate::{TemporalPoint, WindowHistory, WindowRecordId, WindowSegment, WindowTag};
 
-pub(super) type RuntimeStateKey = (String, String, Option<String>, Option<String>, String);
-pub(super) type RollupMembershipKey = (String, String, Option<String>, Option<String>, String);
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) struct RuntimeStateKey {
+    pub(super) window_name: String,
+    pub(super) key: String,
+    pub(super) source: Option<String>,
+    pub(super) partition: Option<String>,
+    pub(super) segment_context: String,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct OpenState {
@@ -12,26 +18,6 @@ pub(super) struct OpenState {
     pub(super) start: TemporalPoint,
     pub(super) source: Option<String>,
     pub(super) partition: Option<String>,
-    pub(super) segments: Vec<WindowSegment>,
-    pub(super) tags: Vec<WindowTag>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(super) struct ParentState {
-    pub(super) known_children: HashSet<RollupChildId>,
-    pub(super) active_children: HashSet<RollupChildId>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(super) struct RollupChildId {
-    pub(super) key: String,
-    pub(super) membership_context: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct RollupMembership {
-    pub(super) parent_key: String,
-    pub(super) segment_context: String,
     pub(super) segments: Vec<WindowSegment>,
     pub(super) tags: Vec<WindowTag>,
 }
@@ -80,15 +66,6 @@ pub(super) struct EventRollupObservation {
     pub(super) segments: Vec<WindowSegment>,
     pub(super) segment_context: String,
     pub(super) rollups: Vec<EventRollupObservation>,
-}
-
-impl ParentState {
-    pub(super) fn view(&self) -> ChildActivityView {
-        ChildActivityView {
-            active_count: self.active_children.len(),
-            total_count: self.known_children.len(),
-        }
-    }
 }
 
 pub(super) struct PipelineRuntime {
