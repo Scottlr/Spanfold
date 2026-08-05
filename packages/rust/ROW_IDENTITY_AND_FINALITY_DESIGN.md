@@ -69,7 +69,7 @@ consumer.
 | Centralize row labels | **Concede for row artifacts** | Canonical row-kind labels should drive metadata, identity, JSON, JSON Lines, and LLM row documents. `Comparator::declaration()` should retain its existing hyphenated and parameterized syntax. |
 | Preserve finality through all paths | **Concede and strengthen** | Typed views are necessary, and JSON Lines must also carry finality metadata. Export must fail on missing metadata instead of defaulting to `Final`. |
 | Clarify `CoverageRow` versus `CoverageSummary` | **Concede** | A coverage row is one aligned target segment and is normally wholly covered or uncovered. The summary is the grouped aggregate and the right source for an overall ratio. |
-| Declare `ComparisonResult::rows` canonical | **Concede with compatibility nuance** | `rows` is canonical storage and serialization. The existing family aliases are zero-copy `Arc` views and should remain in 0.1.1. Future API cleanup can replace public duplicate fields with accessors in a deliberate breaking release. |
+| Declare `ComparisonResult::rows()` canonical | **Concede** | `rows` is canonical storage and serialization. The public family accessors borrow typed slices from it without duplicate flat fields or wire keys. |
 | Freeze fixed FNV vectors for every family now | **Rebut for 0.1.1** | Golden digests would prematurely freeze a Rust-only, serde-coupled 64-bit scheme that already differs from .NET. Protect cross-export equality now; add fixed cross-language vectors after a shared identity specification is approved. |
 | Change the hash algorithm during this integration fix | **Defer** | An uncoordinated change would rewrite every Rust ID and still would not prove .NET parity. Specify and version the shared format first. |
 | Add string helpers for `TemporalAxis`, `ComparisonSide`, and `ContainmentStatus` | **Defer** | These are already typed enums, and presentation strings legitimately belong to adapters. Add canonical text only when it is part of a Spanfold wire contract or more consumers demonstrate the need. |
@@ -195,7 +195,7 @@ impl ComparisonResult {
 
 The methods should:
 
-- borrow canonical rows from `ComparisonResult::rows`;
+- borrow canonical rows from `ComparisonResult::rows()`;
 - borrow the authoritative existing `ComparisonRowFinality` records;
 - validate the expected count and kind before yielding entries;
 - preserve family and row order;
@@ -214,7 +214,7 @@ Spanfold explicitly guarantees that, for a genuine Spanfold-produced result:
 
 - `row_finalities` is partitioned in canonical family order;
 - metadata within each family is parallel to row order in
-  `ComparisonResult::rows`;
+  `ComparisonResult::rows()`;
 - each typed view yields the row and metadata at the same family-relative
   index;
 - every Spanfold exporter consumes that same association.
@@ -320,10 +320,11 @@ Rustdoc should state these invariants directly:
 - Consumers needing overall coverage must use `coverage_summaries`, not average
   or reinterpret individual segment ratios.
 
-`ComparisonResult::rows` should be documented as canonical grouped storage and
-the canonical serialized collection. The existing `overlap_rows`,
-`coverage_rows`, and other family fields remain zero-copy compatibility views
-in 0.1.1. New internal code and the typed row/finality views should use `rows`.
+`ComparisonResult::rows()` should be documented as canonical grouped storage and
+the canonical serialized collection. The `overlap_rows()`, `coverage_rows()`,
+and other family accessors borrow typed slices from `rows()`; they do not create
+duplicate storage or flat wire keys. New internal code and the typed
+row/finality views should use `rows()`.
 
 ## Identity compatibility policy
 
@@ -415,7 +416,7 @@ separate consumer change:
 
 1. Pin `spanfold = "=0.1.1"` while adopting the new contract.
 2. Iterate through the nine `*_rows_with_finality()` methods, which are backed
-   by canonical `result.rows`, rather than reading the compatibility aliases.
+   by canonical `result.rows()`, rather than reaching into row-family storage.
 3. Remove every `family:index` evidence identifier.
 4. Rename the projected evidence key from `rawscope_row_id` to
    `spanfold_row_id`.
@@ -483,7 +484,7 @@ is waiting for the published Spanfold API.
 - Comparator declaration syntax remains compatible.
 - Coverage documentation directs aggregate consumers to
   `coverage_summaries`.
-- Existing family aliases remain available in 0.1.1 while `rows` is documented
-  and used as canonical storage.
+- Family accessors borrow from canonical `rows()` while `rows` remains the sole
+  serialized row collection.
 - Release notes explicitly identify corrected Rust 0.1.0 advanced-family IDs
   and accurately limit the stability claim for the current identity scheme.

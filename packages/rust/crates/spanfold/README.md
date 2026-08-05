@@ -86,10 +86,12 @@ symmetric-difference, containment, lead/lag, and as-of rows. The IDs are opaque
 identifiers assigned by the producing Rust result; persist them exactly rather
 than relying on the current private hashing scheme or assuming .NET parity.
 
-`result.rows` is the canonical grouped row collection. Existing family fields
-remain zero-copy compatibility views in 0.1.1. A `CoverageRow` describes one
-aligned target segment and is normally wholly covered or uncovered; use
-`result.coverage_summaries` for grouped aggregate coverage ratios.
+`result.rows()` is the canonical grouped row collection. The family accessors
+(`result.overlap_rows()`, `result.coverage_rows()`, and their siblings) borrow
+typed slices from that collection; they do not add flat wire keys. A
+`CoverageRow` describes one aligned target segment and is normally wholly
+covered or uncovered; use `result.coverage_summaries` for grouped aggregate
+coverage ratios.
 
 ## Capabilities
 

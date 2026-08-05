@@ -514,9 +514,9 @@ mod tests {
         let result = fixture.execute();
 
         assert!(result.is_valid);
-        assert_eq!(result.residual_rows.len(), 1);
-        assert_eq!(result.residual_rows[0].range.start, 1);
-        assert_eq!(result.residual_rows[0].range.end, 5);
+        assert_eq!(result.residual_rows().len(), 1);
+        assert_eq!(result.residual_rows()[0].range.start, 1);
+        assert_eq!(result.residual_rows()[0].range.end, 5);
     }
 
     #[test]
@@ -577,9 +577,12 @@ mod tests {
         let result = fixture.execute();
 
         assert!(result.is_valid);
-        assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.overlap_rows[0].key, "device-1");
-        assert_eq!(result.overlap_rows[0].partition.as_deref(), Some("fleet-a"));
+        assert_eq!(result.overlap_rows().len(), 1);
+        assert_eq!(result.overlap_rows()[0].key, "device-1");
+        assert_eq!(
+            result.overlap_rows()[0].partition.as_deref(),
+            Some("fleet-a")
+        );
         assert!(fixture.plan().coalesce_adjacent_windows);
         assert_eq!(
             fixture.plan().duplicate_window_policy,
@@ -608,7 +611,7 @@ mod tests {
         let result = fixture.execute();
 
         assert!(result.is_valid);
-        assert!(result.residual_rows.is_empty());
+        assert!(result.residual_rows().is_empty());
     }
 
     #[test]

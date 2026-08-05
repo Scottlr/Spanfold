@@ -2,10 +2,9 @@
 
 use super::*;
 
-/// Canonical row storage with finality metadata partitioned by row family.
+/// Finality metadata partitioned by row family in canonical row order.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ComparisonRowState {
-    rows: ComparisonRows,
     overlap: Vec<ComparisonRowFinality>,
     residual: Vec<ComparisonRowFinality>,
     missing: Vec<ComparisonRowFinality>,
@@ -18,7 +17,7 @@ pub(super) struct ComparisonRowState {
 }
 
 impl ComparisonRowState {
-    pub(super) fn new(rows: ComparisonRows, finalities: Vec<ComparisonRowFinality>) -> Self {
+    pub(super) fn new(rows: &ComparisonRows, finalities: Vec<ComparisonRowFinality>) -> Self {
         let expected_count = rows
             .family_layouts()
             .iter()
@@ -32,7 +31,6 @@ impl ComparisonRowState {
 
         let mut finalities = finalities.into_iter();
         let mut state = Self {
-            rows,
             overlap: Vec::new(),
             residual: Vec::new(),
             missing: Vec::new(),
@@ -49,7 +47,7 @@ impl ComparisonRowState {
                     state.$rows = take_finalities(
                         &mut finalities,
                         ComparisonRowKind::$kind,
-                        state.rows.$rows.len(),
+                        rows.$rows.len(),
                     );
                 )*
             };
@@ -59,16 +57,12 @@ impl ComparisonRowState {
         state
     }
 
-    pub(super) fn empty() -> Self {
-        Self::new(ComparisonRows::default(), Vec::new())
+    pub(super) fn empty(rows: &ComparisonRows) -> Self {
+        Self::new(rows, Vec::new())
     }
 
-    pub(super) fn rows(&self) -> &ComparisonRows {
-        &self.rows
-    }
-
-    pub(super) fn compatibility_finalities(&self) -> Vec<ComparisonRowFinality> {
-        let mut finalities = Vec::with_capacity(self.rows.total_count());
+    pub(super) fn flattened_finalities(&self) -> Vec<ComparisonRowFinality> {
+        let mut finalities = Vec::new();
         macro_rules! append_finalities {
             ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
                 $(finalities.extend(self.$rows.iter().cloned());)*
@@ -131,24 +125,20 @@ fn take_finalities(
 pub(super) struct ComparisonResultState {
     prepared: Option<PreparedComparison>,
     aligned: Option<AlignedComparison>,
-    rows: ComparisonRowState,
+    finalities: ComparisonRowState,
 }
 
 impl ComparisonResultState {
     pub(super) fn new(
         prepared: Option<PreparedComparison>,
         aligned: Option<AlignedComparison>,
-        rows: ComparisonRowState,
+        finalities: ComparisonRowState,
     ) -> Self {
         Self {
             prepared,
             aligned,
-            rows,
+            finalities,
         }
-    }
-
-    pub(super) fn empty() -> Self {
-        Self::new(None, None, ComparisonRowState::empty())
     }
 
     pub(super) fn prepared(&self) -> Option<&PreparedComparison> {
@@ -159,19 +149,15 @@ impl ComparisonResultState {
         self.aligned.as_ref()
     }
 
-    pub(super) fn rows(&self) -> &ComparisonRows {
-        self.rows.rows()
-    }
-
-    pub(super) fn compatibility_finalities(&self) -> Vec<ComparisonRowFinality> {
-        self.rows.compatibility_finalities()
+    pub(super) fn row_finalities(&self) -> Vec<ComparisonRowFinality> {
+        self.finalities.flattened_finalities()
     }
 
     pub(super) fn finalities(&self) -> impl Iterator<Item = &ComparisonRowFinality> {
-        self.rows.finalities()
+        self.finalities.finalities()
     }
 
     pub(super) fn family_finalities(&self, kind: ComparisonRowKind) -> &[ComparisonRowFinality] {
-        self.rows.family_finalities(kind)
+        self.finalities.family_finalities(kind)
     }
 }

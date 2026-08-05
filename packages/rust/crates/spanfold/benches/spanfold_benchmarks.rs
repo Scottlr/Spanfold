@@ -454,10 +454,13 @@ fn result_export_materialization_benchmarks(c: &mut Criterion) {
     .run();
     assert!(result.is_valid);
     assert_eq!(
-        result.lead_lag_rows.len(),
+        result.lead_lag_rows().len(),
         RESULT_EXPORT_TRANSITIONS_PER_SIDE
     );
-    assert_eq!(result.as_of_rows.len(), RESULT_EXPORT_TRANSITIONS_PER_SIDE);
+    assert_eq!(
+        result.as_of_rows().len(),
+        RESULT_EXPORT_TRANSITIONS_PER_SIDE
+    );
     assert_eq!(
         result.row_finalities.len(),
         RESULT_EXPORT_TRANSITIONS_PER_SIDE * 2
@@ -527,13 +530,13 @@ fn dense_duplicate_cohort_benchmarks(c: &mut Criterion) {
     let comparison = dense_duplicate_cohort_builder(&history);
     let result = comparison.run();
     assert!(result.is_valid);
-    assert_eq!(result.overlap_rows.len(), 1);
+    assert_eq!(result.overlap_rows().len(), 1);
     assert_eq!(
-        result.overlap_rows[0].target_record_ids.len(),
+        result.overlap_rows()[0].target_record_ids.len(),
         DENSE_DUPLICATES_PER_SOURCE
     );
     assert_eq!(
-        result.overlap_rows[0].against_record_ids.len(),
+        result.overlap_rows()[0].against_record_ids.len(),
         DENSE_DUPLICATES_PER_SOURCE * DENSE_DUPLICATE_AGAINST_SOURCES.len()
     );
     assert!(
@@ -558,10 +561,10 @@ fn cohort_activity_benchmarks(c: &mut Criterion) {
     let result = comparison.run();
     let evidence = result.cohort_evidence();
     assert!(result.is_valid);
-    assert!(!result.overlap_rows.is_empty());
+    assert!(!result.overlap_rows().is_empty());
     assert!(
         result
-            .overlap_rows
+            .overlap_rows()
             .iter()
             .any(|row| row.against_record_ids.len() > COHORT_ACTIVITY_SOURCE_COUNT)
     );
@@ -681,18 +684,18 @@ fn transition_comparator_benchmarks(c: &mut Criterion) {
 
         let lead_lag_result = lead_lag.run();
         assert_eq!(
-            lead_lag_result.lead_lag_rows.len(),
+            lead_lag_result.lead_lag_rows().len(),
             transition_count_per_side
         );
-        assert!(lead_lag_result.lead_lag_rows.iter().all(|row| {
+        assert!(lead_lag_result.lead_lag_rows().iter().all(|row| {
             row.comparison_record_id.is_some()
                 && row.delta_magnitude == Some(TRANSITION_EXPECTED_DELTA)
                 && row.is_within_tolerance
         }));
 
         let as_of_result = as_of.run();
-        assert_eq!(as_of_result.as_of_rows.len(), transition_count_per_side);
-        assert!(as_of_result.as_of_rows.iter().all(|row| {
+        assert_eq!(as_of_result.as_of_rows().len(), transition_count_per_side);
+        assert!(as_of_result.as_of_rows().iter().all(|row| {
             row.matched_record_id.is_some()
                 && row.distance_magnitude == Some(TRANSITION_EXPECTED_DELTA)
                 && row.status == spanfold::AsOfMatchStatus::Matched

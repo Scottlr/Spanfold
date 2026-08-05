@@ -545,9 +545,12 @@ mod tests {
             .overlap()
             .run();
 
-        assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.overlap_rows[0].key, "device-1");
-        assert_eq!(result.overlap_rows[0].partition.as_deref(), Some("fleet-a"));
+        assert_eq!(result.overlap_rows().len(), 1);
+        assert_eq!(result.overlap_rows()[0].key, "device-1");
+        assert_eq!(
+            result.overlap_rows()[0].partition.as_deref(),
+            Some("fleet-a")
+        );
     }
 
     #[test]
@@ -577,8 +580,8 @@ mod tests {
             .overlap()
             .run();
 
-        assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.overlap_rows[0].target_record_ids.len(), 2);
+        assert_eq!(result.overlap_rows().len(), 1);
+        assert_eq!(result.overlap_rows()[0].target_record_ids.len(), 2);
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
