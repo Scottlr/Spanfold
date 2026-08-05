@@ -425,14 +425,14 @@ impl<T> EventPipelineBuilder<T> {
             },
             runtime: PipelineRuntime {
                 observation_buffer,
-                record_windows: self.record_windows,
-                history: crate::WindowHistory::new(),
-                active: std::collections::HashMap::new(),
+                recorder: crate::recorder::WindowRecorder::with_id_prefix(
+                    self.record_windows,
+                    "pipeline",
+                ),
                 pending_confirmations: std::collections::HashMap::new(),
                 parents: std::collections::HashMap::new(),
                 rollup_memberships: std::collections::HashMap::new(),
                 position: 0,
-                next_record_id: 0,
             },
             marker: PhantomData,
         })

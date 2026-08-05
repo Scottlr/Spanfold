@@ -37,6 +37,8 @@ mod liveness;
 /// Event-driven window pipeline and fallible ingestion API.
 pub mod pipeline;
 mod primitive;
+/// Explicit event-to-window lifecycle recording.
+pub mod recorder;
 /// Window history, records, and query/summarization APIs.
 pub mod records;
 /// Ordered cross-window sequence matching over recorded history.
@@ -105,6 +107,9 @@ pub use pipeline::{
     for_events,
 };
 pub use primitive::{FiniteFloat, PrimitiveValue, PrimitiveValueError};
+pub use recorder::{
+    WindowObservation, WindowRecorder, WindowRecorderError, WindowRecorderTransition,
+};
 pub use records::{
     ClosedWindow, OpenWindow, SummaryError, WindowAnnotation, WindowAnnotationTarget,
     WindowBoundaryChange, WindowBoundaryReason, WindowGroupKind, WindowGroupSummary, WindowHistory,

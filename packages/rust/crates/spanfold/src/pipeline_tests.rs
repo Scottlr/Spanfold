@@ -28,6 +28,14 @@ struct StabilizedSignal {
     invalid_projection: bool,
 }
 
+#[derive(Clone)]
+struct AtomicObservationSignal {
+    first_active: bool,
+    second_active: bool,
+    invalid_second_key: bool,
+    invalid_rollup_key: bool,
+}
+
 impl StabilizedSignal {
     fn new(enter: bool, exit: bool) -> Self {
         Self {
@@ -227,6 +235,112 @@ fn failed_confirmation_preserves_staged_pending_state() {
             .iter()
             .any(|emission| emission.window_name == "Stable")
     );
+}
+
+#[test]
+fn invalid_later_definition_is_atomic_and_does_not_advance_position_or_ids() {
+    let callbacks = Arc::new(Mutex::new(Vec::new()));
+    let mut pipeline = for_events::<AtomicObservationSignal>()
+        .record_windows()
+        .on_emission({
+            let callbacks = Arc::clone(&callbacks);
+            move |emission| callbacks.lock().unwrap().push(emission.window_name.clone())
+        })
+        .track_window("First", |_| "first", |signal| signal.first_active)
+        .track_window(
+            "Second",
+            |signal| {
+                if signal.invalid_second_key {
+                    ""
+                } else {
+                    "second"
+                }
+            },
+            |signal| signal.second_active,
+        )
+        .build_or_panic();
+
+    let invalid = AtomicObservationSignal {
+        first_active: true,
+        second_active: true,
+        invalid_second_key: true,
+        invalid_rollup_key: false,
+    };
+    assert!(matches!(
+        pipeline.ingest(invalid, None, None),
+        Err(IngestionError::InvalidObservation(
+            WindowRecorderError::EmptyWindowKey
+        ))
+    ));
+    assert_eq!(pipeline.processing_position(), 0);
+    assert!(pipeline.history().open_windows().is_empty());
+    assert!(pipeline.history().closed_windows().is_empty());
+    assert!(callbacks.lock().unwrap().is_empty());
+
+    let valid = AtomicObservationSignal {
+        first_active: true,
+        second_active: true,
+        invalid_second_key: false,
+        invalid_rollup_key: false,
+    };
+    let result = pipeline.ingest(valid, None, None).expect("valid event");
+    assert_eq!(result.processing_position, 1);
+    assert_eq!(pipeline.processing_position(), 1);
+    assert_eq!(
+        result
+            .emissions
+            .iter()
+            .map(|emission| emission.record_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pipeline-0000", "pipeline-0001"]
+    );
+    assert_eq!(pipeline.history().open_windows().len(), 2);
+    assert_eq!(callbacks.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn invalid_dynamic_rollup_observation_is_atomic() {
+    let mut pipeline = for_events::<AtomicObservationSignal>()
+        .record_windows()
+        .window("Child", |_| "child", |signal| signal.first_active)
+        .roll_up(
+            "Parent",
+            |signal| {
+                if signal.invalid_rollup_key {
+                    ""
+                } else {
+                    "parent"
+                }
+            },
+            |children| children.any_active(),
+        )
+        .build_or_panic();
+
+    let invalid = AtomicObservationSignal {
+        first_active: true,
+        second_active: false,
+        invalid_second_key: false,
+        invalid_rollup_key: true,
+    };
+    assert!(matches!(
+        pipeline.ingest(invalid, None, None),
+        Err(IngestionError::InvalidObservation(
+            WindowRecorderError::EmptyWindowKey
+        ))
+    ));
+    assert_eq!(pipeline.processing_position(), 0);
+    assert!(pipeline.history().open_windows().is_empty());
+
+    let valid = AtomicObservationSignal {
+        first_active: true,
+        second_active: false,
+        invalid_second_key: false,
+        invalid_rollup_key: false,
+    };
+    let result = pipeline.ingest(valid, None, None).expect("valid event");
+    assert_eq!(result.processing_position, 1);
+    assert_eq!(result.emissions.len(), 2);
+    assert_eq!(pipeline.history().open_windows().len(), 2);
 }
 
 #[test]
@@ -1360,6 +1474,36 @@ fn metadata_and_rollup_observations_are_evaluated_once_per_event() {
     ] {
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
+}
+
+#[test]
+fn rollup_key_selectors_are_not_repeated_for_old_parent_removal() {
+    let rollup_key_calls = Arc::new(AtomicUsize::new(0));
+    let mut pipeline = for_events::<StabilizedSignal>()
+        .window("Stable", |signal| signal.key, |signal| signal.enter)
+        .roll_up(
+            "AnyStable",
+            {
+                let calls = Arc::clone(&rollup_key_calls);
+                move |signal| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    signal.parent
+                }
+            },
+            |children| children.any_active(),
+        )
+        .build_or_panic();
+
+    pipeline
+        .ingest(StabilizedSignal::new(true, false), None, None)
+        .expect("first event");
+    let mut migrated = StabilizedSignal::new(true, false);
+    migrated.parent = "parent-2";
+    pipeline
+        .ingest(migrated, None, None)
+        .expect("migrated event");
+
+    assert_eq!(rollup_key_calls.load(Ordering::Relaxed), 2);
 }
 
 #[test]

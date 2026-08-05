@@ -180,7 +180,7 @@ HTML, testing helpers, CLI counts, builders, and root re-exports.
 
 ## ARCH-003 — Strong — Core and CLI duplicate event-to-window lifecycle behavior
 
-**Status:** Open with observed behavioral drift  
+**Status:** Partially resolved in S003; CLI adaptation remains open for S006
 **Category:** In-process deepening  
 **Files:**
 
@@ -197,6 +197,10 @@ The implementations have already drifted:
 - CLI import continues without updating `state.tags` in the same situation (`workflow.rs:349-359`).
 
 The duplication exists because the core pipeline increments its own processing position, while CLI import maps provide explicit positions from input data.
+
+S003 extracted the core lifecycle into the concrete `WindowRecorder` API and
+adapted `EventPipeline` to supply explicit temporal observations. The CLI still
+owns its import-side lifecycle state and is intentionally left for S006.
 
 ### Scalable direction
 
@@ -225,7 +229,7 @@ This does not require a public trait hierarchy. The first goal is one implementa
 
 ## ARCH-004 — Strong — Pipeline definition and runtime share one implementation file
 
-**Status:** Open  
+**Status:** Partially resolved in S003; broader runtime split remains open
 **Category:** In-process deepening  
 **Files:**
 
@@ -258,6 +262,11 @@ The public builder grows combinatorially through variants of:
 Adding another option creates pressure for additional method combinations. The checked-in Rust specification instead illustrates one window-definition configuration path, and the design notes describe the builder as intentionally narrow.
 
 `EventPipeline` also owns immutable definitions and mutable runtime state together. `ingest` uses `mem::take` to move definitions aside temporarily while mutating runtime state. The five-element `RuntimeStateKey` tuple hides meaning behind positional fields.
+
+S003 moved event-to-window lifecycle recording, history mutation, and record ID
+allocation behind `WindowRecorder`, and `EventPipeline` now delegates that
+slice. Definition storage, selectors, roll-ups, and the remaining runtime
+separation are unchanged and remain future work.
 
 ### Scalable direction
 

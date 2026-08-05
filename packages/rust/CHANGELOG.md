@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add the public `WindowRecorder` and `WindowObservation` API for recording
+  lifecycle transitions at explicit temporal points, including deterministic
+  IDs, history, segment boundaries, and tag updates.
 - Make snapshot finality records-owned with `WindowSnapshotFinality`, containing
   only `Final` and `Provisional`. Migrate callers from
   `WindowSnapshotRecord.finality: ComparisonFinality` to the new type; the

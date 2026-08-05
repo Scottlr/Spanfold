@@ -3,9 +3,10 @@ use std::{collections::BTreeSet, marker::PhantomData};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::recorder::{WindowObservation as RecorderObservation, WindowRecorderError};
 use crate::{
-    ClosedWindow, OpenWindow, TemporalPoint, TemporalRange, WindowBoundaryChange,
-    WindowBoundaryReason, WindowHistory, WindowRecordId, WindowSegment, WindowTag,
+    TemporalPoint, WindowBoundaryChange, WindowBoundaryReason, WindowHistory, WindowRecordId,
+    WindowRecorder, WindowSegment, WindowTag,
 };
 
 mod builder;
@@ -17,10 +18,11 @@ mod validation;
 use definitions::{PipelineDefinitions, RollUpDefinition, WindowDefinition};
 use rollup::{RollupChildId, RollupMembership, RollupMembershipKey};
 use runtime::{
-    ChildContext, EventRollupObservation, EventWindowObservation, OpenState, PipelineRuntime,
-    RuntimeStateKey, SourceWindowLifecycle, WindowObservation,
+    ChildContext, EventRollupObservation, EventWindowObservation, PipelineRuntime, RuntimeStateKey,
+    SourceWindowLifecycle, WindowObservation,
 };
 
+pub use crate::recorder::WindowTransitionKind;
 pub use builder::{
     EventPipelineBuilder, RollUpSegmentProjection, WindowOptions, WindowPipelineBuilder, for_events,
 };
@@ -64,15 +66,19 @@ pub enum IngestionError {
     /// Runtime segment values produced a non-unique projected shape.
     #[error("invalid segment projection: {0}")]
     InvalidSegmentProjection(String),
+    /// A recorder observation violated the canonical window metadata contract.
+    #[error("invalid window observation: {0}")]
+    InvalidObservation(#[source] WindowRecorderError),
 }
 
-/// Window transition kind emitted during ingestion.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum WindowTransitionKind {
-    /// A window opened.
-    Opened,
-    /// A window closed.
-    Closed,
+impl From<WindowRecorderError> for IngestionError {
+    fn from(error: WindowRecorderError) -> Self {
+        match error {
+            WindowRecorderError::Temporal(error) => Self::Temporal(error),
+            WindowRecorderError::RecordIdOverflow => Self::RecordIdOverflow,
+            error => Self::InvalidObservation(error),
+        }
+    }
 }
 
 /// One window transition emitted during ingestion.
@@ -157,7 +163,7 @@ impl<T> EventPipeline<T> {
     /// Returns the recorded window history.
     #[must_use]
     pub fn history(&self) -> &WindowHistory {
-        &self.runtime.history
+        self.runtime.recorder.history()
     }
 
     /// Returns configured pipeline metadata.
@@ -244,19 +250,22 @@ impl PipelineRuntime {
         let max_new_records = definitions
             .max_new_records
             .ok_or(IngestionError::RecordIdOverflow)?;
-        if self.next_record_id > u64::MAX.saturating_sub(max_new_records) {
-            return Err(IngestionError::RecordIdOverflow);
-        }
+        self.recorder.ensure_capacity(max_new_records)?;
         let event_point = definitions.event_time.as_ref().map_or_else(
             || TemporalPoint::position(next_position),
             |selector| TemporalPoint::timestamp_ticks(selector(&event)),
         );
-        for active in self.active.values() {
-            TemporalRange::new(active.start.clone(), event_point.clone())?;
-        }
+        self.recorder.validate_point(&event_point)?;
         let mut observations = std::mem::take(&mut self.observation_buffer);
         if let Err(error) =
             self.observe_event(definitions, &event, source, partition, &mut observations)
+        {
+            observations.clear();
+            self.observation_buffer = observations;
+            return Err(error);
+        }
+        if let Err(error) =
+            self.preflight_observations(definitions, &observations, source, partition)
         {
             observations.clear();
             self.observation_buffer = observations;
@@ -289,6 +298,52 @@ impl PipelineRuntime {
         })
     }
 
+    fn preflight_observations<T>(
+        &self,
+        definitions: &PipelineDefinitions<T>,
+        observations: &[EventWindowObservation],
+        source: Option<&str>,
+        partition: Option<&str>,
+    ) -> Result<(), IngestionError> {
+        for (definition, observation) in definitions.windows.iter().zip(observations) {
+            if matches!(observation.lifecycle, SourceWindowLifecycle::Pending(_)) {
+                continue;
+            }
+            self.recorder.validate_parts(
+                &definition.name,
+                &observation.key,
+                source,
+                partition,
+                &observation.segments,
+                &observation.tags,
+            )?;
+            let rollup_tags = match observation.lifecycle {
+                SourceWindowLifecycle::Active => observation.tags.clone(),
+                SourceWindowLifecycle::Closing => self
+                    .recorder
+                    .active_state(
+                        &observation.state_key.window_name,
+                        &observation.state_key.key,
+                        observation.state_key.source.as_deref(),
+                        observation.state_key.partition.as_deref(),
+                        &observation.state_key.segment_context,
+                    )
+                    .map(|state| state.tags)
+                    .unwrap_or_default(),
+                SourceWindowLifecycle::Inactive | SourceWindowLifecycle::Pending(_) => Vec::new(),
+            };
+            preflight_rollup_observations(
+                &self.recorder,
+                &definition.rollups,
+                &observation.rollups,
+                source,
+                partition,
+                &rollup_tags,
+            )?;
+        }
+        Ok(())
+    }
+
     fn observe_event<T>(
         &self,
         definitions: &PipelineDefinitions<T>,
@@ -307,7 +362,13 @@ impl PipelineRuntime {
                 partition: partition.map(str::to_owned),
                 segment_context: String::new(),
             };
-            let was_active = self.active.contains_key(&state_key);
+            let was_active = self.recorder.is_active(
+                &state_key.window_name,
+                &state_key.key,
+                state_key.source.as_deref(),
+                state_key.partition.as_deref(),
+                &state_key.segment_context,
+            );
             let predicate_matches = if was_active {
                 definition.exit_when.as_ref().map_or_else(
                     || !(definition.is_active)(event),
@@ -340,6 +401,17 @@ impl PipelineRuntime {
             } else {
                 SourceWindowLifecycle::Inactive
             };
+            let previous = if matches!(lifecycle, SourceWindowLifecycle::Closing) {
+                self.recorder.active_state(
+                    &state_key.window_name,
+                    &state_key.key,
+                    state_key.source.as_deref(),
+                    state_key.partition.as_deref(),
+                    &state_key.segment_context,
+                )
+            } else {
+                None
+            };
             let has_active_metadata = matches!(lifecycle, SourceWindowLifecycle::Active);
             let segments = if has_active_metadata {
                 definition
@@ -357,10 +429,17 @@ impl PipelineRuntime {
             } else {
                 Vec::new()
             };
-            let rollups = if has_active_metadata {
-                observe_rollup_projections(&definition.rollups, &segments)?
+            let rollup_segments = if has_active_metadata {
+                segments.as_slice()
+            } else if let Some(previous) = previous.as_ref() {
+                previous.segments.as_slice()
             } else {
+                &[]
+            };
+            let rollups = if matches!(lifecycle, SourceWindowLifecycle::Pending(_)) {
                 Vec::new()
+            } else {
+                observe_rollup_projections(&definition.rollups, event, rollup_segments)?
             };
             observations.push(EventWindowObservation {
                 state_key,
@@ -400,7 +479,13 @@ impl PipelineRuntime {
         }
 
         self.pending_confirmations.remove(&state_key);
-        let previous = self.active.get(&state_key).cloned();
+        let previous = self.recorder.active_state(
+            &state_key.window_name,
+            &state_key.key,
+            state_key.source.as_deref(),
+            state_key.partition.as_deref(),
+            &state_key.segment_context,
+        );
         let is_active = matches!(lifecycle, SourceWindowLifecycle::Active);
         emissions.extend(self.sync_window_state(WindowObservation {
             state_key,
@@ -418,7 +503,8 @@ impl PipelineRuntime {
             self.sync_rollups(
                 &definition.rollups,
                 event,
-                Some(rollups),
+                &rollups,
+                true,
                 source,
                 partition,
                 ChildContext {
@@ -438,7 +524,8 @@ impl PipelineRuntime {
             self.sync_rollups(
                 &definition.rollups,
                 event,
-                None,
+                &rollups,
+                true,
                 source,
                 partition,
                 ChildContext {
@@ -456,7 +543,8 @@ impl PipelineRuntime {
             self.sync_rollups(
                 &definition.rollups,
                 event,
-                None,
+                &rollups,
+                true,
                 source,
                 partition,
                 ChildContext {
@@ -479,18 +567,20 @@ impl PipelineRuntime {
         &mut self,
         definitions: &[RollUpDefinition<T>],
         event: &T,
-        observations: Option<Vec<EventRollupObservation>>,
+        observations: &[EventRollupObservation],
+        use_observed_metadata: bool,
         source: Option<&str>,
         partition: Option<&str>,
         child: ChildContext<'_>,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
-        let mut observations = observations.map(Vec::into_iter);
-        for definition in definitions {
+        debug_assert_eq!(definitions.len(), observations.len());
+        for (definition, observation) in definitions.iter().zip(observations) {
             self.sync_rollup(
                 definition,
                 event,
-                observations.as_mut().and_then(Iterator::next),
+                observation,
+                use_observed_metadata,
                 source,
                 partition,
                 child.clone(),
@@ -505,25 +595,24 @@ impl PipelineRuntime {
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
-        observation: Option<EventRollupObservation>,
+        observation: &EventRollupObservation,
+        use_observed_metadata: bool,
         source: Option<&str>,
         partition: Option<&str>,
         child: ChildContext<'_>,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
-        let (projected_segments, segment_context, rollup_observations) = match observation {
-            Some(observation) => (
-                observation.segments,
-                observation.segment_context,
-                Some(observation.rollups),
-            ),
-            None => {
-                let segments = project_segments(&definition.segment_projection, child.segments)?;
-                let segment_context = stable_segments(&segments);
-                (segments, segment_context, None)
-            }
+        let (projected_segments, segment_context) = if use_observed_metadata {
+            (
+                observation.segments.clone(),
+                observation.segment_context.clone(),
+            )
+        } else {
+            let segments = project_segments(&definition.segment_projection, child.segments)?;
+            let segment_context = stable_segments(&segments);
+            (segments, segment_context)
         };
-        let parent_key = (definition.key)(event);
+        let parent_key = observation.key.clone();
         let rollup_lineage = format!("{}>{}", child.lineage, definition.name);
         let membership_key = RollupMembershipKey {
             lineage: rollup_lineage.clone(),
@@ -548,7 +637,7 @@ impl PipelineRuntime {
                 self.remove_rollup_parent(
                     definition,
                     event,
-                    None,
+                    &observation.rollups,
                     source,
                     partition,
                     &rollup_lineage,
@@ -564,7 +653,7 @@ impl PipelineRuntime {
             self.update_rollup_parent(
                 definition,
                 event,
-                rollup_observations,
+                &observation.rollups,
                 source,
                 partition,
                 &rollup_lineage,
@@ -583,7 +672,7 @@ impl PipelineRuntime {
                 self.remove_rollup_parent(
                     definition,
                     event,
-                    None,
+                    &observation.rollups,
                     source,
                     partition,
                     &rollup_lineage,
@@ -599,7 +688,7 @@ impl PipelineRuntime {
             self.update_rollup_parent(
                 definition,
                 event,
-                None,
+                &observation.rollups,
                 source,
                 partition,
                 &rollup_lineage,
@@ -619,7 +708,7 @@ impl PipelineRuntime {
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
-        observations: Option<Vec<EventRollupObservation>>,
+        observations: &[EventRollupObservation],
         source: Option<&str>,
         partition: Option<&str>,
         rollup_lineage: &str,
@@ -672,6 +761,7 @@ impl PipelineRuntime {
             &definition.rollups,
             event,
             observations,
+            false,
             source,
             partition,
             ChildContext {
@@ -693,7 +783,7 @@ impl PipelineRuntime {
         &mut self,
         definition: &RollUpDefinition<T>,
         event: &T,
-        observations: Option<Vec<EventRollupObservation>>,
+        observations: &[EventRollupObservation],
         source: Option<&str>,
         partition: Option<&str>,
         rollup_lineage: &str,
@@ -743,6 +833,7 @@ impl PipelineRuntime {
             &definition.rollups,
             event,
             observations,
+            true,
             source,
             partition,
             ChildContext {
@@ -763,147 +854,39 @@ impl PipelineRuntime {
         &mut self,
         observation: WindowObservation,
     ) -> Result<Vec<WindowEmission>, IngestionError> {
-        if observation.is_active {
-            if let Some(previous) = self.active.get(&observation.state_key) {
-                if previous.segments == observation.segments {
-                    if previous.tags != observation.tags {
-                        if let Some(state) = self.active.get_mut(&observation.state_key) {
-                            state.tags = observation.tags.clone();
-                        }
-                        if self.record_windows
-                            && let Some(id) = self
-                                .active
-                                .get(&observation.state_key)
-                                .map(|state| state.id.clone())
-                        {
-                            self.history.update_open_tags(&id, observation.tags.clone());
-                        }
-                    }
-                    return Ok(Vec::new());
-                }
-                let mut emissions = Vec::new();
-                let changes = segment_changes(&previous.segments, &observation.segments);
-                if let Some(emission) = self.close_window_state(
-                    &observation.state_key,
-                    observation.event_point.clone(),
-                    Some(WindowBoundaryReason::SegmentChanged),
-                    changes,
-                )? {
-                    emissions.push(emission);
-                }
-                emissions.push(self.open_window_state(observation)?);
-                return Ok(emissions);
-            }
-            return Ok(vec![self.open_window_state(observation)?]);
-        }
-
-        Ok(self
-            .close_window_state(
-                &observation.state_key,
-                observation.event_point,
-                Some(WindowBoundaryReason::ActivePredicateEnded),
-                Vec::new(),
-            )?
-            .into_iter()
-            .collect())
-    }
-
-    fn open_window_state(
-        &mut self,
-        observation: WindowObservation,
-    ) -> Result<WindowEmission, IngestionError> {
-        let id = self.next_id()?;
-        let open = OpenWindow {
-            id: id.clone(),
-            window_name: observation.window_name.clone(),
-            key: observation.key.clone(),
-            start: observation.event_point.clone(),
-            known_at: None,
-            source: observation.source.clone(),
-            partition: observation.partition.clone(),
-            segments: observation.segments.clone(),
-            tags: observation.tags.clone(),
-        };
-        if self.record_windows {
-            self.history.push_open(open);
-        }
-        self.active.insert(
-            observation.state_key,
-            OpenState {
-                id: id.clone(),
-                start: observation.event_point.clone(),
-                source: observation.source.clone(),
-                partition: observation.partition.clone(),
-                segments: observation.segments.clone(),
-                tags: observation.tags.clone(),
-            },
+        let state_context = observation.state_key.segment_context.clone();
+        // Source/current roll-up metadata was validated by
+        // `preflight_observations`; old-parent removal paths reuse previously
+        // accepted membership metadata and therefore do not introduce a new
+        // validation surface here.
+        let recorder_observation = RecorderObservation::from_validated_parts(
+            observation.window_name,
+            observation.key,
+            observation.event_point,
+            observation.is_active,
+            observation.source,
+            observation.partition,
+            state_context,
+            observation.segments,
+            observation.tags,
         );
-        Ok(WindowEmission {
-            kind: WindowTransitionKind::Opened,
-            window_name: observation.window_name,
-            key: observation.key,
-            record_id: id,
-            position: self.position,
-            source: observation.source,
-            partition: observation.partition,
-            segments: observation.segments,
-            tags: observation.tags,
-            boundary_reason: None,
-            boundary_changes: Vec::new(),
-        })
-    }
-
-    fn close_window_state(
-        &mut self,
-        state_key: &RuntimeStateKey,
-        event_point: TemporalPoint,
-        boundary_reason: Option<WindowBoundaryReason>,
-        boundary_changes: Vec<WindowBoundaryChange>,
-    ) -> Result<Option<WindowEmission>, IngestionError> {
-        let Some(open_state) = self.active.get(state_key).cloned() else {
-            return Ok(None);
-        };
-        let range = TemporalRange::new(open_state.start.clone(), event_point.clone())?;
-        self.active.remove(state_key);
-        let emission = WindowEmission {
-            kind: WindowTransitionKind::Closed,
-            window_name: state_key.window_name.clone(),
-            key: state_key.key.clone(),
-            record_id: open_state.id.clone(),
-            position: self.position,
-            source: open_state.source.clone(),
-            partition: open_state.partition.clone(),
-            segments: open_state.segments.clone(),
-            tags: open_state.tags.clone(),
-            boundary_reason,
-            boundary_changes: boundary_changes.clone(),
-        };
-        if self.record_windows {
-            self.history.remove_open(&open_state.id);
-            self.history.push_closed(ClosedWindow {
-                id: open_state.id,
-                window_name: state_key.window_name.clone(),
-                key: state_key.key.clone(),
-                range,
-                known_at: None,
-                source: open_state.source,
-                partition: open_state.partition,
-                segments: open_state.segments,
-                tags: open_state.tags,
-                boundary_reason,
-                boundary_changes,
-            });
-        }
-        Ok(Some(emission))
-    }
-
-    fn next_id(&mut self) -> Result<WindowRecordId, IngestionError> {
-        let id = WindowRecordId::generated(format!("pipeline-{:04}", self.next_record_id));
-        self.next_record_id = self
-            .next_record_id
-            .checked_add(1)
-            .ok_or(IngestionError::RecordIdOverflow)?;
-        Ok(id)
+        let transitions = self.recorder.observe_validated(recorder_observation)?;
+        Ok(transitions
+            .into_iter()
+            .map(|transition| WindowEmission {
+                kind: transition.kind,
+                window_name: transition.window_name,
+                key: transition.key,
+                record_id: transition.record_id,
+                position: self.position,
+                source: transition.source,
+                partition: transition.partition,
+                segments: transition.segments,
+                tags: transition.tags,
+                boundary_reason: transition.boundary_reason,
+                boundary_changes: transition.boundary_changes,
+            })
+            .collect())
     }
 }
 
@@ -983,20 +966,53 @@ fn project_segments(
 
 fn observe_rollup_projections<T>(
     definitions: &[RollUpDefinition<T>],
+    event: &T,
     child_segments: &[WindowSegment],
 ) -> Result<Vec<EventRollupObservation>, IngestionError> {
     let mut observations = Vec::with_capacity(definitions.len());
     for definition in definitions {
         let segments = project_segments(&definition.segment_projection, child_segments)?;
         let segment_context = stable_segments(&segments);
-        let rollups = observe_rollup_projections(&definition.rollups, &segments)?;
+        let key = (definition.key)(event);
+        let rollups = observe_rollup_projections(&definition.rollups, event, &segments)?;
         observations.push(EventRollupObservation {
+            key,
             segments,
             segment_context,
             rollups,
         });
     }
     Ok(observations)
+}
+
+fn preflight_rollup_observations<T>(
+    recorder: &WindowRecorder,
+    definitions: &[RollUpDefinition<T>],
+    observations: &[EventRollupObservation],
+    source: Option<&str>,
+    partition: Option<&str>,
+    tags: &[WindowTag],
+) -> Result<(), IngestionError> {
+    debug_assert_eq!(definitions.len(), observations.len());
+    for (definition, observation) in definitions.iter().zip(observations) {
+        recorder.validate_parts(
+            &definition.name,
+            &observation.key,
+            source,
+            partition,
+            &observation.segments,
+            tags,
+        )?;
+        preflight_rollup_observations(
+            recorder,
+            &definition.rollups,
+            &observation.rollups,
+            source,
+            partition,
+            tags,
+        )?;
+    }
+    Ok(())
 }
 
 fn should_keep_segment(projection: &RollUpSegmentProjection, name: &str) -> bool {
@@ -1022,29 +1038,6 @@ fn stable_segments(segments: &[WindowSegment]) -> String {
         }
     }
     stable
-}
-
-fn segment_changes(
-    previous: &[WindowSegment],
-    current: &[WindowSegment],
-) -> Vec<WindowBoundaryChange> {
-    let mut changes = Vec::new();
-    let mut names = BTreeSet::new();
-    names.extend(previous.iter().map(|segment| segment.name.as_str()));
-    names.extend(current.iter().map(|segment| segment.name.as_str()));
-    for name in names {
-        let before = previous.iter().find(|segment| segment.name == name);
-        let after = current.iter().find(|segment| segment.name == name);
-        if before == after {
-            continue;
-        }
-        changes.push(WindowBoundaryChange {
-            segment_name: name.to_owned(),
-            previous_value: before.map(|segment| segment.value.clone()),
-            current_value: after.map(|segment| segment.value.clone()),
-        });
-    }
-    changes
 }
 
 #[cfg(test)]
