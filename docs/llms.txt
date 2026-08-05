@@ -34,8 +34,13 @@ Overlap, Residual (target-only), Missing (comparison-only), Gap, Coverage, Symme
 
 ## Packages
 
-- [.NET / C#](https://github.com/Scottlr/Spanfold/blob/main/packages/dotnet/README.md): C# API surface, CLI, testing helpers, samples, benchmarks
-- [Rust](https://github.com/Scottlr/Spanfold/blob/main/packages/rust/README.md): Rust 2024 core API, selector-backed comparisons, Episode analytics, deterministic exports, audit bundles, testing helpers, benchmarks, and CLI workflows
+- [.NET / C#](https://github.com/Scottlr/Spanfold/blob/main/packages/dotnet/README.md): C# API surface, CLI, testing helpers, samples, benchmarks. NuGet.org currently publishes Spanfold and Spanfold.Testing 0.1.0-preview.2; the repository's 0.2.0-preview.1 Spanfold.Artifacts and Spanfold.Cli projects are source-only.
+- [Rust](https://github.com/Scottlr/Spanfold/blob/main/packages/rust/README.md): published Rust 2024 spanfold and spanfold-cli 0.1.1 crates, selector-backed comparisons, Episode analytics, deterministic exports, audit bundles, testing helpers, and benchmarks
+
+## Documentation discovery
+
+- [Repository README](https://github.com/Scottlr/Spanfold/blob/main/README.md)
+- [Documentation contributor guide](https://github.com/Scottlr/Spanfold/blob/main/docs/README.md)
 
 ## Repository
 

@@ -14,19 +14,24 @@ When a predicate changes — a service goes down, a threshold is crossed, a stat
 
 ## Install the preview
 
-Install the current .NET preview from NuGet.org or the Rust crate from
-crates.io:
+Install the latest published .NET preview from NuGet.org or the current Rust
+crate from crates.io:
 
 ```bash
-dotnet add package Spanfold --version 0.2.0-preview.1
+dotnet add package Spanfold --version 0.1.0-preview.2
 cargo add spanfold@0.1.1
 ```
+
+The repository's .NET source is versioned `0.2.0-preview.1`, but that version
+has not been published to NuGet.org.
 
 ## Quick Start
 
 ```csharp
+using Spanfold;
+
 // 1. Define: what condition are you tracking, and for which key?
-var pipeline = EventPipeline
+var pipeline = Spanfold.Spanfold
     .For<MonitorEvent>()
     .RecordWindows()
     .TrackWindow("Outage",
@@ -150,19 +155,19 @@ but it can express conditions over any event data:
 
 You have two or more monitoring providers watching the same service. When an outage occurs, each provider may report it at a slightly different time, recover at a different time, or miss it entirely. Spanfold records each provider's outage windows and emits structured rows showing exactly where they agreed, where one reported a period the other didn't, and how large each discrepancy was.
 
-→ [Provider outage comparison](docs/use-cases.html#provider-outage-comparison)
+→ [Provider outage comparison](docs/use-cases.html#monitoring)
 
 ### Pipeline stage divergence
 
 A processing pipeline passes events through multiple stages — ingestion, enrichment, classification, alerting. When a condition appears at one stage but not another, or arrives late, or disappears before the final stage, Spanfold records a window at each stage and compares them to show where state diverged, lagged, or dropped.
 
-→ [Pipeline stage divergence](docs/use-cases.html#pipeline-stage-divergence)
+→ [Pipeline stage divergence](docs/use-cases.html#data-pipelines)
 
 ### Backtesting without future leakage
 
 Auditing a past decision means using only what was knowable at the time — not data that arrived later. Spanfold's known-at filtering separates when a state was observed from when it was available to the system, so backtests, replays, and decision-point audits do not accidentally include future observations even when replaying historical data.
 
-→ [No-future-leakage backtesting](docs/use-cases.html#backtesting)
+→ [No-future-leakage backtesting](docs/use-cases.html#decision-audit)
 
 ---
 
@@ -202,14 +207,22 @@ Auditing a past decision means using only what was knowable at the time — not 
 
 ## .NET Package
 
-The .NET preview includes the C# API, CLI, testing helpers, samples, benchmarks,
-and package documentation. Install the packages and global tool from NuGet.org:
+NuGet.org currently publishes the core C# API and testing helpers at
+`0.1.0-preview.2`:
 
 ```bash
-dotnet add package Spanfold --version 0.2.0-preview.1
-dotnet add package Spanfold.Artifacts --version 0.2.0-preview.1
-dotnet add package Spanfold.Testing --version 0.2.0-preview.1
-dotnet tool install --global Spanfold.Cli --version 0.2.0-preview.1
+dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold.Testing --version 0.1.0-preview.2
+```
+
+The `Spanfold.Artifacts` package and the current `Spanfold.Cli`
+`0.2.0-preview.1` tool are not published. Use those projects from a repository
+checkout. After creating a fixture described by the
+[fixture schema](docs/fixture-schema.md), run the documented comparison command
+through the source project:
+
+```bash
+dotnet run --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj -- compare fixture.json --format json
 ```
 
 → [.NET package README](packages/dotnet/README.md)
@@ -302,3 +315,5 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [Rust API reference](docs/api-rust.html)
 - [Comparator reference](docs/comparator-reference.md)
 - [Comparison guide](docs/comparison-guide.md)
+- [Machine-readable documentation index](docs/llms.txt)
+- [Documentation site contributor guide](docs/README.md)

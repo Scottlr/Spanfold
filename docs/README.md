@@ -4,6 +4,10 @@ The public site is intentionally static and dependency-free. Shared navigation,
 language selection, mobile behavior, and syntax highlighting live in the site
 scripts and styles rather than a generated framework.
 
+Public discovery starts at [the site overview](index.html). The
+[machine-readable documentation index](llms.txt) lists the main guides, language
+journeys, API references, and package entry points.
+
 ## Adding a page
 
 Start from this shell and keep the fallback navigation small. `site-shell.js`
@@ -56,6 +60,8 @@ Register new primary destinations in `site-shell.js`. Detail pages should be
 linked from their overview or guide rather than adding every page to the main
 navigation. Shared conceptual prose remains visible in both language modes;
 use language panels for code, commands, and genuinely language-specific notes.
+Pages without paired panels or dedicated C#/Rust routes are shared-neutral, so
+the shell does not render a language control on them.
 
 ## Dedicated language routes
 

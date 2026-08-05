@@ -95,15 +95,19 @@
       fragment.appendChild(container);
     });
 
-    const language = document.createElement("div");
-    language.className = "nav-section nav-language";
-    language.innerHTML = `
-      <span class="nav-title">Language</span>
-      <div class="language-switcher" aria-label="Documentation language">
-        <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-        <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
-      </div>`;
-    fragment.appendChild(language);
+    const hasLanguagePanels = Boolean(document.querySelector(".language-panel[data-language]"));
+    const hasLanguageRoutes = Boolean(document.body.dataset.csharpHref && document.body.dataset.rustHref);
+    if (hasLanguagePanels || hasLanguageRoutes) {
+      const language = document.createElement("div");
+      language.className = "nav-section nav-language";
+      language.innerHTML = `
+        <span class="nav-title">Language</span>
+        <div class="language-switcher" aria-label="Documentation language">
+          <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
+          <button type="button" data-language-toggle="rust" aria-pressed="false">Rust</button>
+        </div>`;
+      fragment.appendChild(language);
+    }
 
     nav.replaceChildren(fragment);
   }
