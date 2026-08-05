@@ -256,13 +256,14 @@ cargo install spanfold-cli --version 0.1.1</code></pre>
         <section class="api-member" id="Sequences">
           <p class="member-kind">spanfold::sequences</p>
           <h2>WindowSequenceBuilder</h2>
-          <p><code>WindowHistory::match_sequence(name)</code> matches ordered, non-overlapping windows for the same lane identity.</p>
+          <p><code>WindowHistory::match_sequence(name)</code> matches onset-ordered windows for the same lane identity. Selected steps may overlap; completed matches do not reuse source records.</p>
           <table class="member-table">
             <tr><th>Item</th><th>Purpose</th></tr>
             <tr><td><code>step(window_name)</code>, <code>then(window_name)</code></td><td>Declare the ordered pattern.</td></tr>
             <tr><td><code>run()</code></td><td>Returns <code>Result&lt;Vec&lt;WindowSequenceMatch&gt;, WindowSequenceError&gt;</code>.</td></tr>
             <tr><td><code>run_live(evaluation_horizon)</code></td><td>Evaluates open evidence at an explicit horizon.</td></tr>
           </table>
+          <p><a href="ordered-sequences.html">Read the complete ordered sequences guide</a> for matching, lineage, live finality, and release availability.</p>
         </section>
 
         <section class="api-member" id="Exports">

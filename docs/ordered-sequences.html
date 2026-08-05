@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use Spanfold ordered cross-window sequences in C# and Rust to match named steps within one lane, control gaps, preserve lineage, and interpret live finality.">
+  <title>Ordered cross-window sequences guide - Spanfold</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="csharp">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <p class="eyebrow">Guide · C# and Rust</p>
+      <h1>Match a journey across named state windows.</h1>
+      <p class="lead">
+        Ordered sequences answer whether one key, source, and partition lane
+        passed through literal named window families in order. The matcher is
+        deliberately bounded: a linear list of steps, optional per-transition
+        gaps, deterministic evidence selection, and no branching, negation,
+        loops, or causal claim.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="#direct-api">Use the direct API</a>
+        <a class="button secondary" href="#matching">Understand matching</a>
+      </div>
+    </section>
+
+    <section class="doc-section" id="analytical-unit">
+      <div class="section-heading">
+        <p class="eyebrow">Choose the analytical unit</p>
+        <h2>Use sequences for transitions between meanings.</h2>
+        <p>
+          A sequence step names a window family such as <code>Warning</code>,
+          <code>Offline</code>, or <code>Recovered</code>. It does not describe a
+          low-level event type or an arbitrary predicate over records. Record
+          the interpreted states first, then ask whether a lane followed the
+          named journey.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article>
+          <h3>Exact comparisons</h3>
+          <p>Use overlap, residual, missing, coverage, containment, or lead/lag rows when the result must explain precise agreement and disagreement between two selected histories.</p>
+        </article>
+        <article>
+          <h3>Episodes</h3>
+          <p>Use Episodes when nearby fragments of the same interpreted condition should form occurrences that are then related across target and against sides.</p>
+        </article>
+        <article>
+          <h3>Ordered sequences</h3>
+          <p>Use a sequence when different named conditions form a meaningful order within one lane: warning, outage, recovery; queued, processing, completed; or suspected, confirmed, resolved.</p>
+        </article>
+      </div>
+      <p>
+        These views can be used together. A completed incident sequence says
+        the three states occurred in order; it does not say two providers agreed
+        on their exact ranges, or combine those windows into one occurrence.
+      </p>
+    </section>
+
+    <section class="doc-section" id="pattern-lane">
+      <div class="section-heading">
+        <p class="eyebrow">Pattern and lane</p>
+        <h2>Literal steps stay inside one correlation lane.</h2>
+        <p>
+          A plan has a non-blank analytical name, at least two literal window-family
+          names, and an optional inclusive maximum processing-position gap.
+          Repeating a family is valid: <code>A → B → A</code> requires separate
+          records because one source record cannot fill two steps.
+        </p>
+      </div>
+      <div class="stage-flow">
+        <article class="stage-card">
+          <p class="stage-kicker">1. Anchor</p>
+          <h4>The first family starts a candidate chain.</h4>
+          <p>Only a record for the configured first step can anchor a completed match.</p>
+        </article>
+        <article class="stage-card">
+          <p class="stage-kicker">2. Correlate</p>
+          <h4>Key, source, and partition must stay equal.</h4>
+          <p>Evidence never crosses a device, provider, stage, or partition boundary to complete a journey.</p>
+        </article>
+        <article class="stage-card">
+          <p class="stage-kicker">3. Advance</p>
+          <h4>Each next onset is not earlier.</h4>
+          <p>Later steps may overlap earlier evidence; onset order, rather than non-overlap, defines the sequence.</p>
+        </article>
+        <article class="stage-card">
+          <p class="stage-kicker">4. Complete</p>
+          <h4>One record fills every named step.</h4>
+          <p>Only a complete chain becomes a match and consumes its contributing record IDs.</p>
+        </article>
+      </div>
+      <p>
+        Rust lane identity uses exact string equality for key, source, and
+        partition. In C#, the first step family's configured history key
+        comparer anchors key equality for every later step; source and partition
+        use exact object equality. This is a real native-model difference, so
+        normalize key conventions before expecting cross-runtime agreement.
+      </p>
+    </section>
+
+    <section class="doc-section" id="matching">
+      <div class="section-heading">
+        <p class="eyebrow">Deterministic matching</p>
+        <h2>Earliest completion wins; committed evidence is not reused.</h2>
+        <p>
+          Within each lane, candidates for a step are ordered by effective end,
+          then onset, then record ID. Starting from each first-step candidate,
+          the matcher takes the first compatible unused candidate for every next
+          step. It does not enumerate alternative chains or optimize for the
+          largest number of possible matches.
+        </p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Rule</th><th>Consequence</th></tr></thead>
+        <tbody>
+          <tr><td>Onset order</td><td>A candidate is eligible when its start is at or after the previous step's start. Overlapping steps are allowed.</td></tr>
+          <tr><td>Earliest completion</td><td>The lowest effective end wins first; onset and record ID resolve ties deterministically.</td></tr>
+          <tr><td>Commit on completion</td><td>An incomplete attempted chain consumes nothing, so its evidence may still support a later complete chain.</td></tr>
+          <tr><td>Non-reuse</td><td>After a complete match commits, none of its source record IDs can contribute to another match in that lane.</td></tr>
+          <tr><td>Stable result order</td><td>Completed matches are returned by end, then start, then contributing record IDs, with native lane identity used as an additional Rust tie-breaker.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="doc-section" id="gaps">
+      <div class="section-heading">
+        <p class="eyebrow">Optional gap constraint</p>
+        <h2>Limit inactivity between each consecutive pair.</h2>
+        <p>
+          For a transition, inactive gap is
+          <code>max(0, next start − previous effective end)</code>. An overlap
+          therefore has gap zero. <code>WithMaximumGap(...)</code> /
+          <code>with_maximum_gap(...)</code> applies the inclusive limit to every
+          transition independently; it is not an end-to-end duration limit.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article><h3>No maximum</h3><p>Any later-onset record in the same lane can complete the next step, regardless of intervening inactivity.</p></article>
+        <article><h3>Maximum of 5</h3><p>A transition with gap 5 qualifies; gap 6 does not. Each pair in a three-step sequence is checked separately.</p></article>
+        <article><h3>Reported total gap</h3><p>The match sums the positive inactive gaps between selected steps. Its end-to-end magnitude is separately measured from the first onset to the latest effective end.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="direct-api">
+      <div class="section-heading">
+        <p class="eyebrow">Direct library APIs</p>
+        <h2>Build the same bounded question idiomatically.</h2>
+        <p>
+          The examples assume <code>history</code> already contains recorded
+          <code>Warning</code>, <code>Offline</code>, and <code>Recovered</code>
+          windows. Historical execution requires processing-position evidence
+          and requires every record from the selected families in that history
+          to be closed.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C# · current repository source</h3>
+          <pre><code class="language-csharp">using Spanfold.Sequences;
+
+var result = history
+    .MatchSequence("incident journey")
+    .Step("Warning")
+    .Then("Offline")
+    .Then("Recovered")
+    .WithMaximumGap(5)
+    .Run();
+
+foreach (var match in result.Matches)
+{
+    Console.WriteLine(
+        $"{match.Key}: {match.StartPosition}..{match.EndPosition} " +
+        $"gap={match.TotalGapPositionMagnitude} {match.Finality}");
+
+    foreach (var record in match.Evidence)
+    {
+        Console.WriteLine($"  {record.Window.WindowName} {record.Window.Id}");
+    }
+}</code></pre>
+        </article>
+        <article>
+          <h3>Rust · current repository source</h3>
+          <pre><code class="language-rust">let matches = history
+    .match_sequence("incident journey")
+    .step("Warning")
+    .then("Offline")
+    .then("Recovered")
+    .with_maximum_gap(5)
+    .run()?;
+
+for sequence_match in &amp;matches {
+    println!(
+        "{}: {}..{} gap={} {:?}",
+        sequence_match.key(),
+        sequence_match.start().magnitude(),
+        sequence_match.end().magnitude(),
+        sequence_match.total_gap(),
+        sequence_match.finality(),
+    );
+
+    for record in sequence_match.evidence() {
+        println!("  {} {}", record.window.window_name(), record.window.id());
+    }
+}</code></pre>
+        </article>
+      </div>
+      <p class="language-note">
+        Builder validation follows each host language: C# rejects invalid calls
+        as the fluent plan is built or run; Rust returns
+        <code>WindowSequenceError</code> from execution.
+      </p>
+    </section>
+
+    <section class="doc-section" id="lineage-output">
+      <div class="section-heading">
+        <p class="eyebrow">Lineage and output</p>
+        <h2>The match keeps the exact evidence that completed it.</h2>
+        <p>
+          Evidence is an ordered snapshot record per configured step. Each
+          snapshot record retains the source <code>WindowRecord</code> and its
+          record ID, plus the effective range and finality used by matching.
+          Keep this native evidence when an audit must explain why a journey was
+          accepted.
+        </p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Output</th><th>C# / .NET source</th><th>Rust source</th></tr></thead>
+        <tbody>
+          <tr><td>Execution result</td><td><code>WindowSequenceResult</code> with <code>Plan</code>, ordered <code>Matches</code>, and optional <code>EvaluationHorizon</code>.</td><td><code>Vec&lt;WindowSequenceMatch&gt;</code>; there is no enclosing result object or stored evaluation horizon.</td></tr>
+          <tr><td>Plan name</td><td>Available through <code>result.Plan.Name</code>.</td><td>Stored on every match and returned by <code>name()</code>.</td></tr>
+          <tr><td>Lane identity</td><td><code>Key</code>, <code>Source</code>, and <code>Partition</code> are native objects.</td><td><code>key()</code> is a string; <code>source()</code> and <code>partition()</code> are optional strings.</td></tr>
+          <tr><td>Range and magnitude</td><td><code>StartPosition</code>, <code>EndPosition</code>, <code>EndToEndPositionMagnitude</code>, and <code>TotalGapPositionMagnitude</code>.</td><td><code>start()</code>, <code>end()</code>, <code>end_to_end_magnitude()</code>, and <code>total_gap()</code>.</td></tr>
+          <tr><td>Lineage</td><td><code>Evidence</code> contains ordered <code>WindowSnapshotRecord</code> values with source window IDs.</td><td><code>evidence()</code> returns the same native snapshot-record shape.</td></tr>
+          <tr><td>Portable output</td><td colspan="2">There is currently no portable sequence plan/result document, deterministic cross-runtime sequence schema, or CLI sequence route.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="doc-section" id="live-finality">
+      <div class="section-heading">
+        <p class="eyebrow">Live horizon and finality</p>
+        <h2>A live run matches only evidence visible at the horizon.</h2>
+        <p>
+          Use <code>RunLive(TemporalPoint.ForPosition(horizon))</code> or
+          <code>run_live(TemporalPoint::position(horizon))</code>. The history
+          snapshot excludes future evidence, clips a still-open or not-yet-ended
+          record to the horizon, and marks that snapshot record provisional.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C# · live source history</h3>
+          <pre><code class="language-csharp">using Spanfold.Comparison;
+
+var live = history
+    .MatchSequence("incident journey")
+    .Step("Warning")
+    .Then("Offline")
+    .Then("Recovered")
+    .WithMaximumGap(5)
+    .RunLive(TemporalPoint.ForPosition(42));
+
+var provisional = live.Matches
+    .Where(match =&gt; match.Finality == ComparisonFinality.Provisional);</code></pre>
+        </article>
+        <article>
+          <h3>Rust · live source history</h3>
+          <pre><code class="language-rust">let live = history
+    .match_sequence("incident journey")
+    .step("Warning")
+    .then("Offline")
+    .then("Recovered")
+    .with_maximum_gap(5)
+    .run_live(TemporalPoint::position(42))?;
+
+let provisional = live.iter().filter(|sequence_match| {
+    sequence_match.finality() == &amp;ComparisonFinality::Provisional
+});</code></pre>
+        </article>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Evidence-derived finality</h3><p>A completed match is provisional exactly when any selected snapshot record is provisional. If every selected record is final, the match is final.</p></article>
+        <article><h3>No gap-settling boundary</h3><p>The maximum gap only tests transitions that were selected. It does not keep an otherwise final match provisional while waiting for another possible future candidate.</p></article>
+        <article><h3>No absence result</h3><p>A live run returns completed visible chains. It does not emit a provisional “not matched yet” row for a journey that future evidence might complete.</p></article>
+        <article><h3>No completeness promise</h3><p>The horizon does not imply a watermark, allowed lateness, retention policy, or source completeness. Callers own those guarantees and rerun matching when history changes.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="availability">
+      <div class="section-heading">
+        <p class="eyebrow">Availability</p>
+        <h2>The source APIs are ahead of both published packages.</h2>
+        <p>
+          Ordered sequences landed in the repository after the current published
+          NuGet and crates.io baselines. Use a repository checkout until each
+          ecosystem receives a later release that explicitly includes the feature.
+        </p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Runtime</th><th>Current repository source</th><th>Published package</th></tr></thead>
+        <tbody>
+          <tr><td>C# / .NET</td><td>Implemented in source version <code>0.2.0-preview.1</code> under <code>Spanfold.Sequences</code>.</td><td>NuGet.org <code>Spanfold 0.1.0-preview.2</code> predates ordered sequences.</td></tr>
+          <tr><td>Rust</td><td>Implemented on the current branch under <code>spanfold::sequences</code>; the crate manifest still reads <code>0.1.1</code>.</td><td>The published crates.io <code>spanfold 0.1.1</code> release predates ordered sequences despite sharing the source tree's current version number.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        The native semantics intentionally correspond, but package versioning,
+        result wrapping, key identity, and error handling remain runtime-specific.
+        No portable document currently turns the sequence surface into a
+        cross-runtime compatibility contract.
+      </p>
+    </section>
+
+    <section class="doc-section two-col">
+      <div>
+        <p class="eyebrow">Next</p>
+        <h2>Choose the neighboring view for the next question.</h2>
+      </div>
+      <div>
+        <p>
+          Read exact comparison semantics when range disagreement matters, use
+          Episode analysis when fragments should form occurrences, or define
+          live ordering and completeness ownership before publishing changing
+          sequence results.
+        </p>
+        <div class="actions">
+          <a class="button secondary" href="concepts-comparing-histories.html">Compare exact rows</a>
+          <a class="button secondary" href="episode-analysis.html">Episode analysis</a>
+          <a class="button secondary" href="live-stream-operations.html">Live operations</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="https://github.com/Scottlr/spanfold">GitHub repository</a></footer>
+  <script src="site-shell.js"></script>
+  <script src="syntax.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>

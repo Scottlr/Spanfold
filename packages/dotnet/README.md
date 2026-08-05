@@ -286,6 +286,8 @@ that explicit interpretation provides recall and precision.
 Use `Spanfold.Sequences` when one lane must pass through literal named window
 families in onset order. Matches use earliest-completion greedy selection,
 never reuse committed evidence, and can carry provisional live windows.
+This API is available in the current repository source and is not included in
+the published NuGet.org `0.1.0-preview.2` package.
 
 ```csharp
 using Spanfold.Sequences;
@@ -299,6 +301,11 @@ var journeys = pipeline.History
     .Run()
     .Matches;
 ```
+
+The current repository source surface, including lane identity, candidate
+selection, gap arithmetic, lineage, live finality, and the published-package
+boundary, is covered in the
+[ordered cross-window sequences guide](https://scottlr.github.io/Spanfold/ordered-sequences.html).
 
 ## Assess, Trace, Revise, and Audit
 
@@ -697,6 +704,7 @@ analysis.
 ## More Detail
 
 - [Comparison guide](https://github.com/Scottlr/Spanfold/blob/main/docs/comparison-guide.md)
+- [Ordered cross-window sequences guide](https://scottlr.github.io/Spanfold/ordered-sequences.html)
 - [Comparator reference](https://github.com/Scottlr/Spanfold/blob/main/docs/comparator-reference.md)
 - [Live finality and changelog](https://github.com/Scottlr/Spanfold/blob/main/docs/live-finality-and-changelog.md)
 - [Fixture schema](https://github.com/Scottlr/Spanfold/blob/main/docs/fixture-schema.md)
