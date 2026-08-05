@@ -22,6 +22,7 @@ Overlap, Residual (target-only), Missing (comparison-only), Gap, Coverage, Symme
 - [Get started](https://scottlr.github.io/Spanfold/get-started.html)
 - [Get started with C#](https://scottlr.github.io/Spanfold/get-started-csharp.html)
 - [Get started with Rust](https://scottlr.github.io/Spanfold/get-started-rust.html)
+- [C# and Rust portability guide](https://scottlr.github.io/Spanfold/cross-language-guide.html): task-by-task package, pipeline, history, comparison, row, finality, export, Episode, sequence, CLI, testing, and current-gap map
 - [Use cases](https://scottlr.github.io/Spanfold/use-cases.html)
 - [Concepts](https://scottlr.github.io/Spanfold/concepts.html)
 - [API reference](https://scottlr.github.io/Spanfold/api.html)

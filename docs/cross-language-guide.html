@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A task-by-task portability map between Spanfold's C# and Rust APIs, packages, results, exports, Episode analytics, sequences, testing helpers, and CLIs.">
+  <title>C# and Rust portability guide - Spanfold</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="csharp">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <p class="eyebrow">C# ↔ Rust portability</p>
+      <h1>Carry the temporal question across runtimes.</h1>
+      <p class="lead">
+        Spanfold's C# and Rust APIs share the same model—record windows, select
+        two sides, normalize, align, compare, then inspect or export evidence.
+        This guide maps that workflow by task while preserving the idioms and
+        package boundaries of each runtime.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="#workflow-map">Open the API map</a>
+        <a class="button secondary" href="#differences">Read current differences</a>
+      </div>
+    </section>
+
+    <section class="doc-section" id="packages">
+      <div class="section-heading">
+        <p class="eyebrow">Choose a runtime</p>
+        <h2>Package status is not symmetrical today.</h2>
+        <p>The Rust releases expose the current documented surface. The current .NET source is ahead of the packages on NuGet.org, so check the status column before porting a source example into an installed package.</p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Concern</th><th>C# / .NET</th><th>Rust</th></tr></thead>
+        <tbody>
+          <tr><td>Core library</td><td><code>Spanfold</code> <strong>0.1.0-preview.2</strong> on NuGet.org; repository source is <strong>0.2.0-preview.1</strong>.</td><td><code>spanfold</code> <strong>0.1.1</strong> on crates.io.</td></tr>
+          <tr><td>Testing helpers</td><td><code>Spanfold.Testing</code> <strong>0.1.0-preview.2</strong> is a separate NuGet package.</td><td><code>SpanfoldAssert</code>, <code>SpanfoldSnapshot</code>, fixture builders, and the virtual clock ship in <code>spanfold</code>.</td></tr>
+          <tr><td>Exports and bundles</td><td><code>Spanfold.Artifacts</code> is a separate, source-only project at the current repository version.</td><td>Deterministic export functions ship in <code>spanfold</code>; audit-bundle assembly is owned by <code>spanfold-cli</code>.</td></tr>
+          <tr><td>Command line</td><td><code>Spanfold.Cli</code> <strong>0.1.0-preview.2</strong> is a published global tool whose command is <code>spanfold</code>. The current 0.2.0-preview.1 CLI surface is source-only.</td><td><code>spanfold-cli</code> <strong>0.1.1</strong> is published; its installed command is <code>spanfold</code>.</td></tr>
+        </tbody>
+      </table>
+      <div class="code-grid">
+        <article>
+          <h3>C# · published packages</h3>
+          <pre><code class="language-powershell">dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold.Testing --version 0.1.0-preview.2
+dotnet tool install --global Spanfold.Cli --version 0.1.0-preview.2</code></pre>
+        </article>
+        <article>
+          <h3>Rust · published crates</h3>
+          <pre><code class="language-bash">cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="workflow-map">
+      <div class="section-heading">
+        <p class="eyebrow">Task map</p>
+        <h2>Translate intent, not casing.</h2>
+        <p>The nouns remain stable. C# uses properties, extension methods, and configuring delegates; Rust uses borrowed history, consuming builders, explicit values, and <code>Result</code> at fallible boundaries.</p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Task</th><th>C# / .NET source</th><th>Rust 0.1.1</th></tr></thead>
+        <tbody>
+          <tr><td>Start a pipeline</td><td><code>EventPipeline.For&lt;TEvent&gt;()</code></td><td><code>for_events::&lt;T&gt;()</code></td></tr>
+          <tr><td>Record history</td><td><code>.RecordWindows()</code></td><td><code>.record_windows()</code></td></tr>
+          <tr><td>Add one window and finish</td><td><code>.TrackWindow(...)</code> returns the pipeline</td><td><code>.track_window(...).build()?</code></td></tr>
+          <tr><td>Add several windows</td><td><code>.Window(...).Window(...).Build()</code></td><td><code>.window(...).window(...).build()?</code></td></tr>
+          <tr><td>Ingest one / many</td><td><code>Ingest(...)</code> / <code>IngestMany(...)</code></td><td><code>ingest(...)?</code> / <code>ingest_many(...)?</code></td></tr>
+          <tr><td>Borrow recorded history</td><td><code>pipeline.History</code></td><td><code>pipeline.history()</code></td></tr>
+          <tr><td>Query a lane</td><td><code>Query().Window(...).Lane(...).ClosedWindows()</code></td><td><code>query().where_window(...).where_source(...).closed_windows()</code></td></tr>
+          <tr><td>Snapshot at a horizon</td><td><code>SnapshotAt(TemporalPoint.ForPosition(...))</code></td><td><code>snapshot_at(TemporalPoint::position(...))?</code></td></tr>
+          <tr><td>Start a comparison</td><td><code>history.Compare(name)</code></td><td><code>history.compare(name)</code></td></tr>
+          <tr><td>Select sides</td><td><code>Target(name, ...)</code> / <code>Against(name, ...)</code></td><td><code>target_selector(...)</code> / <code>against_selector(...)</code>, or source conveniences</td></tr>
+          <tr><td>Scope and normalize</td><td><code>Within(...)</code> / <code>Normalize(...)</code></td><td><code>scope(...)</code> / <code>normalization(...)</code></td></tr>
+          <tr><td>Choose rows</td><td><code>Using(c =&gt; c.Overlap().Residual()...)</code></td><td><code>overlap().residual()...</code></td></tr>
+          <tr><td>Validate / prepare / align</td><td><code>Validate()</code> / <code>Prepare()</code> / <code>prepared.Align()</code></td><td><code>validate()</code> / <code>prepare()</code> / <code>align()</code></td></tr>
+          <tr><td>Run final / live</td><td><code>Run()</code> / <code>RunLive(horizon)</code></td><td><code>run()</code> / <code>run_live(horizon)</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="doc-section" id="pipeline">
+      <div class="section-heading">
+        <p class="eyebrow">Record</p>
+        <h2>Build and ingest with the same lane identity.</h2>
+        <p>In both runtimes, <code>source</code> and <code>partition</code> are ingestion context. Processing position advances once per committed event, and recording must be enabled before history-based analysis is useful.</p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C# · current source API</h3>
+          <pre><code class="language-csharp">var pipeline = EventPipeline
+    .For&lt;DeviceStatus&gt;()
+    .RecordWindows()
+    .TrackWindow(
+        "DeviceOffline",
+        e =&gt; e.DeviceId,
+        e =&gt; !e.IsOnline);
+
+var ingestion = pipeline.Ingest(
+    new DeviceStatus("device-17", false),
+    source: "provider-a",
+    partition: "eu-west");
+
+var history = pipeline.History;</code></pre>
+        </article>
+        <article>
+          <h3>Rust</h3>
+          <pre><code class="language-rust">let mut pipeline = spanfold::for_events::&lt;DeviceStatus&gt;()
+    .record_windows()
+    .track_window(
+        "DeviceOffline",
+        |e| e.device_id.clone(),
+        |e| !e.is_online,
+    )
+    .build()?;
+
+let ingestion = pipeline.ingest(
+    DeviceStatus { device_id: "device-17".into(), is_online: false },
+    Some("provider-a"),
+    Some("eu-west"),
+)?;
+
+let history = pipeline.history();</code></pre>
+        </article>
+      </div>
+      <p class="language-note">The published .NET 0.1.0-preview.2 examples use <code>Spanfold.Spanfold.For&lt;TEvent&gt;()</code>. In current source, <code>EventPipeline.For&lt;TEvent&gt;()</code> is the preferred entry point and the older static entry point is obsolete.</p>
+      <p class="language-note">For a batch with one Rust lane, <code>ingest_many(events, source, partition)</code> applies that context to every event. The C# <code>IngestMany(events)</code> overload has no lane parameters; call <code>Ingest(event, source, partition)</code> for each event when source or partition matters.</p>
+      <p class="language-note">In current C# source, emission callbacks run after the event and its history have committed. An <code>IngestionCallbackException&lt;TEvent&gt;</code> reports callback failures and carries the committed result; do not blindly retry that event.</p>
+    </section>
+
+    <section class="doc-section" id="history">
+      <div class="section-heading">
+        <p class="eyebrow">Inspect</p>
+        <h2>Query first when one history answers the question.</h2>
+        <p>Both APIs filter by window name, key, source, partition, segment, and tag. A snapshot clips evidence to an explicit horizon and labels records derived from still-open windows as provisional.</p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C#</h3>
+          <pre><code class="language-csharp">var closed = history.Query()
+    .Window("DeviceOffline")
+    .Key("device-17")
+    .Lane("provider-a")
+    .ClosedWindows();
+
+var snapshot = history.SnapshotAt(
+    TemporalPoint.ForPosition(42));
+var visible = snapshot.Query()
+    .Window("DeviceOffline")
+    .Windows();</code></pre>
+        </article>
+        <article>
+          <h3>Rust</h3>
+          <pre><code class="language-rust">let closed = history.query()
+    .where_window("DeviceOffline")
+    .where_key("device-17")
+    .where_source("provider-a")
+    .closed_windows();
+
+let snapshot = history.snapshot_at(
+    TemporalPoint::position(42),
+)?;
+let visible = snapshot.query()
+    .where_window("DeviceOffline")
+    .windows();</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="comparison">
+      <div class="section-heading">
+        <p class="eyebrow">Compare</p>
+        <h2>The comparison stages have direct counterparts.</h2>
+        <p><strong>Build</strong> captures the question. <strong>Validate</strong> critiques the plan. <strong>Prepare</strong> selects, normalizes, and records exclusions. <strong>Align</strong> partitions time into comparable segments. <strong>Run</strong> executes the requested comparators and materializes rows.</p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C#</h3>
+          <pre><code class="language-csharp">var comparison = history
+    .Compare("Provider QA")
+    .Target("primary", s =&gt; s.Source("provider-a"))
+    .Against("secondary", s =&gt; s.Source("provider-b"))
+    .Within(s =&gt; s.Window("DeviceOffline"))
+    .Using(c =&gt; c
+        .Overlap()
+        .Residual()
+        .Missing()
+        .Coverage());
+
+var diagnostics = comparison.Validate();
+var prepared = comparison.Prepare();
+var aligned = prepared.Align();
+var result = comparison.Run();</code></pre>
+        </article>
+        <article>
+          <h3>Rust</h3>
+          <pre><code class="language-rust">let comparison = history
+    .compare("Provider QA")
+    .target_selector(
+        ComparisonSelector::for_source("provider-a")
+            .with_name("primary"),
+    )
+    .against_selector(
+        ComparisonSelector::for_source("provider-b")
+            .with_name("secondary"),
+    )
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .coverage();
+
+let diagnostics = comparison.validate();
+let prepared = comparison.prepare();
+let aligned = comparison.align();
+let result = comparison.run();</code></pre>
+        </article>
+      </div>
+      <p class="language-note">Use serializable selectors when the plan will be exported. Rust also permits <code>ComparisonSelector::runtime_only(...)</code> for local predicates, but deterministic plan and result exports reject that plan as non-portable.</p>
+    </section>
+
+    <section class="doc-section" id="results">
+      <div class="section-heading">
+        <p class="eyebrow">Consume evidence</p>
+        <h2>Row families correspond; finality contracts differ.</h2>
+        <p>Use the typed collections for analysis, then use the finality-aware views when a live horizon can make a row provisional. Finality describes horizon dependence; it is not a watermark or a claim that late records cannot arrive.</p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Evidence</th><th>C#</th><th>Rust</th></tr></thead>
+        <tbody>
+          <tr><td>Core rows</td><td><code>OverlapRows</code>, <code>ResidualRows</code>, <code>MissingRows</code></td><td><code>overlap_rows</code>, <code>residual_rows</code>, <code>missing_rows</code></td></tr>
+          <tr><td>Advanced rows</td><td><code>CoverageRows</code>, <code>GapRows</code>, <code>SymmetricDifferenceRows</code>, <code>ContainmentRows</code>, <code>LeadLagRows</code>, <code>AsOfRows</code></td><td>The same names in <code>snake_case</code>.</td></tr>
+          <tr><td>Finality-aware view</td><td><code>ResidualRowsWithFinality()</code></td><td><code>residual_rows_with_finality()?</code></td></tr>
+          <tr><td>Finality values</td><td><code>ComparisonFinality.Final</code> and <code>Provisional</code>.</td><td>The non-exhaustive <code>ComparisonFinality</code> also includes <code>Revised</code> and <code>Retracted</code>. Handle unknown future variants rather than assuming only <code>Final</code> and <code>Provisional</code>.</td></tr>
+          <tr><td>Stage evidence</td><td><code>result.Prepared</code> and <code>result.Aligned</code> are typed optional stage objects; diagnostics are typed in <code>result.Diagnostics</code>.</td><td><code>result.prepared</code> and <code>result.aligned</code> are <code>Option&lt;serde_json::Value&gt;</code>, not direct typed counterparts; diagnostics remain in <code>result.diagnostics</code>.</td></tr>
+        </tbody>
+      </table>
+      <div class="code-grid">
+        <article><h3>C# · live rows</h3><pre><code class="language-csharp">var live = comparison.RunLive(
+    TemporalPoint.ForPosition(42));
+
+var provisional = live
+    .ResidualRowsWithFinality()
+    .Where(row =&gt;
+        row.Metadata.Finality ==
+        ComparisonFinality.Provisional);</code></pre></article>
+        <article><h3>Rust · live rows</h3><pre><code class="language-rust">let live = comparison.run_live(
+    TemporalPoint::position(42),
+);
+
+let provisional = live
+    .residual_rows_with_finality()?
+    .filter(|row|
+        row.metadata.finality ==
+        ComparisonFinality::Provisional);</code></pre></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="exports">
+      <div class="section-heading">
+        <p class="eyebrow">Export and audit</p>
+        <h2>The formats correspond; the owning package does not.</h2>
+        <p>Both implementations emit deterministic JSON, JSON Lines, Markdown, debug HTML, and LLM-context output. Keep the comparison runtime free of implicit file writes: create a result first, then export it or explicitly choose a configured export path.</p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Output</th><th>C# · <code>Spanfold.Artifacts</code></th><th>Rust · <code>spanfold</code></th></tr></thead>
+        <tbody>
+          <tr><td>Plan JSON</td><td><code>plan.ExportJson()</code></td><td><code>export_plan_json(&amp;plan)?</code></td></tr>
+          <tr><td>Result JSON</td><td><code>result.ExportJson()</code></td><td><code>export_result_json(&amp;result)?</code></td></tr>
+          <tr><td>JSON Lines</td><td><code>result.ExportJsonLines()</code></td><td><code>export_result_json_lines(&amp;result)?</code> or <code>write_result_json_lines(...)?</code></td></tr>
+          <tr><td>Markdown</td><td><code>result.ExportMarkdown()</code></td><td><code>export_result_markdown(&amp;result)</code></td></tr>
+          <tr><td>Debug HTML</td><td><code>result.ExportDebugHtml(path)</code></td><td><code>export_result_debug_html(&amp;result)</code>, or a configured builder export</td></tr>
+          <tr><td>LLM context</td><td><code>result.ExportLlmContext()</code></td><td><code>export_result_llm_context(&amp;result)?</code>, or a configured builder export</td></tr>
+          <tr><td>Audit bundle</td><td><code>AuditBundleWriter.Write(...)</code>; <code>AuditBundleReader.Open(...).Verify()</code> checks manifest integrity.</td><td><code>spanfold audit ...</code>, <code>audit-windows</code>, or <code>audit-events</code> assemble CLI bundles.</td></tr>
+        </tbody>
+      </table>
+      <p class="language-note">A .NET bundle verifier checks file sizes and SHA-256 digests against its manifest; it does not authenticate the producer. The Rust CLI bundle is a deterministic artifact collection, but it does not expose the .NET integrity-verification contract.</p>
+    </section>
+
+    <section class="doc-section" id="episodes-sequences">
+      <div class="section-heading">
+        <p class="eyebrow">Occurrences and journeys</p>
+        <h2>Episodes and ordered sequences exist in both runtimes.</h2>
+        <p>Episode analysis stitches nearby fragments within each side, then relates formed occurrences across sides. Sequences instead match literal named window families in onset order within one key/source/partition lane.</p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C# · Episodes</h3>
+          <pre><code class="language-csharp">using Spanfold.Episodes;
+
+var episodes = history
+    .CompareEpisodes("Provider QA")
+    .Target("reference", s =&gt; s.Source("provider-a"))
+    .Against("detector", s =&gt; s.Source("provider-b"))
+    .Within(s =&gt; s.Window("DeviceOffline"))
+    .StitchGapsUpTo(2L)
+    .RelateWithin(1L)
+    .Run();
+
+var scorecard = episodes.AsReference();</code></pre>
+        </article>
+        <article>
+          <h3>Rust · Episodes</h3>
+          <pre><code class="language-rust">let episodes = history
+    .compare_episodes("Provider QA")
+    .target(
+        "reference",
+        ComparisonSelector::for_source("provider-a"),
+    )
+    .against(
+        "detector",
+        ComparisonSelector::for_source("provider-b"),
+    )
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .stitch_gaps_up_to(TemporalTolerance::processing_positions(2)?)
+    .relate_within(TemporalTolerance::processing_positions(1)?)
+    .run()?;
+
+let scorecard = episodes.as_reference();</code></pre>
+        </article>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>C# · ordered sequence</h3>
+          <pre><code class="language-csharp">using Spanfold.Sequences;
+
+var journeys = history
+    .MatchSequence("incident journey")
+    .Step("Warning")
+    .Then("Offline")
+    .Then("Recovered")
+    .WithMaximumGap(5)
+    .Run()
+    .Matches;</code></pre>
+        </article>
+        <article>
+          <h3>Rust · ordered sequence</h3>
+          <pre><code class="language-rust">let journeys = history
+    .match_sequence("incident journey")
+    .step("Warning")
+    .then("Offline")
+    .then("Recovered")
+    .with_maximum_gap(5)
+    .run()?;</code></pre>
+        </article>
+      </div>
+      <p class="language-note">Portable Episode document schema version 1 is processing-position only. The .NET and Rust CLIs can execute the same document and emit aligned deterministic JSON or Markdown; runtime-specific Episode IDs are deliberately omitted from that portable result.</p>
+    </section>
+
+    <section class="doc-section" id="cli-testing">
+      <div class="section-heading">
+        <p class="eyebrow">Automation</p>
+        <h2>Share fixtures, then use each runtime's native harness.</h2>
+        <p>The versioned contract fixture and Episode document are the portable boundaries. Assertion APIs are intentionally language-native and return or throw in the style of their host runtime.</p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Workflow</th><th>C# / .NET source CLI</th><th>Rust 0.1.1 CLI</th></tr></thead>
+        <tbody>
+          <tr><td>Shared fixture paths</td><td colspan="2"><code>validate-plan</code>, <code>compare</code>, <code>explain</code>, <code>audit</code>, <code>audit-windows</code>, and <code>episodes</code></td></tr>
+          <tr><td>Event import</td><td>No CLI event-map import route.</td><td><code>import-events</code> and <code>audit-events</code> accept mapped JSON Lines or header-row CSV.</td></tr>
+          <tr><td>Acceptance policies</td><td><code>check</code> and <code>suite</code> execute assessment specifications.</td><td>No assessment-specification CLI route.</td></tr>
+          <tr><td>Bundle lifecycle</td><td><code>verify-bundle</code> and <code>diff</code>.</td><td>No bundle verification or bundle-diff command.</td></tr>
+          <tr><td>Fixture builder</td><td><code>WindowHistoryFixtureBuilder</code></td><td><code>WindowHistoryFixture</code></td></tr>
+          <tr><td>Assertions</td><td><code>SpanfoldAssert</code> throws <code>SpanfoldAssertionException</code>.</td><td><code>SpanfoldAssert</code> returns <code>Result&lt;_, SpanfoldAssertionError&gt;</code>.</td></tr>
+          <tr><td>Snapshots and time</td><td><code>SpanfoldSnapshot</code>, <code>VirtualComparisonClock</code></td><td>The same type names with <code>snake_case</code> methods.</td></tr>
+        </tbody>
+      </table>
+      <div class="code-grid">
+        <article><h3>C# · source checkout</h3><pre><code class="language-bash">dotnet run --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj -- \
+  compare fixture.json --format json</code></pre></article>
+        <article><h3>Rust · installed command</h3><pre><code class="language-bash">spanfold compare fixture.json --format json</code></pre></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="differences">
+      <div class="section-heading">
+        <p class="eyebrow">Runtime differences and current gaps</p>
+        <h2>Do not infer parity beyond the documented contract.</h2>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Release availability</h3><p>NuGet.org publishes <code>Spanfold</code> and <code>Spanfold.Testing</code> 0.1.0-preview.2, and the matching <code>Spanfold.Cli</code> global tool is published. The current .NET 0.2.0-preview.1 API—including Episodes, sequences, assessments, Artifacts, and the expanded CLI surface—is source-first. Rust library and CLI 0.1.1 are published.</p></article>
+        <article><h3>Portable identity</h3><p>Compare semantic rows, ranges, finality, and evidence lineage across runtimes. Current row IDs are runtime-specific, and portable Episode output intentionally excludes runtime Episode IDs.</p></article>
+        <article><h3>Portable time</h3><p>Contract fixtures and portable Episode schema version 1 use processing positions. Portable timestamp-known-at input remains deferred until both runtimes share one explicit clock and availability contract.</p></article>
+        <article><h3>Tooling specialties</h3><p>Rust owns declarative event JSONL/CSV import. .NET owns assessment specifications, integrity-verifiable bundles, and artifact revision/diff workflows. These are supported runtime-specific capabilities, not missing aliases to invent in application code.</p></article>
+        <article><h3>Execution boundary</h3><p>Neither runtime is a hosted stream processor, durable queue, scheduler, or persistence layer. Pipelines are synchronous and callers own IO, retention, ingestion serialization, and when a live comparison is rerun.</p></article>
+        <article><h3>Conformance status</h3><p>The main capability map is implemented in both runtimes, but broader cross-language conformance gates and published workload baselines remain incomplete. Treat deterministic shared documents and fixtures—not file layout or method spelling—as the compatibility surface.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section two-col">
+      <div>
+        <p class="eyebrow">Next</p>
+        <h2>Use the language reference for the full member surface.</h2>
+      </div>
+      <div>
+        <p>This guide is the translation layer. The dedicated references remain authoritative for overloads, errors, advanced comparators, cohorts, source matrices, hierarchy, liveness, and detailed result types.</p>
+        <div class="actions">
+          <a class="button secondary" href="api-csharp.html">C# API reference</a>
+          <a class="button secondary" href="api-rust.html">Rust API reference</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="https://github.com/Scottlr/spanfold">GitHub repository</a></footer>
+  <script src="site-shell.js"></script>
+  <script src="syntax.js"></script>
+</body>
+</html>
