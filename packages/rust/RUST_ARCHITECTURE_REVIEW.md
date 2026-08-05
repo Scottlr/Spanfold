@@ -186,7 +186,7 @@ HTML, testing helpers, CLI counts, builders, and root re-exports.
 
 ## ARCH-003 — Strong — Core and CLI duplicate event-to-window lifecycle behavior
 
-**Status:** Partially resolved in S003; CLI adaptation remains open for S006
+**Status:** Resolved for the shared recorder seam in S003/S006; broader CLI module split remains open
 **Category:** In-process deepening  
 **Files:**
 
@@ -195,18 +195,23 @@ HTML, testing helpers, CLI counts, builders, and root re-exports.
 
 ### Problem
 
-Core `EventPipeline` owns active-window, segment-change, tag-update, open, close, and emission behavior. The CLI independently implements similar behavior through `process_import_event`, `ImportStateKey`, and `ImportState`.
+Core `EventPipeline` owns active-window, segment-change, tag-update, open, close, and emission behavior. The CLI previously independently implemented similar behavior through `process_import_event`, `ImportStateKey`, and `ImportState`.
 
-The implementations have already drifted:
+At the reviewed pre-S003/S006 revision, the implementations had drifted:
 
 - Core updates tags when a window remains active and its segments do not change (`pipeline.rs:1221-1234`).
-- CLI import continues without updating `state.tags` in the same situation (`workflow.rs:349-359`).
+- CLI import continued without updating `state.tags` in the same situation (`workflow.rs:349-359`).
+
+S006 removes this lifecycle drift by routing both paths through `WindowRecorder`.
 
 The duplication exists because the core pipeline increments its own processing position, while CLI import maps provide explicit positions from input data.
 
 S003 extracted the core lifecycle into the concrete `WindowRecorder` API and
-adapted `EventPipeline` to supply explicit temporal observations. The CLI still
-owns its import-side lifecycle state and is intentionally left for S006.
+adapted `EventPipeline` to supply explicit temporal observations. S006 now adapts
+the JSONL/CSV import paths to `WindowObservation` at explicit processing points,
+uses `WindowRecorder` transitions and history for lifecycle decisions, and
+retains only a wire-metadata projection needed to preserve the legacy
+`ImportedWindow` shape and ordering.
 
 ### Scalable direction
 
@@ -225,8 +230,8 @@ This does not require a public trait hierarchy. The first goal is one implementa
 
 ### Benefits
 
-- Fix lifecycle behavior once.
-- Core and CLI cannot drift independently.
+- Fix lifecycle behavior once. **Done for event import in S006.**
+- Core and CLI cannot drift independently for recorder-owned behavior.
 - Explicit temporal ownership.
 - Import formats remain replaceable adapters.
 - Lifecycle tests exercise one interface.
@@ -399,7 +404,7 @@ records/
 
 ## ARCH-006 — Strong — CLI workflow is a relocated monolith
 
-**Status:** Open  
+**Status:** Partially resolved — import lifecycle converged in S006; broader workflow split remains open
 **Category:** Ports and adapters  
 **Files:**
 
@@ -421,6 +426,16 @@ Moving workflow logic out of `main.rs` improved command dispatch, but concentrat
 - Field-path parsing.
 - Predicate evaluation and numeric coercion.
 - Window-history construction.
+
+### S006 lifecycle convergence
+
+The CLI import adapters now feed compiled event data into the shared
+`WindowRecorder` at explicit `TemporalPoint::position` values. Recorder
+transitions and history own open, close, segment-boundary reopen, tag-update,
+and final-open behavior; the CLI retains parsing, I/O, sink publication, and a
+narrow metadata projection to preserve the existing `ImportedWindow` wire
+contract. The remaining monolith, implicit facade imports, and broader workflow
+module split remain open for later slices.
 
 `workflow.rs` begins with `use super::*`, so its implementation and error types depend implicitly on imports owned by `main.rs`.
 

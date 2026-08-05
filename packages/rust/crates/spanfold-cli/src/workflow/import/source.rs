@@ -1,11 +1,10 @@
 use std::{
-    collections::BTreeMap,
     fs,
     io::{BufRead, BufReader},
     path::Path,
 };
 
-use super::super::{close_remaining_imported_windows, process_import_event};
+use super::super::{ImportRecorder, close_remaining_imported_windows, process_import_event};
 use super::{CompiledImportMap, ImportError, ImportedWindowSink};
 
 pub(crate) fn import_events_jsonl(
@@ -20,8 +19,7 @@ pub(crate) fn import_events_jsonl(
         ))
     })?;
     let reader = BufReader::new(file);
-    let mut active = BTreeMap::new();
-    let mut last_position: Option<i64> = None;
+    let mut lifecycle = ImportRecorder::new();
 
     for (index, line) in reader.lines().enumerate() {
         let line = line.map_err(|error| {
@@ -44,13 +42,12 @@ pub(crate) fn import_events_jsonl(
             import_map,
             &path_label,
             index + 1,
-            &mut active,
+            &mut lifecycle,
             sink,
-            &mut last_position,
         )?;
     }
 
-    close_remaining_imported_windows(active, sink)?;
+    close_remaining_imported_windows(lifecycle, sink)?;
     Ok(())
 }
 
@@ -94,8 +91,7 @@ pub(crate) fn import_events_csv(
         }
     }
 
-    let mut active = BTreeMap::new();
-    let mut last_position: Option<i64> = None;
+    let mut lifecycle = ImportRecorder::new();
 
     for (index, record) in reader.records().enumerate() {
         let line_number = index + 2;
@@ -110,12 +106,11 @@ pub(crate) fn import_events_csv(
             import_map,
             &path_label,
             line_number,
-            &mut active,
+            &mut lifecycle,
             sink,
-            &mut last_position,
         )?;
     }
 
-    close_remaining_imported_windows(active, sink)?;
+    close_remaining_imported_windows(lifecycle, sink)?;
     Ok(())
 }

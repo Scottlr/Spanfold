@@ -604,8 +604,9 @@ pub(crate) fn primitive_to_string(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::{close_remaining_imported_windows, process_import_event};
-    use std::collections::BTreeMap;
+    use crate::workflow::{
+        ImportError, ImportRecorder, close_remaining_imported_windows, process_import_event,
+    };
 
     fn compile_map(json: serde_json::Value) -> Result<CompiledImportMap, String> {
         serde_json::from_value::<EventImportMap>(json)
@@ -641,9 +642,8 @@ mod tests {
             "states": [{ "active": true }],
             "a/b": { "~key": 42 }
         });
-        let mut active = BTreeMap::new();
+        let mut lifecycle = ImportRecorder::new();
         let mut windows = Vec::new();
-        let mut last_position = None;
 
         assert!(
             process_import_event(
@@ -651,13 +651,12 @@ mod tests {
                 &import_map,
                 "events.jsonl",
                 1,
-                &mut active,
+                &mut lifecycle,
                 &mut windows,
-                &mut last_position,
             )
             .is_ok()
         );
-        assert!(close_remaining_imported_windows(active, &mut windows).is_ok());
+        assert!(close_remaining_imported_windows(lifecycle, &mut windows).is_ok());
 
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].key, "device-1");
@@ -669,6 +668,110 @@ mod tests {
             windows[0].tags[0].value,
             PrimitiveValue::String("eu".to_owned())
         );
+    }
+
+    #[test]
+    fn recorder_import_rejects_backwards_positions() {
+        let import_map = compile_map(serde_json::json!({
+            "source": "source",
+            "key": "key",
+            "position": "position",
+            "windows": [{
+                "name": "Online",
+                "active": { "field": "active", "isTrue": true }
+            }]
+        }))
+        .expect("compiled map");
+        let mut lifecycle = ImportRecorder::new();
+        let mut windows = Vec::new();
+        let first = serde_json::json!({
+            "source": "provider-a",
+            "key": "device-1",
+            "position": 2,
+            "active": true
+        });
+        process_import_event(
+            &first,
+            &import_map,
+            "events.jsonl",
+            1,
+            &mut lifecycle,
+            &mut windows,
+        )
+        .expect("first position");
+
+        let second = serde_json::json!({
+            "source": "provider-a",
+            "key": "device-1",
+            "position": 1,
+            "active": false
+        });
+        let error = process_import_event(
+            &second,
+            &import_map,
+            "events.jsonl",
+            2,
+            &mut lifecycle,
+            &mut windows,
+        )
+        .expect_err("backwards position");
+        assert!(matches!(
+            error,
+            ImportError::Input(message)
+                if message == "import-events: events.jsonl:2: event position cannot move backwards"
+        ));
+    }
+
+    #[test]
+    fn recorder_import_drops_metadata_after_closing_a_window() {
+        let import_map = compile_map(serde_json::json!({
+            "source": "source",
+            "key": "key",
+            "position": "position",
+            "windows": [{
+                "name": "Online",
+                "active": { "field": "active", "isTrue": true }
+            }]
+        }))
+        .expect("compiled map");
+        let mut lifecycle = ImportRecorder::new();
+        let mut windows = Vec::new();
+        let active = serde_json::json!({
+            "source": "provider-a",
+            "key": "device-1",
+            "position": 1,
+            "active": true
+        });
+        process_import_event(
+            &active,
+            &import_map,
+            "events.jsonl",
+            1,
+            &mut lifecycle,
+            &mut windows,
+        )
+        .expect("active position");
+        assert_eq!(lifecycle.metadata.len(), 1);
+
+        let inactive = serde_json::json!({
+            "source": "provider-a",
+            "key": "device-1",
+            "position": 2,
+            "active": false
+        });
+        process_import_event(
+            &inactive,
+            &import_map,
+            "events.jsonl",
+            2,
+            &mut lifecycle,
+            &mut windows,
+        )
+        .expect("inactive position");
+
+        assert!(lifecycle.metadata.is_empty());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].end_position, Some(2));
     }
 
     #[test]
