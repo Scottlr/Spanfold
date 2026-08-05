@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Replace `WindowArtifact`'s scalar `startPosition`, `endPosition`, and
+  `knownAtPosition` fields with typed `start`, `end`, and `knownAt` temporal
+  points. Consumers must migrate to the new source fields and wire keys, which
+  now preserve axis and timestamp-clock identity.
 - Make `LaneKey` construction fallible and its fields private so empty lane or
   partition identities cannot enter liveness state. Callers must migrate direct
   construction and `From` conversions to `LaneKey::new` or
