@@ -20,6 +20,19 @@ var result = pipeline.History // Start from the recorded window history.
     .Run(); // Execute the comparison.
 ```
 
+```rust
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .overlap()
+    .residual()
+    .coverage()
+    .run();
+```
+
 Use descriptor selectors such as `Source`, `WindowName`, `Key`, `Partition`,
 `PositionRange`, and `TimeRange` whenever a plan needs to be exported or
 reviewed by tooling. Runtime selectors are useful locally, but deterministic
@@ -132,9 +145,24 @@ var result = pipeline.History // Start from recorded windows.
     .Run(); // Execute the comparison.
 ```
 
-Scope and normalization must use the same temporal axis. Spanfold rejects mixed-axis
-plans because processing positions and timestamps cannot be compared without an
-explicit mapping.
+```rust
+let result = pipeline
+    .history()
+    .compare("Event-time QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline").on_event_time())
+    .normalization(ComparisonNormalizationPolicy::event_time())
+    .overlap()
+    .run();
+```
+
+In .NET, scope and normalization must use the same temporal axis; mixed-axis
+plans are rejected because processing positions and timestamps cannot be
+compared without an explicit mapping. Rust stores one axis on the plan, so the
+last applied `scope(...)` or `normalization(...)` axis wins. Apply them
+consistently, as in the example above, rather than expecting Rust to diagnose
+two independently retained axis choices.
 
 Ranges are half-open: `[start, end)`. The start is included and the end is
 excluded. Touching windows create adjacent segments, not overlaps.
@@ -155,6 +183,20 @@ var prepared = pipeline.History // Start from recorded windows.
     .Normalize(normalization => normalization.ClipOpenWindowsTo(TemporalPoint.ForPosition(100))) // Bound open windows at position 100.
     .Using(comparators => comparators.Coverage()) // Request coverage metrics.
     .Prepare(); // Stop after selection and normalization for inspection.
+```
+
+```rust
+let prepared = pipeline
+    .history()
+    .compare("Live QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .normalization(ComparisonNormalizationPolicy::clip_open_windows_to(
+        TemporalPoint::position(100),
+    ))
+    .coverage()
+    .prepare();
 ```
 
 The resulting range records that its end came from the horizon policy, not from
@@ -178,9 +220,24 @@ var windows = pipeline.History.Query() // Start a read-only query over recorded 
     .ClosedWindows(); // Return matching closed source windows.
 ```
 
-`Lane(...)` is a readability alias for `Source(...)`. Spanfold stores the identity
-in `WindowRecord.Source`, but lane is often the clearer term when the same key
-is observed by several feeds, analyzers, or pipeline stages.
+```rust
+let windows = pipeline
+    .history()
+    .query()
+    .where_window("DeviceOffline")
+    .where_key("device-1")
+    .where_source("provider-a")
+    .where_partition("partition-1")
+    .where_segment("lifecycle", "Incident")
+    .where_tag("fleet", "critical")
+    .closed_windows();
+```
+
+In .NET, `Lane(...)` is a readability alias for `Source(...)`, and the identity
+is stored in `WindowRecord.Source`. Rust exposes the same identity through
+`where_source(...)` and `WindowRecord::source()`. Lane is often the clearer
+domain term when the same key is observed by several feeds, analyzers, or
+pipeline stages.
 
 For a current-state read model, evaluate history at an explicit horizon:
 
@@ -207,14 +264,45 @@ var byLifecycle = snapshot.Query() // Reuse the same horizon snapshot.
     .SummarizeBySegment("lifecycle"); // Group counts and measured length by lifecycle.
 ```
 
+```rust
+let horizon = TemporalPoint::position(100);
+let snapshot = pipeline.history().snapshot_at(horizon.clone())?;
+let open = snapshot
+    .query()
+    .where_window("DeviceOffline")
+    .where_source("provider-a")
+    .open_windows();
+
+let open_quick_check = WindowHistoryQuery::new(pipeline.history().windows())
+    .where_window("DeviceOffline")
+    .where_source("provider-a")
+    .open_windows_at(horizon)?;
+
+for record in &open {
+    println!(
+        "{}: {:?} to {:?}",
+        record.window.key(),
+        record.range.start(),
+        record.range.end()
+    );
+}
+
+let by_lifecycle = snapshot
+    .query()
+    .where_window("DeviceOffline")
+    .summarize_by_segment("lifecycle")?;
+```
+
 Snapshot records preserve the source window and add the range that was visible
 at the horizon. A record whose source window had not ended by the horizon is
 marked provisional and clipped to that horizon. The underlying history is not
 mutated.
 
-Summaries are deliberately small: record count, final/provisional count,
-measured processing-position length, and measured event-time duration. Spanfold does
-not impose a reporting schema on top of those groups.
+Summaries are deliberately small. Both runtimes report record and
+final/provisional counts plus measured processing-position length. .NET also
+reports measured event-time duration; Rust's current `WindowGroupSummary` does
+not aggregate timestamp duration. Spanfold does not impose a reporting schema
+on top of those groups.
 
 ## Late Annotations
 
@@ -226,19 +314,45 @@ not mutate the source record, split the range, or change comparison output.
 var openWindow = pipeline.History.Query() // Start a direct history query.
     .Window("DeviceOffline") // Restrict the query to one window family.
     .Lane("provider-a") // Restrict the query to one lane.
-    .LatestWindow(); // Select the latest matching source window.
+    .LatestWindow() // Select the latest matching source window.
+    ?? throw new InvalidOperationException("No matching window was recorded.");
 
 var annotation = pipeline.History.Annotate( // Attach metadata to the window start identity.
-    openWindow!, // Use the source window being explained.
+    openWindow, // Use the source window being explained.
     "reason", // Name the annotation.
     "maintenance", // Store the explanatory value.
     TemporalPoint.ForPosition(105)); // Record when the annotation became known.
 
-var annotations = pipeline.History.AnnotationsFor(openWindow!); // Read annotations back in append order.
+var annotations = pipeline.History.AnnotationsFor(openWindow); // Read annotations back in append order.
 var knownAnnotations = pipeline.History.AnnotationsKnownAt( // Read point-in-time-safe annotations.
-    openWindow!, // Use the same source window.
+    openWindow, // Use the same source window.
     TemporalPoint.ForPosition(110)); // Include annotations known by position 110.
 ```
+
+```rust
+let open_window = history
+    .query()
+    .where_window("DeviceOffline")
+    .where_source("provider-a")
+    .latest()
+    .expect("a matching window");
+let target = WindowAnnotationTarget::from_window(&open_window);
+
+let annotation = history.annotate(
+    target.clone(),
+    "reason",
+    "maintenance",
+    Some(TemporalPoint::position(105)),
+);
+let annotations = history.annotations_for(&target);
+let known_annotations =
+    history.annotations_known_at(&target, TemporalPoint::position(110));
+```
+
+Rust annotation methods operate on `&mut WindowHistory`. An `EventPipeline`
+exposes its history read-only, so applications that need to append annotations
+must own or import a mutable history rather than mutate it through
+`pipeline.history()`.
 
 The annotation target excludes the window end. If metadata is attached while a
 window is open, the same annotation remains associated after that window closes.
@@ -267,6 +381,18 @@ var prepared = pipeline.History // Start from recorded windows.
     .Prepare(); // Inspect prepared data and diagnostics without comparator execution.
 ```
 
+```rust
+let prepared = pipeline
+    .history()
+    .compare("Decision audit")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .known_at_position(42)
+    .overlap()
+    .prepare();
+```
+
 Records unavailable at the known-at point are excluded with diagnostics so
 backtests and decision audits do not silently leak future information.
 
@@ -285,6 +411,17 @@ var result = pipeline.History // Start from current recorded history.
     .Within(scope => scope.Window("DeviceOffline")) // Scope to device-offline windows.
     .Using(comparators => comparators.Residual()) // Emit target-only rows.
     .RunLive(TemporalPoint.ForPosition(100)); // Clip open windows to position 100.
+```
+
+```rust
+let result = pipeline
+    .history()
+    .compare("Live QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .residual()
+    .run_live(TemporalPoint::position(100));
 ```
 
 The result carries `EvaluationHorizon` and row finality metadata so consumers can
@@ -323,6 +460,39 @@ foreach (var signal in liveness.Check(startedAt.AddSeconds(45))) // Evaluate sil
     silencePipeline.Ingest(signal, source: "liveness"); // Open silence windows for expired lanes.
 }
 ```
+
+```rust
+let started_at = TemporalPoint::timestamp_ticks(started_at_ticks);
+let mut liveness = LaneLivenessTracker::for_lanes(
+    started_at.clone(),
+    30 * ticks_per_second,
+    ["provider-a", "provider-b"],
+)?;
+
+let mut silence_pipeline = for_events::<LaneLivenessSignal>()
+    .record_windows()
+    .with_event_time(|signal| signal.occurred_at.magnitude())
+    .track_window(
+        "LaneSilent",
+        |signal| signal.lane.clone(),
+        |signal| signal.is_silent,
+    )
+    .build()?;
+
+for signal in liveness.observe("provider-a", started_at.clone())? {
+    silence_pipeline.ingest(signal, Some("liveness"), None)?;
+}
+
+let horizon = TemporalPoint::timestamp_ticks(
+    started_at.magnitude() + 45 * ticks_per_second,
+);
+for signal in liveness.check(horizon)? {
+    silence_pipeline.ingest(signal, Some("liveness"), None)?;
+}
+```
+
+Rust liveness thresholds are integer magnitudes on the tracker's temporal axis;
+for timestamp tracking, callers choose and consistently apply their tick unit.
 
 The tracker emits only liveness state changes, not every heartbeat. A lane that
 never reports can still become silent after the configured threshold. A later
@@ -379,13 +549,30 @@ var prepared = pipeline.History // Start from recorded windows.
 var explanation = prepared.Explain(); // Render deterministic diagnostic text.
 ```
 
+```rust
+let prepared = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .overlap()
+    .prepare();
+
+let explanation = prepared.explain();
+```
+
 `Explain()` returns deterministic diagnostic text. It is not generated prose.
 `ExportJson()` returns deterministic JSON for CI artifacts, issue reports, and
-tooling workflows. `ExportJsonLines()` streams result rows for larger outputs.
-`ExportDebugHtml()` writes a standalone visual artifact for browser-based
-debugging. `ExportLlmContext()` writes one JSON artifact for LLMs and agents:
-analysis instructions, a concise summary, Markdown orientation, the full result
-JSON, and row documents that can be chunked.
+tooling workflows. In .NET, `ExportJsonLines()` lazily enumerates result lines;
+in Rust, `export_result_json_lines(...)` returns `Result<Vec<String>,
+ComparisonExportError>` and `write_result_json_lines(...)` streams to a writer.
+.NET's path overloads write debug HTML and LLM context atomically. Rust's
+`export_result_debug_html(...)` returns a `String`, while
+`export_result_llm_context(...)` returns a fallible `String`; configured
+`run_with_exports(...)` writes both artifacts. LLM context contains analysis
+instructions, a concise summary, Markdown orientation, the full result JSON,
+and row documents that can be chunked.
 
 ```csharp
 var result = pipeline.History // Start from recorded windows.
@@ -400,8 +587,32 @@ result.ExportDebugHtml("artifacts/provider-qa.html"); // Write a self-contained 
 result.ExportLlmContext("artifacts/provider-qa.llm.json"); // Write agent-readable context and full data.
 ```
 
-Comparison execution does not write artifacts. Let configuration decide whether
-to call an exporter after the immutable result exists:
+```rust
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .overlap()
+    .residual()
+    .missing()
+    .run();
+
+std::fs::create_dir_all("artifacts")?;
+std::fs::write(
+    "artifacts/provider-qa.html",
+    export_result_debug_html(&result),
+)?;
+std::fs::write(
+    "artifacts/provider-qa.llm.json",
+    export_result_llm_context(&result)?,
+)?;
+```
+
+Plain `Run()`/`run()` execution does not write artifacts. Let configuration
+decide whether to call an exporter after the immutable result exists; Rust also
+offers `run_with_exports(...)` as an explicit execution-and-export boundary:
 
 ```csharp
 var resultWithDebug = pipeline.History // Start from recorded windows.
@@ -414,6 +625,21 @@ var resultWithDebug = pipeline.History // Start from recorded windows.
 
 resultWithDebug.ExportDebugHtml("artifacts/provider-qa.html");
 resultWithDebug.ExportLlmContext("artifacts/provider-qa.llm.json");
+```
+
+```rust
+let result_with_debug = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .overlap()
+    .residual()
+    .run_with_exports(
+        &ComparisonDebugHtmlOptions::to_file("artifacts/provider-qa.html"),
+        &ComparisonLlmContextOptions::to_file("artifacts/provider-qa.llm.json"),
+    )?;
 ```
 
 Use debug HTML at workflow boundaries, test failure boundaries, notebook
@@ -444,10 +670,27 @@ var matrix = pipeline.History.CompareSources( // Build a directional source matr
     ["provider-a", "provider-b", "provider-c"]); // Include these sources as rows and columns.
 ```
 
+```rust
+let matrix = pipeline.history().compare_sources(
+    "Provider matrix",
+    "DeviceOffline",
+    &[
+        "provider-a".to_owned(),
+        "provider-b".to_owned(),
+        "provider-c".to_owned(),
+    ],
+);
+```
+
 Cells are directional. The row source is the target and the column source is
-the comparison source. Diagonal cells are identity rows and do not run
-comparators. Missing sources are still emitted as explicit cells so reports do
-not silently drop an expected provider.
+the comparison source. In .NET, diagonal identity cells do not run comparators:
+their row counts are zero and coverage is `1` when the source has windows.
+Duplicate source identities are rejected. Rust computes diagonal metrics from
+the source's closed processing-position activity; open windows and timestamp
+windows are ignored. It also drops blank identities and keeps the first of each
+duplicate identity. After those runtime-specific input rules, missing sources
+are still emitted as explicit cells so reports do not silently drop an expected
+provider.
 
 ## Runtime Boundary Segments
 
@@ -478,6 +721,41 @@ var pipeline = EventPipeline // Start a Spanfold pipeline definition.
     .Build(); // Build the pipeline.
 ```
 
+```rust
+let pipeline = for_events::<DeviceStateChanged>()
+    .record_windows()
+    .window_with_metadata(
+        "DeviceOffline",
+        |update| update.device_id.clone(),
+        |update| update.is_offline,
+        |update| {
+            vec![
+                WindowSegment::new("lifecycle", update.lifecycle.clone())
+                    .expect("valid segment"),
+                WindowSegment::new("stage", update.stage.clone())
+                    .and_then(|segment| segment.with_parent("lifecycle"))
+                    .expect("valid child segment"),
+            ]
+        },
+        |update| {
+            vec![WindowTag::new("fleet", update.fleet_id.clone())
+                .expect("valid tag")]
+        },
+    )
+    .roll_up_with_segment_projection(
+        "ZoneOffline",
+        |update| update.zone_id.clone(),
+        |children| children.any_active(),
+        |segments| segments.preserve("lifecycle").preserve("stage"),
+    )
+    .roll_up(
+        "RegionOffline",
+        |update| update.region_id.clone(),
+        |children| children.any_active(),
+    )
+    .build()?;
+```
+
 Runtime partition, segment, and tag have different meanings:
 
 - partition isolates runtime state
@@ -500,6 +778,23 @@ var escalatedIncidents = pipeline.History // Start from recorded windows.
     .Run(); // Execute the comparison.
 ```
 
+```rust
+let escalated_incidents = pipeline
+    .history()
+    .compare("Escalated incident coverage")
+    .target_selector(ComparisonSelector::for_source("source-a"))
+    .against_selector(ComparisonSelector::for_source("source-b"))
+    .scope(
+        ComparisonScope::window("DeviceOffline")
+            .segment("lifecycle", "Incident")
+            .segment("stage", "Escalated")
+            .tag("fleet", "critical"),
+    )
+    .overlap()
+    .residual()
+    .run();
+```
+
 Roll-up segment projection lets parent windows keep the dimensions that matter
 at their level and ignore lower-level boundaries:
 
@@ -513,6 +808,24 @@ at their level and ignore lower-level boundaries:
         .Drop("stage") // Do not split the zone when only stage changes.
         .Rename("lifecycle", "operatingMode") // Rename the parent dimension.
         .Transform("lifecycle", value => value?.ToString()?.ToUpperInvariant())) // Normalize values.
+```
+
+```rust
+.roll_up_with_segment_projection(
+    "ZoneOffline",
+    |update| update.zone_id.clone(),
+    |children| children.any_active(),
+    |segments| {
+        segments
+            .preserve("lifecycle")
+            .drop("stage")
+            .rename("lifecycle", "operatingMode")
+            .transform("lifecycle", |value| match value {
+                PrimitiveValue::String(text) => PrimitiveValue::String(text.to_uppercase()),
+                other => other.clone(),
+            })
+    },
+)
 ```
 
 ## Cohorts
@@ -537,6 +850,30 @@ var unmatchedLength = result.ResidualRows.TotalPositionLength(); // Sum target-o
 
 var evidence = result.CohortEvidence(); // Parse cohort evidence into typed records.
 var uncovered = evidence.Where(row => !row.IsActive); // Find segments the cohort did not cover.
+```
+
+```rust
+let result = pipeline
+    .history()
+    .compare("Source A vs cohort")
+    .target_selector(ComparisonSelector::for_source("source-a"))
+    .against_cohort(
+        "cohort",
+        ["source-b", "source-c"],
+        CohortActivity::Any,
+    )
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .residual()
+    .run();
+
+let unmatched_length: i64 = result
+    .rows
+    .residual
+    .iter()
+    .map(|row| row.range.end - row.range.start)
+    .sum();
+let evidence = result.cohort_evidence();
+let uncovered = evidence.iter().filter(|row| !row.is_active);
 ```
 
 Available cohort activity rules:
@@ -566,11 +903,24 @@ var hierarchy = pipeline.History.CompareHierarchy( // Explain parent activity fr
     childWindowName: "DeviceOffline"); // Select the child contribution window.
 ```
 
+```rust
+let hierarchy = pipeline.history().compare_hierarchy(
+    "Region explanation",
+    "RegionImpacted",
+    "DeviceOffline",
+);
+```
+
 Rows are emitted as explained parent activity, unexplained parent duration, or
 orphan child duration. Current lineage is inferred from matching source and
 partition for the supplied parent and child window names. Parent and child keys
 may differ because rollups often aggregate several child keys into one parent
-key.
+key. .NET detects matching open parent or child windows and emits
+`HierarchyOpenWindowsWithoutHorizon` while excluding their unbounded duration.
+Rust's current hierarchy helper reads `closed_windows()` only and matches parent
+and child evidence by source, partition, compatible temporal axis, and timestamp
+clock. Matching open windows do not contribute rows and do not produce that
+diagnostic.
 
 ## Redacted agent context
 
@@ -582,6 +932,11 @@ segments, and diagnostic text:
 ```csharp
 var safeContext = result.ExportRedactedAgentContext();
 ```
+
+Rust does not currently expose a redacted agent-context exporter. Its JSON,
+Markdown, debug HTML, and LLM-context exports contain evidence-bearing values;
+apply an application-owned data policy before sharing them outside a trusted
+boundary. Do not substitute `export_result_llm_context(...)` for redaction.
 
 The regular JSON, Markdown, HTML, and LLM exports are evidence-bearing artifacts
 and must be treated as sensitive data unless the caller has already applied an
