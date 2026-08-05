@@ -1,7 +1,16 @@
 //! Input adapters, comparison workflows, and artifact sinks for the CLI.
 
 use super::*;
-use std::io::{BufRead, BufReader};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{BufRead, BufReader},
+};
+
+use spanfold::recorder::WindowTransitionKind;
+use spanfold::{
+    OpenWindow, PrimitiveValue, WindowObservation, WindowRecordId, WindowRecorder,
+    WindowRecorderTransition, WindowSegment, WindowTag,
+};
 
 mod import;
 
@@ -248,20 +257,40 @@ pub(super) fn import_events_to_file(
     result
 }
 
+struct ImportRecorder {
+    recorder: WindowRecorder,
+    last_position: Option<i64>,
+    metadata: BTreeMap<WindowRecordId, ImportedMetadata>,
+}
+
+struct ImportedMetadata {
+    segments: Vec<JsonlNamedValue>,
+    tags: Vec<JsonlNamedValue>,
+}
+
+impl ImportRecorder {
+    fn new() -> Self {
+        Self {
+            recorder: WindowRecorder::new(true),
+            last_position: None,
+            metadata: BTreeMap::new(),
+        }
+    }
+}
+
 fn process_import_event(
     event: &serde_json::Value,
     import_map: &CompiledImportMap,
     path: &str,
     line_number: usize,
-    active: &mut BTreeMap<ImportStateKey, ImportState>,
+    lifecycle: &mut ImportRecorder,
     sink: &mut impl ImportedWindowSink,
-    last_position: &mut Option<i64>,
 ) -> Result<(), ImportError> {
     let position = select_i64(event, &import_map.position, path, line_number)?;
-    if last_position.is_some_and(|last| position < last) {
+    if lifecycle.last_position.is_some_and(|last| position < last) {
         return Err(format!("{path}:{line_number}: event position cannot move backwards").into());
     }
-    *last_position = Some(position);
+    lifecycle.last_position = Some(position);
     let source = select_string(event, &import_map.source, path, line_number)?;
     let partition = import_map
         .partition
@@ -276,56 +305,187 @@ fn process_import_event(
             ))
         })?;
         let key = select_string(event, key_selector, path, line_number)?;
-        let state_key = ImportStateKey {
-            window_name: window.name.clone(),
-            key: key.clone(),
-            source: source.clone(),
-            partition: partition.clone(),
-        };
         let segments = select_named_values(event, &window.segments, path, line_number)?;
         let tags = select_named_values(event, &window.tags, path, line_number)?;
         let is_active = evaluate_predicate(event, &window.active, path, line_number)?;
+        let open_record_id = lifecycle
+            .recorder
+            .history()
+            .open_windows()
+            .iter()
+            .find(|open| {
+                open.window_name == window.name
+                    && open.key == key
+                    && open.source.as_deref() == Some(source.as_str())
+                    && open.partition == partition
+            })
+            .map(|open| open.id.clone());
 
-        if is_active {
-            if let Some(state) = active.get_mut(&state_key) {
-                if state.segments != segments {
-                    sink.push(state.to_window_for_key(&state_key, Some(position)))?;
-                    *state = ImportState {
-                        start_position: position,
-                        segments,
-                        tags,
-                    };
-                } else if state.tags != tags {
-                    state.tags = tags;
-                }
-                continue;
+        let observation = WindowObservation::new(
+            window.name.clone(),
+            key.clone(),
+            TemporalPoint::position(position),
+            is_active,
+        )
+        .and_then(|observation| observation.with_scope(Some(source.clone()), partition.clone()))
+        .and_then(|observation| observation.with_segments(to_window_segments(&segments)))
+        .and_then(|observation| observation.with_tags(to_window_tags(&tags)))
+        .map_err(|error| format!("{path}:{line_number}: {error}"))?;
+
+        let transitions = lifecycle
+            .recorder
+            .observe(observation)
+            .map_err(|error| format!("{path}:{line_number}: {error}"))?;
+        let is_tag_only_update = transitions.is_empty() && open_record_id.is_some();
+        let metadata = ImportedMetadata { segments, tags };
+        for transition in transitions {
+            if transition.kind == WindowTransitionKind::Closed {
+                let previous_metadata = lifecycle
+                    .metadata
+                    .remove(&transition.record_id)
+                    .expect("closed import transition has metadata");
+                sink.push(imported_window_from_transition(
+                    &lifecycle.recorder,
+                    &transition,
+                    previous_metadata,
+                ))?;
+            } else {
+                lifecycle.metadata.insert(
+                    transition.record_id.clone(),
+                    ImportedMetadata {
+                        segments: metadata.segments.clone(),
+                        tags: metadata.tags.clone(),
+                    },
+                );
             }
-            active.insert(
-                state_key,
-                ImportState {
-                    start_position: position,
-                    segments,
-                    tags,
-                },
-            );
-            continue;
         }
-
-        if let Some(state) = active.remove(&state_key) {
-            sink.push(state.to_window_for_key(&state_key, Some(position)))?;
+        if is_tag_only_update && let Some(record_id) = open_record_id {
+            lifecycle.metadata.insert(record_id, metadata);
         }
     }
     Ok(())
 }
 
 fn close_remaining_imported_windows(
-    active: BTreeMap<ImportStateKey, ImportState>,
+    mut lifecycle: ImportRecorder,
     sink: &mut impl ImportedWindowSink,
 ) -> Result<(), ImportError> {
-    for (state_key, state) in active {
-        sink.push(state.to_window_for_key(&state_key, None))?;
+    let mut open_windows = lifecycle.recorder.history().open_windows().to_vec();
+    open_windows.sort_by(|left, right| {
+        (
+            left.window_name.as_str(),
+            left.key.as_str(),
+            left.source.as_deref(),
+            left.partition.as_deref(),
+        )
+            .cmp(&(
+                right.window_name.as_str(),
+                right.key.as_str(),
+                right.source.as_deref(),
+                right.partition.as_deref(),
+            ))
+    });
+    for window in open_windows {
+        let metadata = lifecycle
+            .metadata
+            .remove(&window.id)
+            .expect("open import window has metadata");
+        sink.push(imported_window_from_open(window, metadata))?;
     }
     Ok(())
+}
+
+fn imported_window_from_transition(
+    recorder: &WindowRecorder,
+    transition: &WindowRecorderTransition,
+    metadata: ImportedMetadata,
+) -> ImportedWindow {
+    let window = recorder
+        .history()
+        .closed_windows()
+        .iter()
+        .find(|window| window.id == transition.record_id)
+        .expect("closed transition is recorded before it is emitted");
+    ImportedWindow {
+        window_name: window.window_name.clone(),
+        key: window.key.clone(),
+        source: window
+            .source
+            .clone()
+            .expect("import observations always have a source"),
+        partition: window.partition.clone(),
+        start_position: window.range.start().magnitude(),
+        end_position: Some(window.range.end().magnitude()),
+        segments: metadata.segments,
+        tags: metadata.tags,
+    }
+}
+
+fn imported_window_from_open(window: OpenWindow, metadata: ImportedMetadata) -> ImportedWindow {
+    ImportedWindow {
+        window_name: window.window_name,
+        key: window.key,
+        source: window
+            .source
+            .expect("import observations always have a source"),
+        partition: window.partition,
+        start_position: window.start.magnitude(),
+        end_position: None,
+        segments: metadata.segments,
+        tags: metadata.tags,
+    }
+}
+
+fn to_window_segments(values: &[JsonlNamedValue]) -> Vec<WindowSegment> {
+    let values_by_name = values
+        .iter()
+        .map(|value| (value.name.as_str(), value))
+        .collect::<BTreeMap<_, _>>();
+    let mut emitted = BTreeSet::<String>::new();
+    let mut projected = Vec::new();
+
+    for value in values {
+        if emitted.contains(value.name.as_str()) {
+            continue;
+        }
+        let parent = value
+            .parent_name
+            .as_deref()
+            .filter(|parent| !parent.trim().is_empty());
+        if let Some(parent) = parent
+            && !emitted.contains(parent)
+        {
+            let parent_value = values_by_name
+                .get(parent)
+                .map_or(PrimitiveValue::Null, |value| value.value.clone());
+            projected.push(
+                WindowSegment::new(parent.to_owned(), parent_value)
+                    .expect("compiled import map guarantees non-empty segment names"),
+            );
+            emitted.insert(parent.to_owned());
+        }
+        let segment = WindowSegment::new(value.name.clone(), value.value.clone())
+            .expect("compiled import map guarantees non-empty segment names");
+        projected.push(if let Some(parent) = parent {
+            segment
+                .with_parent(parent.to_owned())
+                .expect("projected parent segments precede their children")
+        } else {
+            segment
+        });
+        emitted.insert(value.name.clone());
+    }
+    projected
+}
+
+fn to_window_tags(values: &[JsonlNamedValue]) -> Vec<WindowTag> {
+    values
+        .iter()
+        .map(|value| {
+            WindowTag::new(value.name.clone(), value.value.clone())
+                .expect("compiled import map guarantees non-empty tag names")
+        })
+        .collect()
 }
 
 pub(super) fn compare_imported_windows(
@@ -544,34 +704,4 @@ pub(super) struct ImportedWindow {
     segments: Vec<JsonlNamedValue>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tags: Vec<JsonlNamedValue>,
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct ImportStateKey {
-    window_name: String,
-    key: String,
-    source: String,
-    partition: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-struct ImportState {
-    start_position: i64,
-    segments: Vec<JsonlNamedValue>,
-    tags: Vec<JsonlNamedValue>,
-}
-
-impl ImportState {
-    fn to_window_for_key(&self, key: &ImportStateKey, end_position: Option<i64>) -> ImportedWindow {
-        ImportedWindow {
-            window_name: key.window_name.clone(),
-            key: key.key.clone(),
-            source: key.source.clone(),
-            partition: key.partition.clone(),
-            start_position: self.start_position,
-            end_position,
-            segments: self.segments.clone(),
-            tags: self.tags.clone(),
-        }
-    }
 }

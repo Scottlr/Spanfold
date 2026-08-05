@@ -6,12 +6,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 use spanfold::{
     AgainstSelection, Comparator, ComparisonFinality, ComparisonPlan, ContractFixture,
-    EpisodeAnalysisDocument, OpenWindowPolicy, PrimitiveValue, TemporalPoint, WindowHistoryFixture,
-    compare, compare_live, export_result_debug_html, export_result_json, export_result_llm_context,
+    EpisodeAnalysisDocument, OpenWindowPolicy, TemporalPoint, WindowHistoryFixture, compare,
+    compare_live, export_result_debug_html, export_result_json, export_result_llm_context,
     export_result_markdown, write_export_files_atomically, write_result_json_lines,
 };
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     process::ExitCode,
