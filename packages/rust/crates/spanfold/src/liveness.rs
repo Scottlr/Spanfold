@@ -5,44 +5,87 @@ use thiserror::Error;
 
 use crate::{TemporalAxis, TemporalPoint};
 
+/// Failure while constructing a lane identity.
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum LaneKeyError {
+    /// A lane identifier was empty or whitespace-only.
+    #[error("lane cannot be empty")]
+    EmptyLane,
+    /// A present partition identifier was empty or whitespace-only.
+    #[error("partition cannot be empty")]
+    EmptyPartition,
+}
+
 /// Stable identity for one tracked source lane.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct LaneKey {
-    /// Source or lane identifier.
-    pub lane: String,
-    /// Optional partition identifier.
-    pub partition: Option<String>,
+    lane: String,
+    partition: Option<String>,
 }
 
 impl LaneKey {
-    /// Creates an unpartitioned lane key.
-    #[must_use]
-    pub fn new(lane: impl Into<String>) -> Self {
-        Self {
-            lane: lane.into(),
+    /// Creates an unpartitioned lane key after validating its identity.
+    pub fn new(lane: impl Into<String>) -> Result<Self, LaneKeyError> {
+        let lane = lane.into();
+        if lane.trim().is_empty() {
+            return Err(LaneKeyError::EmptyLane);
+        }
+        Ok(Self {
+            lane,
             partition: None,
-        }
+        })
     }
 
-    /// Creates a partition-aware lane key.
+    /// Creates a partition-aware lane key after validating its identity.
+    pub fn with_partition(
+        lane: impl Into<String>,
+        partition: impl Into<String>,
+    ) -> Result<Self, LaneKeyError> {
+        let lane = lane.into();
+        if lane.trim().is_empty() {
+            return Err(LaneKeyError::EmptyLane);
+        }
+        let partition = partition.into();
+        if partition.trim().is_empty() {
+            return Err(LaneKeyError::EmptyPartition);
+        }
+        Ok(Self {
+            lane,
+            partition: Some(partition),
+        })
+    }
+
+    /// Returns the source or lane identifier.
     #[must_use]
-    pub fn with_partition(lane: impl Into<String>, partition: impl Into<String>) -> Self {
-        Self {
-            lane: lane.into(),
-            partition: Some(partition.into()),
+    pub fn lane(&self) -> &str {
+        &self.lane
+    }
+
+    /// Returns the optional partition identifier.
+    #[must_use]
+    pub fn partition(&self) -> Option<&str> {
+        self.partition.as_deref()
+    }
+}
+
+impl<'de> Deserialize<'de> for LaneKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawLaneKey {
+            lane: String,
+            partition: Option<String>,
         }
-    }
-}
 
-impl From<&str> for LaneKey {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<String> for LaneKey {
-    fn from(value: String) -> Self {
-        Self::new(value)
+        let raw = RawLaneKey::deserialize(deserializer)?;
+        match raw.partition {
+            Some(partition) => Self::with_partition(raw.lane, partition),
+            None => Self::new(raw.lane),
+        }
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -88,9 +131,11 @@ impl<'de> Deserialize<'de> for LaneLivenessSignal {
         }
 
         let raw = RawSignal::deserialize(deserializer)?;
-        if raw.lane.trim().is_empty() {
-            return Err(serde::de::Error::custom("lane cannot be empty"));
+        let key = match raw.partition {
+            Some(partition) => LaneKey::with_partition(raw.lane, partition),
+            None => LaneKey::new(raw.lane),
         }
+        .map_err(serde::de::Error::custom)?;
         if raw.silence_threshold_magnitude <= 0 {
             return Err(serde::de::Error::custom(
                 "silence threshold must be greater than zero",
@@ -107,8 +152,8 @@ impl<'de> Deserialize<'de> for LaneLivenessSignal {
             ));
         }
         Ok(Self {
-            lane: raw.lane,
-            partition: raw.partition,
+            lane: key.lane,
+            partition: key.partition,
             is_silent: raw.is_silent,
             occurred_at: raw.occurred_at,
             evaluated_at: raw.evaluated_at,
@@ -160,6 +205,9 @@ impl LaneState {
 /// Liveness tracker construction and evaluation errors.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum LaneLivenessError {
+    /// A lane identity failed validation.
+    #[error(transparent)]
+    InvalidLaneKey(#[from] LaneKeyError),
     /// At least one lane must be tracked.
     #[error("at least one lane must be tracked")]
     EmptyLanes,
@@ -278,7 +326,10 @@ impl LaneLivenessTracker {
         Self::new(
             started_at,
             silence_threshold_magnitude,
-            lanes.into_iter().map(|lane| LaneKey::new(lane.into())),
+            lanes
+                .into_iter()
+                .map(|lane| LaneKey::new(lane.into()))
+                .collect::<Result<Vec<_>, _>>()?,
         )
     }
 
@@ -300,7 +351,7 @@ impl LaneLivenessTracker {
         lane: impl Into<String>,
         observed_at: TemporalPoint,
     ) -> Result<Vec<LaneLivenessSignal>, LaneLivenessError> {
-        self.observe_key(LaneKey::new(lane.into()), observed_at)
+        self.observe_key(LaneKey::new(lane.into())?, observed_at)
     }
 
     /// Records an observation for a partitioned lane.
@@ -311,7 +362,7 @@ impl LaneLivenessTracker {
         observed_at: TemporalPoint,
     ) -> Result<Vec<LaneLivenessSignal>, LaneLivenessError> {
         self.observe_key(
-            LaneKey::with_partition(lane.into(), partition.into()),
+            LaneKey::with_partition(lane.into(), partition.into())?,
             observed_at,
         )
     }
@@ -550,8 +601,8 @@ mod tests {
             started_at,
             10,
             [
-                LaneKey::with_partition("provider-a", "partition-1"),
-                LaneKey::with_partition("provider-a", "partition-2"),
+                LaneKey::with_partition("provider-a", "partition-1").expect("partition-1"),
+                LaneKey::with_partition("provider-a", "partition-2").expect("partition-2"),
             ],
         )
         .expect("tracker");
@@ -563,5 +614,66 @@ mod tests {
 
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].partition.as_deref(), Some("partition-2"));
+    }
+
+    #[test]
+    fn lane_key_requires_non_empty_identity_parts() {
+        assert_eq!(LaneKey::new("  "), Err(LaneKeyError::EmptyLane));
+        assert_eq!(
+            LaneKey::with_partition("provider-a", "\t"),
+            Err(LaneKeyError::EmptyPartition)
+        );
+
+        let key = LaneKey::with_partition("provider-a", "partition-1").expect("key");
+        assert_eq!(key.lane(), "provider-a");
+        assert_eq!(key.partition(), Some("partition-1"));
+    }
+
+    #[test]
+    fn lane_key_deserialization_enforces_identity_validation() {
+        let key: LaneKey =
+            serde_json::from_str(r#"{"lane":"provider-a","partition":"partition-1"}"#)
+                .expect("valid key");
+        assert_eq!(key.lane(), "provider-a");
+        assert_eq!(key.partition(), Some("partition-1"));
+
+        let empty_lane = serde_json::from_str::<LaneKey>(r#"{"lane":" ","partition":null}"#)
+            .expect_err("empty lane");
+        assert!(empty_lane.to_string().contains("lane cannot be empty"));
+
+        let empty_partition =
+            serde_json::from_str::<LaneKey>(r#"{"lane":"provider-a","partition":" "}"#)
+                .expect_err("empty partition");
+        assert!(
+            empty_partition
+                .to_string()
+                .contains("partition cannot be empty")
+        );
+    }
+
+    #[test]
+    fn tracker_entry_points_return_typed_identity_errors() {
+        let started_at = TemporalPoint::position(0);
+        let error = LaneLivenessTracker::for_lanes(started_at.clone(), 10, [" "])
+            .expect_err("blank configured lane");
+        assert_eq!(
+            error,
+            LaneLivenessError::InvalidLaneKey(LaneKeyError::EmptyLane)
+        );
+
+        let mut tracker =
+            LaneLivenessTracker::for_lanes(started_at.clone(), 10, ["lane-a"]).expect("tracker");
+        assert_eq!(
+            tracker
+                .observe("\t", started_at.clone())
+                .expect_err("blank observed lane"),
+            LaneLivenessError::InvalidLaneKey(LaneKeyError::EmptyLane)
+        );
+        assert_eq!(
+            tracker
+                .observe_partition("lane-a", " ", started_at)
+                .expect_err("blank observed partition"),
+            LaneLivenessError::InvalidLaneKey(LaneKeyError::EmptyPartition)
+        );
     }
 }

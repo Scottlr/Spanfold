@@ -95,7 +95,9 @@ pub use extensions::{
     ComparisonExtensionSelector,
 };
 pub use fixture::{ContractFixture, FixtureError};
-pub use liveness::{LaneKey, LaneLivenessError, LaneLivenessSignal, LaneLivenessTracker};
+pub use liveness::{
+    LaneKey, LaneKeyError, LaneLivenessError, LaneLivenessSignal, LaneLivenessTracker,
+};
 pub use pipeline::{
     ChildActivityView, EventPipeline, EventPipelineBuildError, EventPipelineBuilder,
     EventPipelineMetadata, IngestionError, IngestionResult, RollUpSegmentProjection,

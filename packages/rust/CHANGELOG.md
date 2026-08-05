@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make `LaneKey` construction fallible and its fields private so empty lane or
+  partition identities cannot enter liveness state. Callers must migrate direct
+  construction and `From` conversions to `LaneKey::new` or
+  `LaneKey::with_partition` and handle `LaneKeyError`.
 - Replace the raw `PrimitiveValue::Float(f64)` payload with validated
   `FiniteFloat`. Callers must migrate direct construction and pattern matches
   to `PrimitiveValue::try_float`, `FiniteFloat::try_new`, and `as_f64`.
