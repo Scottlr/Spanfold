@@ -357,6 +357,9 @@ Portable Episode analysis schema version 1 is likewise processing-position
 only; see the repository's
 [portable Episode analysis](../../features/episodes/portable-analysis.md)
 contract and shared provider/detector example.
+The public [Episode analysis guide](../../docs/episode-analysis.html) connects
+that portable route to direct C# and Rust formation, graph, summary, finality,
+and lineage semantics.
 
 ## Query Recorded Windows Directly
 

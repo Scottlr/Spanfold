@@ -9,7 +9,10 @@ Public discovery starts at [the site overview](index.html). The
 journeys, API references, and package entry points. The
 [C# and Rust portability guide](cross-language-guide.html) is the canonical
 task-by-task map between the two public APIs and their current package and CLI
-boundaries. The [import existing history guide](import-existing-history.html)
+boundaries. The [Episode analysis guide](episode-analysis.html) is the
+occurrence-level journey for both runtimes, including graph interpretation,
+live finality, native lineage, and the portable schema v1 boundary. The
+[import existing history guide](import-existing-history.html)
 is the adoption path for applications that already own materialized intervals,
 including the current C# and Rust construction asymmetry. The
 [live stream operations guide](live-stream-operations.html)

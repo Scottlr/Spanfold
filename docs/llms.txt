@@ -23,6 +23,7 @@ Overlap, Residual (target-only), Missing (comparison-only), Gap, Coverage, Symme
 - [Get started with C#](https://scottlr.github.io/Spanfold/get-started-csharp.html)
 - [Get started with Rust](https://scottlr.github.io/Spanfold/get-started-rust.html)
 - [C# and Rust portability guide](https://scottlr.github.io/Spanfold/cross-language-guide.html): task-by-task package, pipeline, history, comparison, row, finality, export, Episode, sequence, CLI, testing, and current-gap map
+- [Episode analysis guide](https://scottlr.github.io/Spanfold/episode-analysis.html): C# and Rust occurrence formation, fragment-based relation graph semantics, neutral and reference summaries, live finality, lineage and identity boundaries, and portable document schema version 1
 - [Import existing history](https://scottlr.github.io/Spanfold/import-existing-history.html): map already-materialized windows into C# or Rust history, then query, snapshot, compare, annotate, and rebuild safely without claiming persistence support
 - [Live stream operations](https://scottlr.github.io/Spanfold/live-stream-operations.html): ordered lane ingestion, stabilization, time axes, live horizons, finality, changelogs, liveness, correction replay, bounded-watermark boundaries, retention, persistence, and safe consumer publication
 - [Use cases](https://scottlr.github.io/Spanfold/use-cases.html)

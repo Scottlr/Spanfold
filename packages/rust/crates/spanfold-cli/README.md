@@ -67,6 +67,9 @@ spanfold episodes episode-plan.json windows.jsonl --format json
 
 Schema version 1 is processing-position only and omits runtime-specific Episode
 IDs from its deterministic JSON and Markdown results.
+See the public [Episode analysis guide](../../../../docs/episode-analysis.html)
+for the corresponding direct Rust and C# APIs, relation interpretation, live
+finality, and portable identity boundary.
 
 The CLI uses the [`spanfold`](https://crates.io/crates/spanfold) library. See the
 [repository](https://github.com/Scottlr/Spanfold) and
