@@ -55,11 +55,12 @@ The dashed edges are the important friction: behavior and ownership leak across 
 
 ## ARCH-001 — Strong — Comparison planning and phases lack locality
 
-**Status:** Open  
+**Status:** Partially resolved — selector, planning, and diagnostic locality (S007)
 **Category:** In-process deepening  
 **Files:**
 
-- `crates/spanfold/src/comparison.rs:25-2725`
+- `crates/spanfold/src/comparison.rs` (facade and remaining execution/phase implementation)
+- `crates/spanfold/src/comparison/{selector,plan,diagnostics,critic}.rs` (S007)
 - `crates/spanfold/src/comparison/{rows,comparators,finality}.rs`
 - `crates/spanfold/src/builders.rs`
 - `crates/spanfold/src/fixture.rs`
@@ -68,15 +69,20 @@ The dashed edges are the important friction: behavior and ownership leak across 
 
 ### Problem
 
-The production portion of `comparison.rs` owns at least six independent change axes:
+The production portion of `comparison.rs` owns multiple independent change axes. S007 has
+given selector expressions, plan configuration/validation, and plan/runtime diagnostics
+dedicated implementation modules while retaining the existing facade and public exports.
+The remaining execution and phase ownership still needs the later slices:
 
 - Comparator declaration and parsing: lines 25-144 and 1697-1801.
-- Selector expression, matching, composition, and export: lines 146-550.
-- Scope and normalization policy: lines 618-865.
-- Plan construction and validation: lines 867-1244.
+- Selector expression, matching, composition, and export: `comparison/selector.rs` (S007).
+- Scope and normalization policy: `comparison/plan.rs` (S007).
+- Plan construction and validation: `comparison/plan.rs` (S007).
+- Plan/runtime diagnostics: `comparison/diagnostics.rs` (S007).
+- Plan/prepared-evidence runtime criticism: `comparison/critic.rs` (S007).
 - Execution and materialization: lines 1499-1916.
 - Preparation, normalization, and deduplication: lines 1918-2255 and 2322-2582.
-- Grouping and alignment: lines 2257-2312 and 2584-2724.
+- Grouping and alignment: remaining in `comparison.rs` (later slice).
 
 The existing child modules are useful, but each begins with `use super::*`. Their internal interfaces remain implicit and parent-wide.
 
