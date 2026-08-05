@@ -9,7 +9,9 @@ Public discovery starts at [the site overview](index.html). The
 journeys, API references, and package entry points. The
 [C# and Rust portability guide](cross-language-guide.html) is the canonical
 task-by-task map between the two public APIs and their current package and CLI
-boundaries.
+boundaries. The [live stream operations guide](live-stream-operations.html)
+is the operational path for ordered ingestion, live horizons, liveness,
+correction, retention, and persistence ownership.
 
 ## Adding a page
 
