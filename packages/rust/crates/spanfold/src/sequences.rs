@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     ComparisonFinality, TemporalAxis, TemporalPoint, TemporalRangeError, WindowHistory,
-    WindowRecord, WindowRecordId, WindowSnapshotRecord,
+    WindowRecord, WindowRecordId, WindowSnapshotFinality, WindowSnapshotRecord,
 };
 
 /// Error returned when defining or evaluating an ordered sequence.
@@ -182,7 +182,7 @@ impl<'a> WindowSequenceBuilder<'a> {
             evidence.push(WindowSnapshotRecord {
                 range: closed.range.clone(),
                 window,
-                finality: ComparisonFinality::Final,
+                finality: WindowSnapshotFinality::Final,
             });
         }
 
@@ -380,14 +380,7 @@ fn materialize_match(
             .checked_add(gap)
             .ok_or(WindowSequenceError::MagnitudeOverflow)
     })?;
-    let finality = if evidence
-        .iter()
-        .any(|record| record.finality == ComparisonFinality::Provisional)
-    {
-        ComparisonFinality::Provisional
-    } else {
-        ComparisonFinality::Final
-    };
+    let finality = comparison_finality(evidence);
 
     let end_to_end_magnitude = end
         .magnitude()
@@ -406,6 +399,17 @@ fn materialize_match(
         total_gap,
         finality,
     })
+}
+
+fn comparison_finality(evidence: &[&WindowSnapshotRecord]) -> ComparisonFinality {
+    if evidence
+        .iter()
+        .any(|record| record.finality == WindowSnapshotFinality::Provisional)
+    {
+        ComparisonFinality::Provisional
+    } else {
+        ComparisonFinality::Final
+    }
 }
 
 fn checked_inactive_gap(previous_end: i64, next_start: i64) -> Result<i64, WindowSequenceError> {
@@ -578,6 +582,44 @@ mod tests {
                 .run(),
             Err(WindowSequenceError::OpenEvidence { .. })
         ));
+    }
+
+    #[test]
+    fn sequence_finality_translates_records_snapshot_finality() {
+        let closed_history = WindowHistoryFixture::new()
+            .closed_window("A", "item", 0, 2, no_metadata)
+            .unwrap()
+            .closed_window("B", "item", 3, 5, no_metadata)
+            .unwrap()
+            .build();
+        let final_match = closed_history
+            .match_sequence("closed")
+            .step("A")
+            .then("B")
+            .run()
+            .unwrap()
+            .pop()
+            .expect("closed match");
+        assert_eq!(final_match.finality(), &ComparisonFinality::Final);
+
+        let live_history = WindowHistoryFixture::new()
+            .closed_window("A", "item", 0, 2, no_metadata)
+            .unwrap()
+            .open_window("B", "item", 3, no_metadata)
+            .unwrap()
+            .build();
+        let provisional_match = live_history
+            .match_sequence("open")
+            .step("A")
+            .then("B")
+            .run_live(TemporalPoint::position(5))
+            .unwrap()
+            .pop()
+            .expect("provisional match");
+        assert_eq!(
+            provisional_match.finality(),
+            &ComparisonFinality::Provisional
+        );
     }
 
     #[test]

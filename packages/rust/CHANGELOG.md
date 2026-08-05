@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make snapshot finality records-owned with `WindowSnapshotFinality`, containing
+  only `Final` and `Provisional`. Migrate callers from
+  `WindowSnapshotRecord.finality: ComparisonFinality` to the new type; the
+  serialized values remain exactly `"Final"` and `"Provisional"`, and higher
+  comparison layers translate snapshot finality at their boundary.
 - Replace `WindowArtifact`'s scalar `startPosition`, `endPosition`, and
   `knownAtPosition` fields with typed `start`, `end`, and `knownAt` temporal
   points. Consumers must migrate to the new source fields and wire keys, which

@@ -151,8 +151,11 @@ fn query_selectors_have_the_same_intersection_across_record_adapters() {
         .windows();
 
     assert_eq!(snapshot_rows.len(), 2);
-    assert_eq!(snapshot_rows[0].finality, ComparisonFinality::Final);
-    assert_eq!(snapshot_rows[1].finality, ComparisonFinality::Provisional);
+    assert_eq!(snapshot_rows[0].finality, WindowSnapshotFinality::Final);
+    assert_eq!(
+        snapshot_rows[1].finality,
+        WindowSnapshotFinality::Provisional
+    );
 }
 
 #[test]
@@ -168,9 +171,26 @@ fn snapshot_records_include_final_and_provisional_ranges() {
         .windows();
 
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].finality, ComparisonFinality::Final);
-    assert_eq!(rows[1].finality, ComparisonFinality::Provisional);
+    assert_eq!(rows[0].finality, WindowSnapshotFinality::Final);
+    assert_eq!(rows[1].finality, WindowSnapshotFinality::Provisional);
     assert_eq!(rows[1].range.magnitude(), 3);
+}
+
+#[test]
+fn snapshot_finality_serde_preserves_final_and_provisional_wire_values() {
+    for (finality, wire) in [
+        (WindowSnapshotFinality::Final, "\"Final\""),
+        (WindowSnapshotFinality::Provisional, "\"Provisional\""),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&finality).expect("serialize finality"),
+            wire
+        );
+        assert_eq!(
+            serde_json::from_str::<WindowSnapshotFinality>(wire).expect("deserialize finality"),
+            finality
+        );
+    }
 }
 
 #[test]
