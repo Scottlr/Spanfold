@@ -425,12 +425,12 @@ mod tests {
         .expect("jsonl compare");
 
         assert!(result.is_valid);
-        assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.residual_rows.len(), 1);
-        assert_eq!(result.coverage_rows.len(), 2);
-        assert_eq!(result.missing_rows.len(), 0);
-        assert_eq!(result.gap_rows.len(), 0);
-        assert_eq!(result.symmetric_difference_rows.len(), 0);
+        assert_eq!(result.overlap_rows().len(), 1);
+        assert_eq!(result.residual_rows().len(), 1);
+        assert_eq!(result.coverage_rows().len(), 2);
+        assert_eq!(result.missing_rows().len(), 0);
+        assert_eq!(result.gap_rows().len(), 0);
+        assert_eq!(result.symmetric_difference_rows().len(), 0);
     }
 
     #[test]
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(result.plan_name, "Live audit");
         assert_eq!(result.comparator_summaries.len(), 1);
         assert_eq!(result.comparator_summaries[0].comparator_name, "residual");
-        assert_eq!(result.residual_rows.len(), 2);
+        assert_eq!(result.residual_rows().len(), 2);
         assert!(result.has_provisional_rows());
     }
 

@@ -125,7 +125,7 @@ Use explicit imports between these modules. Do not expose the internal phase sea
 
 ## ARCH-002 — Strong — Result and phase artifacts have competing representations
 
-**Status:** Open  
+**Status:** Partially resolved — canonical result rows
 **Category:** Canonical state  
 **Files:**
 
@@ -138,22 +138,33 @@ Use explicit imports between these modules. Do not expose the internal phase sea
 
 ### Problem
 
-`ComparisonResult` exposes every row family twice:
+`ComparisonResult` previously exposed every row family twice:
 
 - Canonical-looking grouped storage in `ComparisonRows`.
 - Nine flat `Arc<Vec<T>>` compatibility fields.
 
-The `Arc` values avoid copying row data, but the interface and synchronization burden remain duplicated. `materialize_result` must keep both views aligned.
+At the audited revision, the `Arc` values avoided copying row data, but the
+interface and synchronization burden were duplicated and `materialize_result`
+had to keep both views aligned. R009 removes that duplicate representation.
+
+R009 removes the nine flat fields. `ComparisonRows` is now the only stored
+row-family representation on the public result, and the family accessors borrow
+slices from it without allocating compatibility vectors.
 
 Typed `PreparedComparison` and `AlignedComparison` artifacts are serialized into `serde_json::Value` during execution. Export and debug code later recover information using string keys such as `selectedWindows`, `normalizedWindows`, and `segments`.
 
-Adding one comparator family currently changes comparison declaration, dispatch, algorithms, rows, finality, JSONL, JSON, Markdown, LLM context, debug HTML, testing helpers, CLI counts, builders, and root re-exports.
+The remaining competing representations are the typed prepared/aligned
+artifacts serialized into `serde_json::Value` and the separate manual export
+projection. Adding one comparator family still changes comparison declaration,
+dispatch, algorithms, rows, finality, JSONL, JSON, Markdown, LLM context, debug
+HTML, testing helpers, CLI counts, builders, and root re-exports.
 
 ### Scalable direction
 
-- Make `ComparisonRows` the only stored row-family representation.
+- Make `ComparisonRows` the only stored row-family representation. **Done in R009.**
 - Retain typed prepared and aligned artifacts until the export seam.
-- Replace duplicate fields with compatibility accessors or zero-state views until the next breaking release.
+- Keep the borrowing family accessors as the source-level API while the grouped
+  `rows` field remains the wire representation.
 - Introduce one internal row-family traversal used by finality, counts, exports, debug rendering, and testing helpers.
 - Define one canonical artifact projection and make every format adapter consume it.
 
@@ -535,7 +546,7 @@ The following historical resolution claims should be reopened or narrowed:
 
 | Existing item | Current disposition | Reason |
 | --- | --- | --- |
-| RUST-040 | Performance addressed; interface debt remains | `Arc` removes row copying, but duplicate row representations and synchronization remain |
+| RUST-040 | Resolved for duplicate result row storage | `ComparisonResult` now stores grouped `ComparisonRows` only; borrowing family accessors replace the flat fields. Typed phase artifacts and manual export projection remain tracked by RUST-041 and RUST-065. |
 | RUST-041 | Partially resolved | Aligned no longer owns prepared, but core results still serialize typed phase artifacts into `Value` |
 | RUST-042 | Performance addressed; duplication remains | Borrowed query added, while owned and snapshot interfaces still repeat behavior |
 | RUST-065 | Incomplete | Derived and manual result serialization still coexist |

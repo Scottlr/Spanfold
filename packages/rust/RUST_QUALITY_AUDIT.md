@@ -618,6 +618,8 @@ Extensions are descriptor and metadata structs only. There is no comparator/sele
 
 The type derives `Serialize`, producing `planName`, nested `rows`, and duplicated flat arrays while skipping `plan`. `export_result_json` produces a different object with `plan`, row objects augmented with IDs/finality, no top-level `planName`, and no flat arrays. Both claim the same result schema.
 
+**Current status (R009):** Partially resolved. `ComparisonResult` now serializes one grouped `rows` collection and its family accessors borrow that canonical storage; the derived serializer and the manual exporter still differ in plan, phase-artifact, and finality projection, so the single serializer correction remains open.
+
 **Required correction:** define one canonical serializer/schema and make all public export paths delegate to it.
 
 ### RUST-066 — P1 — Plan export certifies invalid plans with empty diagnostics
@@ -1130,7 +1132,7 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-055 | Ingestion benchmarks now include the specified 100k and 1m event scales alongside small development cases. | `spanfold_benchmarks.rs` |
 | RUST-062 | Comparator declarations now use explicit stable lowercase spellings and expose `parse_result` with a typed parse error; legacy spellings remain accepted on input. | `Comparator::declaration`/`parse_result` |
 | RUST-063 | Diagnostics now expose a stable actionable remediation hint via `ComparisonDiagnostic::message()` without breaking the compact wire code/severity contract. | diagnostic API |
-| RUST-065 | Flat row fields are now excluded from derived `ComparisonResult` serde; the canonical serialized contract is the grouped `rows` artifact. | `ComparisonResult` serde annotations |
+| RUST-065 | Partially resolved: derived `ComparisonResult` serde and family accessors now use grouped canonical rows, while the manual exporter still has a separate plan/phase/finality projection. | `ComparisonResult`, `export_result_json` |
 | RUST-066 | Plan exports now include structural validation diagnostics instead of an unconditional empty diagnostics array. | `build_plan_json_value` |
 | RUST-068 | Markdown output escapes dynamic heading, label, metadata, and evidence content before embedding it in Markdown/HTML. | `escape_markdown` |
 | RUST-069 | Markdown exports now include serialized row evidence for every comparator family in addition to counts and summaries. | `append_markdown_rows` |
@@ -1177,7 +1179,7 @@ The following findings have been repaired during the implementation pass. The no
 | RUST-073 | Core conceptual modules for temporal values, records/history, pipeline, and exports are now public documented modules while retaining root re-exports for compatibility; remaining specialized modules stay behind the facade until their boundaries are split. | `lib.rs` module visibility/docs |
 | RUST-056 | `ComparisonPlan` fields are now crate-private and the type is non-exhaustive; external callers construct plans through `ComparisonPlan::new` and focused configuration methods rather than fabricating contradictory field bags. | `ComparisonPlan::new`, `with_*` methods |
 | RUST-057 | All public record DTO serde boundaries now use validated custom deserialization: empty identities/names, unknown fields, duplicate segment/tag names, invalid parent order, empty metadata, and known-at axis mismatches are rejected before records enter history. | custom `Deserialize` for `WindowRecordId`, `WindowSegment`, `WindowTag`, `ClosedWindow`, `OpenWindow` |
-| RUST-040 | Typed result rows are now shared through `Arc<Vec<T>>`: grouped rows remain the canonical storage and compatibility family fields are zero-copy views instead of cloned row vectors. | `ComparisonRows`, `ComparisonResult`, `RowAccumulator` |
+| RUST-040 | Resolved for result rows: `ComparisonResult` stores grouped `ComparisonRows` only; family accessors borrow slices without flat `Arc<Vec<T>>` fields or row-vector copies. | `ComparisonRows`, `ComparisonResult`, `RowAccumulator` |
 | RUST-042 | `WindowHistory::query` now builds a sorted borrowed reference index; filtering retains references and only materializes owned records at terminal methods such as `windows()`/`closed_windows()`. The old owned query remains available for callers that already have a materialized vector. | `WindowHistoryRefQuery`, `WindowRef`, `WindowHistory::query` |
 | RUST-074 | Removed the zero-sized selector forwarding builder, cross-language fixture-builder type aliases, and redundant query aliases (`window`, `lane`, `all`, etc.); canonical `where_*`/terminal methods are now the public vocabulary. | `builders.rs`, `testing.rs`, `records.rs` |
 | RUST-059 | `EventPipelineBuilder::build` and `WindowPipelineBuilder::build` now return `Result<_, EventPipelineBuildError>`; panic behavior is isolated behind explicitly named `build_or_panic`, and all internal benchmark/test callers use the intended boundary. | `pipeline.rs`, benchmark and pipeline tests |

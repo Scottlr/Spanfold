@@ -13,6 +13,11 @@
 - Replace the raw `PrimitiveValue::Float(f64)` payload with validated
   `FiniteFloat`. Callers must migrate direct construction and pattern matches
   to `PrimitiveValue::try_float`, `FiniteFloat::try_new`, and `as_f64`.
+- Replace the nine public `ComparisonResult` row fields with borrowed accessors:
+  migrate `overlap_rows`, `residual_rows`, `missing_rows`, `coverage_rows`,
+  `gap_rows`, `symmetric_difference_rows`, `containment_rows`, `lead_lag_rows`,
+  and `as_of_rows` to `*_rows()` (or use `rows().<family>`). The grouped
+  serialized `rows` collection is unchanged.
 - Add Episode formation over normalized window evidence, same-side gap
   stitching, exhaustive cross-side relation graphs, neutral summaries, and
   explicit reference scorecards.

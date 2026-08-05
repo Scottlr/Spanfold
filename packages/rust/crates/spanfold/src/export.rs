@@ -900,6 +900,23 @@ mod tests {
     #[test]
     fn all_row_families_share_authoritative_metadata_across_exports() {
         let result = all_row_family_result();
+        assert_eq!(result.rows(), &result.rows);
+        assert_eq!(result.overlap_rows(), result.rows.overlap.as_slice());
+        assert_eq!(result.residual_rows(), result.rows.residual.as_slice());
+        assert_eq!(result.missing_rows(), result.rows.missing.as_slice());
+        assert_eq!(result.coverage_rows(), result.rows.coverage.as_slice());
+        assert_eq!(result.gap_rows(), result.rows.gap.as_slice());
+        assert_eq!(
+            result.symmetric_difference_rows(),
+            result.rows.symmetric_difference.as_slice()
+        );
+        assert_eq!(
+            result.containment_rows(),
+            result.rows.containment.as_slice()
+        );
+        assert_eq!(result.lead_lag_rows(), result.rows.lead_lag.as_slice());
+        assert_eq!(result.as_of_rows(), result.rows.as_of.as_slice());
+
         let kinds = [
             ComparisonRowKind::Overlap,
             ComparisonRowKind::Residual,
@@ -1039,20 +1056,19 @@ mod tests {
         assert_eq!(error.expected_kind, ComparisonRowKind::Residual);
         assert_eq!(error.actual_kind.as_deref(), Some("lead-lag"));
 
-        let mut divergent_rows = all_row_family_result();
-        std::sync::Arc::make_mut(&mut divergent_rows.rows.overlap)[0]
-            .range
-            .end += 1;
-        let divergence = export_result_json(&divergent_rows)
-            .expect_err("divergent compatibility rows must fail export");
-        let ComparisonExportError::InconsistentRowMetadata(divergence) = divergence else {
-            panic!("unexpected export error: {divergence}");
+        let mut extra_row = all_row_family_result();
+        let overlap_row = extra_row.overlap_rows()[0].clone();
+        std::sync::Arc::make_mut(&mut extra_row.rows.overlap).push(overlap_row);
+        let error = export_result_json(&extra_row)
+            .expect_err("row-count mutation must fail metadata validation");
+        let ComparisonExportError::InconsistentRowMetadata(error) = error else {
+            panic!("unexpected export error: {error}");
         };
-        assert_eq!(divergence.family, ComparisonRowKind::Overlap);
-        assert_eq!(
-            divergence.actual_kind.as_deref(),
-            Some("compatibility projection diverged")
-        );
+        assert_eq!(error.family, ComparisonRowKind::Overlap);
+        assert_eq!(error.expected_count, extra_row.rows.overlap.len());
+        assert_eq!(error.actual_count, extra_row.rows.overlap.len() - 1);
+        assert_eq!(error.metadata_index, extra_row.rows.overlap.len() - 1);
+        assert_eq!(error.actual_kind.as_deref(), Some("residual"));
     }
 
     #[test]

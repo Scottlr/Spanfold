@@ -1504,6 +1504,7 @@ struct ResultArtifacts {
     coverage_summaries: Vec<CoverageSummary>,
     lead_lag_summaries: Vec<LeadLagSummary>,
     extension_metadata: Vec<ComparisonExtensionMetadata>,
+    rows: ComparisonRows,
     state: ComparisonResultState,
 }
 
@@ -1722,6 +1723,9 @@ fn execute_compare(
         .iter()
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     {
+        let rows = ComparisonRows::default();
+        let state =
+            ComparisonResultState::new(Some(prepared), None, ComparisonRowState::empty(&rows));
         let mut result = materialize_result(
             plan,
             &plan.name,
@@ -1732,11 +1736,8 @@ fn execute_compare(
                 coverage_summaries: Vec::new(),
                 lead_lag_summaries: Vec::new(),
                 extension_metadata: Vec::new(),
-                state: ComparisonResultState::new(
-                    Some(prepared),
-                    None,
-                    ComparisonRowState::empty(),
-                ),
+                rows,
+                state,
             },
         );
         result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -1843,7 +1844,7 @@ fn execute_compare(
         .collect::<BTreeSet<_>>();
     let rows = rows.into_shared();
     let coverage_summaries = build_coverage_summaries(&rows.coverage);
-    let row_state = build_row_state(rows, &provisional_record_ids, &gap_provisional_record_ids);
+    let row_state = build_row_state(&rows, &provisional_record_ids, &gap_provisional_record_ids);
     let extension_metadata = build_extension_metadata(&aligned, plan);
 
     let mut result = materialize_result(
@@ -1858,6 +1859,7 @@ fn execute_compare(
             coverage_summaries,
             lead_lag_summaries,
             extension_metadata,
+            rows,
             state: ComparisonResultState::new(Some(prepared), Some(aligned), row_state),
         },
     );
@@ -1873,6 +1875,8 @@ fn invalid_result(
     plan: &ComparisonPlan,
     diagnostics: Vec<ComparisonDiagnostic>,
 ) -> ComparisonResult {
+    let rows = ComparisonRows::default();
+    let state = ComparisonResultState::new(None, None, ComparisonRowState::empty(&rows));
     let mut result = materialize_result(
         plan,
         &plan.name,
@@ -1883,7 +1887,8 @@ fn invalid_result(
             coverage_summaries: Vec::new(),
             lead_lag_summaries: Vec::new(),
             extension_metadata: Vec::new(),
-            state: ComparisonResultState::empty(),
+            rows,
+            state,
         },
     );
     result.known_at = plan.known_at.as_ref().map(row_point_from_temporal_point);
@@ -2008,7 +2013,7 @@ fn materialize_result(
     artifacts: ResultArtifacts,
 ) -> ComparisonResult {
     let state = Arc::new(artifacts.state);
-    let rows = state.rows().clone();
+    let rows = artifacts.rows;
     let prepared = plan
         .output
         .include_explain_data
@@ -2021,7 +2026,7 @@ fn materialize_result(
         .then(|| state.aligned())
         .flatten()
         .map(|aligned| serde_json::to_value(aligned).expect("aligned artifact"));
-    let row_finalities = state.compatibility_finalities();
+    let row_finalities = state.row_finalities();
 
     ComparisonResult {
         schema: "spanfold.comparison.result".to_owned(),
@@ -2037,16 +2042,7 @@ fn materialize_result(
         evaluation_horizon: None,
         comparator_summaries: artifacts.comparator_summaries,
         coverage_summaries: artifacts.coverage_summaries,
-        overlap_rows: Arc::clone(&rows.overlap),
-        residual_rows: Arc::clone(&rows.residual),
-        missing_rows: Arc::clone(&rows.missing),
-        coverage_rows: Arc::clone(&rows.coverage),
-        gap_rows: Arc::clone(&rows.gap),
-        symmetric_difference_rows: Arc::clone(&rows.symmetric_difference),
-        containment_rows: Arc::clone(&rows.containment),
-        lead_lag_rows: Arc::clone(&rows.lead_lag),
         lead_lag_summaries: artifacts.lead_lag_summaries,
-        as_of_rows: Arc::clone(&rows.as_of),
         row_finalities,
         extension_metadata: artifacts.extension_metadata,
         rows,
@@ -2929,32 +2925,21 @@ mod tests {
         assert_eq!(result.comparator_summaries[0].row_count, 1);
         assert_eq!(result.comparator_summaries[1].row_count, 1);
         assert_eq!(result.comparator_summaries[2].row_count, 2);
-        assert_eq!(result.overlap_rows[0].range.start, 3);
-        assert_eq!(result.overlap_rows[0].range.end, 5);
-        assert_eq!(result.residual_rows[0].range.start, 1);
-        assert_eq!(result.residual_rows[0].range.end, 3);
+        assert_eq!(result.overlap_rows()[0].range.start, 3);
+        assert_eq!(result.overlap_rows()[0].range.end, 5);
+        assert_eq!(result.residual_rows()[0].range.start, 1);
+        assert_eq!(result.residual_rows()[0].range.end, 3);
     }
 
     #[test]
-    fn canonical_state_preserves_direct_serialize_and_flat_compatibility_views() {
+    fn canonical_rows_preserve_accessors_and_direct_serialization() {
         let fixture = ContractFixture::parse_json(include_str!(
             "../../../../dotnet/tests/Spanfold.Tests/Comparison/Fixtures/basic-overlap.json"
         ))
         .expect("fixture should parse");
         let result = compare(fixture.history(), fixture.plan());
 
-        macro_rules! assert_shared_compatibility_rows {
-            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
-                $(assert!(Arc::ptr_eq(&result.rows.$rows, &result.$compat));)*
-            };
-        }
-        for_each_comparison_row_family!(assert_shared_compatibility_rows);
-
-        assert_eq!(result.state.rows(), &result.rows);
-        assert_eq!(
-            result.state.compatibility_finalities(),
-            result.row_finalities
-        );
+        assert_eq!(result.state.row_finalities(), result.row_finalities);
         assert_eq!(
             serde_json::to_value(result.state.prepared().expect("typed prepared"))
                 .expect("serialize typed prepared"),
@@ -2981,6 +2966,30 @@ mod tests {
         assert!(!object.contains_key("state"));
         assert!(!object.contains_key("plan"));
         assert!(!object.contains_key("overlap_rows"));
+        assert!(!object.contains_key("residual_rows"));
+        assert!(!object.contains_key("missing_rows"));
+        assert!(!object.contains_key("coverage_rows"));
+        assert!(!object.contains_key("gap_rows"));
+        assert!(!object.contains_key("symmetric_difference_rows"));
+        assert!(!object.contains_key("containment_rows"));
+        assert!(!object.contains_key("lead_lag_rows"));
+        assert!(!object.contains_key("as_of_rows"));
+
+        assert_eq!(result.overlap_rows(), result.rows.overlap.as_slice());
+        assert_eq!(result.residual_rows(), result.rows.residual.as_slice());
+        assert_eq!(result.missing_rows(), result.rows.missing.as_slice());
+        assert_eq!(result.coverage_rows(), result.rows.coverage.as_slice());
+        assert_eq!(result.gap_rows(), result.rows.gap.as_slice());
+        assert_eq!(
+            result.symmetric_difference_rows(),
+            result.rows.symmetric_difference.as_slice()
+        );
+        assert_eq!(
+            result.containment_rows(),
+            result.rows.containment.as_slice()
+        );
+        assert_eq!(result.lead_lag_rows(), result.rows.lead_lag.as_slice());
+        assert_eq!(result.as_of_rows(), result.rows.as_of.as_slice());
     }
 
     #[test]
@@ -3156,16 +3165,16 @@ mod tests {
 
         let result = compare(&history, &plan);
 
-        assert_eq!(result.gap_rows.len(), 1);
-        assert_eq!(result.gap_rows[0].range.start, 3);
-        assert_eq!(result.gap_rows[0].range.end, 5);
-        assert_eq!(result.symmetric_difference_rows.len(), 2);
+        assert_eq!(result.gap_rows().len(), 1);
+        assert_eq!(result.gap_rows()[0].range.start, 3);
+        assert_eq!(result.gap_rows()[0].range.end, 5);
+        assert_eq!(result.symmetric_difference_rows().len(), 2);
         assert_eq!(
-            result.symmetric_difference_rows[0].side,
+            result.symmetric_difference_rows()[0].side,
             ComparisonSide::Target
         );
         assert_eq!(
-            result.symmetric_difference_rows[1].side,
+            result.symmetric_difference_rows()[1].side,
             ComparisonSide::Against
         );
     }
@@ -3204,17 +3213,17 @@ mod tests {
         };
 
         let result = compare(&history, &plan);
-        assert_eq!(result.containment_rows.len(), 3);
+        assert_eq!(result.containment_rows().len(), 3);
         assert_eq!(
-            result.containment_rows[0].status,
+            result.containment_rows()[0].status,
             ContainmentStatus::LeftOverhang
         );
         assert_eq!(
-            result.containment_rows[1].status,
+            result.containment_rows()[1].status,
             ContainmentStatus::Contained
         );
         assert_eq!(
-            result.containment_rows[2].status,
+            result.containment_rows()[2].status,
             ContainmentStatus::RightOverhang
         );
     }
@@ -3265,12 +3274,12 @@ mod tests {
                 strict: false,
             },
         );
-        assert_eq!(lead_lag.lead_lag_rows.len(), 1);
+        assert_eq!(lead_lag.lead_lag_rows().len(), 1);
         assert_eq!(
-            lead_lag.lead_lag_rows[0].direction,
+            lead_lag.lead_lag_rows()[0].direction,
             LeadLagDirection::TargetLeads
         );
-        assert_eq!(lead_lag.lead_lag_rows[0].delta_magnitude, Some(-2));
+        assert_eq!(lead_lag.lead_lag_rows()[0].delta_magnitude, Some(-2));
         assert_eq!(lead_lag.lead_lag_summaries[0].target_lead_count, 1);
 
         let as_of = compare(
@@ -3304,9 +3313,9 @@ mod tests {
                 strict: false,
             },
         );
-        assert_eq!(as_of.as_of_rows.len(), 1);
-        assert_eq!(as_of.as_of_rows[0].status, AsOfMatchStatus::Matched);
-        assert_eq!(as_of.as_of_rows[0].distance_magnitude, Some(3));
+        assert_eq!(as_of.as_of_rows().len(), 1);
+        assert_eq!(as_of.as_of_rows()[0].status, AsOfMatchStatus::Matched);
+        assert_eq!(as_of.as_of_rows()[0].distance_magnitude, Some(3));
     }
 
     #[test]
@@ -3335,10 +3344,10 @@ mod tests {
 
         let result = compare(&history, &plan);
 
-        assert_eq!(result.as_of_rows.len(), 1);
-        assert_eq!(result.as_of_rows[0].status, AsOfMatchStatus::Exact);
-        assert_eq!(result.as_of_rows[0].distance_magnitude, Some(0));
-        assert!(result.as_of_rows[0].matched_record_id.is_some());
+        assert_eq!(result.as_of_rows().len(), 1);
+        assert_eq!(result.as_of_rows()[0].status, AsOfMatchStatus::Exact);
+        assert_eq!(result.as_of_rows()[0].distance_magnitude, Some(0));
+        assert!(result.as_of_rows()[0].matched_record_id.is_some());
     }
 
     #[test]
@@ -3383,10 +3392,10 @@ mod tests {
         let result = compare(&history, &plan);
 
         assert!(result.is_valid);
-        assert_eq!(result.lead_lag_rows[0].delta_magnitude, Some(i64::MAX));
-        assert!(result.lead_lag_rows[0].is_within_tolerance);
-        assert_eq!(result.as_of_rows[0].distance_magnitude, Some(i64::MAX));
-        assert_eq!(result.as_of_rows[0].status, AsOfMatchStatus::Matched);
+        assert_eq!(result.lead_lag_rows()[0].delta_magnitude, Some(i64::MAX));
+        assert!(result.lead_lag_rows()[0].is_within_tolerance);
+        assert_eq!(result.as_of_rows()[0].distance_magnitude, Some(i64::MAX));
+        assert_eq!(result.as_of_rows()[0].status, AsOfMatchStatus::Matched);
     }
 
     #[test]
@@ -3474,14 +3483,14 @@ mod tests {
             },
         );
 
-        assert_eq!(lead_lag.lead_lag_rows.len(), 1);
-        assert_eq!(lead_lag.lead_lag_rows[0].axis, TemporalAxis::Timestamp);
-        assert_eq!(lead_lag.lead_lag_rows[0].delta_magnitude, Some(100));
+        assert_eq!(lead_lag.lead_lag_rows().len(), 1);
+        assert_eq!(lead_lag.lead_lag_rows()[0].axis, TemporalAxis::Timestamp);
+        assert_eq!(lead_lag.lead_lag_rows()[0].delta_magnitude, Some(100));
         assert_eq!(
-            lead_lag.lead_lag_rows[0].direction,
+            lead_lag.lead_lag_rows()[0].direction,
             LeadLagDirection::TargetLags
         );
-        assert!(lead_lag.lead_lag_rows[0].is_within_tolerance);
+        assert!(lead_lag.lead_lag_rows()[0].is_within_tolerance);
 
         let as_of = compare(
             history,
@@ -3515,10 +3524,10 @@ mod tests {
             },
         );
 
-        assert_eq!(as_of.as_of_rows.len(), 1);
-        assert_eq!(as_of.as_of_rows[0].axis, TemporalAxis::Timestamp);
-        assert_eq!(as_of.as_of_rows[0].status, AsOfMatchStatus::Matched);
-        assert_eq!(as_of.as_of_rows[0].distance_magnitude, Some(100));
+        assert_eq!(as_of.as_of_rows().len(), 1);
+        assert_eq!(as_of.as_of_rows()[0].axis, TemporalAxis::Timestamp);
+        assert_eq!(as_of.as_of_rows()[0].status, AsOfMatchStatus::Matched);
+        assert_eq!(as_of.as_of_rows()[0].distance_magnitude, Some(100));
     }
 
     #[test]
@@ -3571,7 +3580,7 @@ mod tests {
         );
 
         let total: i64 = result
-            .residual_rows
+            .residual_rows()
             .iter()
             .map(|row| row.range.end - row.range.start)
             .sum();
@@ -3634,7 +3643,7 @@ mod tests {
                 strict: false,
             },
         );
-        assert!(threshold.residual_rows.is_empty());
+        assert!(threshold.residual_rows().is_empty());
 
         let none_history = WindowHistoryFixture::new()
             .closed_window("SelectionPriced", "selection-1", 1, 11, |w| {
@@ -3679,7 +3688,7 @@ mod tests {
             },
         );
         let total: i64 = none
-            .residual_rows
+            .residual_rows()
             .iter()
             .map(|row| row.range.end - row.range.start)
             .sum();
@@ -3723,7 +3732,7 @@ mod tests {
 
         let result = compare_live(&history, &plan, crate::TemporalPoint::position(10));
 
-        assert_eq!(result.residual_rows.len(), 2);
+        assert_eq!(result.residual_rows().len(), 2);
         assert!(result.has_provisional_rows());
         assert_eq!(result.provisional_row_finalities().len(), 2);
         assert_eq!(
@@ -3822,9 +3831,12 @@ mod tests {
 
         let result = compare(&history, &plan);
 
-        assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.overlap_rows[0].key, "device-1");
-        assert_eq!(result.overlap_rows[0].partition.as_deref(), Some("fleet-a"));
+        assert_eq!(result.overlap_rows().len(), 1);
+        assert_eq!(result.overlap_rows()[0].key, "device-1");
+        assert_eq!(
+            result.overlap_rows()[0].partition.as_deref(),
+            Some("fleet-a")
+        );
         assert_eq!(
             result.prepared.as_ref().expect("prepared")["selectedWindows"]
                 .as_array()
@@ -3877,14 +3889,14 @@ mod tests {
 
         let result = compare(&history, &plan);
 
-        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows().len(), 1);
         assert!(
             result
                 .diagnostics
                 .iter()
                 .any(|item| item.code == "DuplicateWindow")
         );
-        assert_eq!(result.overlap_rows[0].target_record_ids.len(), 1);
+        assert_eq!(result.overlap_rows()[0].target_record_ids.len(), 1);
     }
 
     #[test]
@@ -3930,10 +3942,10 @@ mod tests {
 
         let result = compare(&history, &plan);
 
-        assert_eq!(result.overlap_rows.len(), 1);
-        assert_eq!(result.overlap_rows[0].range.start, 1);
-        assert_eq!(result.overlap_rows[0].range.end, 5);
-        assert_eq!(result.overlap_rows[0].target_record_ids.len(), 2);
+        assert_eq!(result.overlap_rows().len(), 1);
+        assert_eq!(result.overlap_rows()[0].range.start, 1);
+        assert_eq!(result.overlap_rows()[0].range.end, 5);
+        assert_eq!(result.overlap_rows()[0].target_record_ids.len(), 2);
     }
 
     #[test]
@@ -4016,7 +4028,7 @@ mod tests {
             .run();
 
         assert!(result.is_valid);
-        assert_eq!(result.overlap_rows.len(), 1);
+        assert_eq!(result.overlap_rows().len(), 1);
         assert_eq!(
             result.prepared.as_ref().expect("prepared")["normalizedWindows"][0]["selectorName"],
             "dynamic-target"
@@ -4055,7 +4067,7 @@ mod tests {
 
         assert!(!result.is_valid);
         assert!(result.aligned.is_none());
-        assert!(result.overlap_rows.is_empty());
+        assert!(result.overlap_rows().is_empty());
         assert!(result.diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "RuntimeNonSerializablePlan"
                 && diagnostic.severity == DiagnosticSeverity::Error
@@ -4103,7 +4115,7 @@ mod tests {
 
         assert!(!result.is_valid);
         assert!(result.aligned.is_none());
-        assert!(result.overlap_rows.is_empty());
+        assert!(result.overlap_rows().is_empty());
         assert!(
             result
                 .error_diagnostics()
@@ -4307,7 +4319,7 @@ mod tests {
             .run();
 
         assert!(result.is_valid);
-        assert!(result.overlap_rows.is_empty());
+        assert!(result.overlap_rows().is_empty());
         assert!(
             result
                 .diagnostics

@@ -779,7 +779,7 @@ mod tests {
             Some(TemporalPoint::position(8)),
         );
         let result = compare_live(&history, &plan, TemporalPoint::position(8));
-        let row = result.gap_rows.first().expect("internal gap");
+        let row = result.gap_rows().first().expect("internal gap");
         assert_eq!(row.range.start, 3);
         assert_eq!(row.range.end, 5);
         assert_eq!(

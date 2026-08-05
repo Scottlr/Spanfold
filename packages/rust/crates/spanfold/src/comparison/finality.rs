@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn build_row_state(
-    rows: ComparisonRows,
+    rows: &ComparisonRows,
     provisional_record_ids: &BTreeSet<String>,
     gap_provisional_record_ids: &BTreeSet<String>,
 ) -> ComparisonRowState {

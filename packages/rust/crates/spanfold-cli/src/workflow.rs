@@ -72,15 +72,15 @@ pub(super) fn write_audit_bundle(
 
 fn row_counts_json(result: &spanfold::ComparisonResult) -> serde_json::Value {
     serde_json::json!({
-        "overlap": result.overlap_rows.len(),
-        "residual": result.residual_rows.len(),
-        "missing": result.missing_rows.len(),
-        "coverage": result.coverage_rows.len(),
-        "gap": result.gap_rows.len(),
-        "symmetricDifference": result.symmetric_difference_rows.len(),
-        "containment": result.containment_rows.len(),
-        "leadLag": result.lead_lag_rows.len(),
-        "asOf": result.as_of_rows.len()
+        "overlap": result.overlap_rows().len(),
+        "residual": result.residual_rows().len(),
+        "missing": result.missing_rows().len(),
+        "coverage": result.coverage_rows().len(),
+        "gap": result.gap_rows().len(),
+        "symmetricDifference": result.symmetric_difference_rows().len(),
+        "containment": result.containment_rows().len(),
+        "leadLag": result.lead_lag_rows().len(),
+        "asOf": result.as_of_rows().len()
     })
 }
 

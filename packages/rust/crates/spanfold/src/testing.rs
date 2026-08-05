@@ -219,15 +219,15 @@ impl VirtualComparisonClock {
 fn row_count(result: &ComparisonResult, row_type: &str) -> Result<usize, SpanfoldAssertionError> {
     let normalized = row_type.replace(['-', '_'], "").to_lowercase();
     match normalized.as_str() {
-        "overlap" => Ok(result.overlap_rows.len()),
-        "residual" => Ok(result.residual_rows.len()),
-        "missing" => Ok(result.missing_rows.len()),
-        "coverage" => Ok(result.coverage_rows.len()),
-        "gap" => Ok(result.gap_rows.len()),
-        "symmetricdifference" => Ok(result.symmetric_difference_rows.len()),
-        "containment" => Ok(result.containment_rows.len()),
-        "leadlag" => Ok(result.lead_lag_rows.len()),
-        "asof" => Ok(result.as_of_rows.len()),
+        "overlap" => Ok(result.overlap_rows().len()),
+        "residual" => Ok(result.residual_rows().len()),
+        "missing" => Ok(result.missing_rows().len()),
+        "coverage" => Ok(result.coverage_rows().len()),
+        "gap" => Ok(result.gap_rows().len()),
+        "symmetricdifference" => Ok(result.symmetric_difference_rows().len()),
+        "containment" => Ok(result.containment_rows().len()),
+        "leadlag" => Ok(result.lead_lag_rows().len()),
+        "asof" => Ok(result.as_of_rows().len()),
         _ => Err(SpanfoldAssertionError::new(format!(
             "Unknown Spanfold row type: {row_type}"
         ))),

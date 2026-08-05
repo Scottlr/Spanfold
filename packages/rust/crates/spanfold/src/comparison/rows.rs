@@ -698,10 +698,6 @@ impl ComparisonRows {
         }
         for_each_comparison_row_family!(layouts)
     }
-
-    pub(super) fn total_count(&self) -> usize {
-        self.family_layouts().iter().map(|(_, count)| count).sum()
-    }
 }
 
 #[derive(Default)]
@@ -735,8 +731,8 @@ impl RowAccumulator {
 
 /// Structured comparison result.
 ///
-/// [`Self::rows`] and [`Self::row_finalities`] are compatibility projections of
-/// canonical typed internal state. For genuine, unmodified Spanfold results,
+/// [`Self::rows`] and [`Self::row_finalities`] are the public result data. For
+/// genuine, unmodified Spanfold results,
 /// finality metadata is partitioned in the same family order and remains
 /// parallel to row order within each family.
 /// The typed `*_rows_with_finality` views validate detectable count and kind
@@ -783,36 +779,9 @@ pub struct ComparisonResult {
     pub coverage_summaries: Vec<CoverageSummary>,
     /// Canonical result rows grouped by family.
     pub rows: ComparisonRows,
-    /// Zero-copy overlap-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub overlap_rows: Arc<Vec<OverlapRow>>,
-    /// Zero-copy residual-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub residual_rows: Arc<Vec<ResidualRow>>,
-    /// Zero-copy missing-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub missing_rows: Arc<Vec<MissingRow>>,
-    /// Zero-copy coverage-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub coverage_rows: Arc<Vec<CoverageRow>>,
-    /// Zero-copy gap-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub gap_rows: Arc<Vec<GapRow>>,
-    /// Zero-copy symmetric-difference-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub symmetric_difference_rows: Arc<Vec<SymmetricDifferenceRow>>,
-    /// Zero-copy containment-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub containment_rows: Arc<Vec<ContainmentRow>>,
-    /// Zero-copy lead/lag-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub lead_lag_rows: Arc<Vec<LeadLagRow>>,
     /// Lead/lag summaries.
     #[serde(skip)]
     pub lead_lag_summaries: Vec<LeadLagSummary>,
-    /// Zero-copy as-of-row compatibility view. Prefer [`Self::rows`].
-    #[serde(skip)]
-    pub as_of_rows: Arc<Vec<AsOfRow>>,
     /// Authoritative row identity and finality metadata in canonical family
     /// and row order.
     #[serde(rename = "rowFinalities")]
@@ -825,12 +794,62 @@ pub struct ComparisonResult {
 }
 
 impl ComparisonResult {
+    /// Returns canonical grouped result rows without allocating row copies.
+    pub fn rows(&self) -> &ComparisonRows {
+        &self.rows
+    }
+
     pub(crate) fn canonical_rows(&self) -> &ComparisonRows {
-        self.state.rows()
+        &self.rows
     }
 
     pub(crate) fn canonical_row_finalities(&self) -> impl Iterator<Item = &ComparisonRowFinality> {
         self.state.finalities()
+    }
+
+    /// Returns overlap rows borrowed from canonical grouped storage.
+    pub fn overlap_rows(&self) -> &[OverlapRow] {
+        self.rows.overlap.as_slice()
+    }
+
+    /// Returns residual rows borrowed from canonical grouped storage.
+    pub fn residual_rows(&self) -> &[ResidualRow] {
+        self.rows.residual.as_slice()
+    }
+
+    /// Returns missing rows borrowed from canonical grouped storage.
+    pub fn missing_rows(&self) -> &[MissingRow] {
+        self.rows.missing.as_slice()
+    }
+
+    /// Returns coverage rows borrowed from canonical grouped storage.
+    pub fn coverage_rows(&self) -> &[CoverageRow] {
+        self.rows.coverage.as_slice()
+    }
+
+    /// Returns gap rows borrowed from canonical grouped storage.
+    pub fn gap_rows(&self) -> &[GapRow] {
+        self.rows.gap.as_slice()
+    }
+
+    /// Returns symmetric-difference rows borrowed from canonical grouped storage.
+    pub fn symmetric_difference_rows(&self) -> &[SymmetricDifferenceRow] {
+        self.rows.symmetric_difference.as_slice()
+    }
+
+    /// Returns containment rows borrowed from canonical grouped storage.
+    pub fn containment_rows(&self) -> &[ContainmentRow] {
+        self.rows.containment.as_slice()
+    }
+
+    /// Returns lead/lag rows borrowed from canonical grouped storage.
+    pub fn lead_lag_rows(&self) -> &[LeadLagRow] {
+        self.rows.lead_lag.as_slice()
+    }
+
+    /// Returns as-of rows borrowed from canonical grouped storage.
+    pub fn as_of_rows(&self) -> &[AsOfRow] {
+        self.rows.as_of.as_slice()
     }
 
     /// Returns overlap rows paired with their authoritative result metadata.
@@ -845,7 +864,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Overlap,
-            self.state.rows().overlap.as_slice(),
+            self.rows.overlap.as_slice(),
         )
     }
 
@@ -861,7 +880,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Residual,
-            self.state.rows().residual.as_slice(),
+            self.rows.residual.as_slice(),
         )
     }
 
@@ -877,7 +896,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Missing,
-            self.state.rows().missing.as_slice(),
+            self.rows.missing.as_slice(),
         )
     }
 
@@ -893,7 +912,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Coverage,
-            self.state.rows().coverage.as_slice(),
+            self.rows.coverage.as_slice(),
         )
     }
 
@@ -906,11 +925,7 @@ impl ComparisonResult {
         impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, GapRow>>,
         ComparisonRowMetadataError,
     > {
-        row_finality_pairs(
-            self,
-            ComparisonRowKind::Gap,
-            self.state.rows().gap.as_slice(),
-        )
+        row_finality_pairs(self, ComparisonRowKind::Gap, self.rows.gap.as_slice())
     }
 
     /// Returns symmetric-difference rows paired with their authoritative result metadata.
@@ -925,7 +940,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::SymmetricDifference,
-            self.state.rows().symmetric_difference.as_slice(),
+            self.rows.symmetric_difference.as_slice(),
         )
     }
 
@@ -941,7 +956,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::Containment,
-            self.state.rows().containment.as_slice(),
+            self.rows.containment.as_slice(),
         )
     }
 
@@ -957,7 +972,7 @@ impl ComparisonResult {
         row_finality_pairs(
             self,
             ComparisonRowKind::LeadLag,
-            self.state.rows().lead_lag.as_slice(),
+            self.rows.lead_lag.as_slice(),
         )
     }
 
@@ -970,11 +985,7 @@ impl ComparisonResult {
         impl ExactSizeIterator<Item = ComparisonRowWithFinality<'_, AsOfRow>>,
         ComparisonRowMetadataError,
     > {
-        row_finality_pairs(
-            self,
-            ComparisonRowKind::AsOf,
-            self.state.rows().as_of.as_slice(),
-        )
+        row_finality_pairs(self, ComparisonRowKind::AsOf, self.rows.as_of.as_slice())
     }
 
     fn row_family_layouts(&self) -> [(ComparisonRowKind, usize); 9] {
@@ -1049,37 +1060,12 @@ impl ComparisonResult {
             });
         }
 
-        self.validate_compatibility_projections()
-    }
-
-    fn validate_compatibility_projections(&self) -> Result<(), ComparisonRowMetadataError> {
-        let mut start = 0;
-        macro_rules! validate_rows {
-            ($(($kind:ident, $rows:ident, $compat:ident, $view:ident, $debug:literal, $count:literal),)*) => {
-                $(
-                    let canonical = &self.state.rows().$rows;
-                    if self.rows.$rows != *canonical || self.$compat != *canonical {
-                        return Err(ComparisonRowMetadataError {
-                            family: ComparisonRowKind::$kind,
-                            metadata_index: start,
-                            expected_count: canonical.len(),
-                            actual_count: self.rows.$rows.len(),
-                            expected_kind: ComparisonRowKind::$kind,
-                            actual_kind: Some("compatibility projection diverged".to_owned()),
-                        });
-                    }
-                    start += canonical.len();
-                )*
-            };
-        }
-        for_each_comparison_row_family!(validate_rows);
-
         if !self.row_finalities.iter().eq(self.state.finalities()) {
             let mismatch = self
                 .row_finalities
                 .iter()
                 .zip(self.state.finalities())
-                .position(|(compatibility, canonical)| compatibility != canonical)
+                .position(|(public, authoritative)| public != authoritative)
                 .unwrap_or(self.row_finalities.len());
             let (family, _, expected_count) = self
                 .row_family_layouts()
@@ -1097,7 +1083,7 @@ impl ComparisonResult {
                 expected_count,
                 actual_count: expected_count,
                 expected_kind: family,
-                actual_kind: Some("compatibility projection diverged".to_owned()),
+                actual_kind: Some("row finality metadata diverged".to_owned()),
             });
         }
 
