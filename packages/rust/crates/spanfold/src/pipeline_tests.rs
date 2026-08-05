@@ -480,6 +480,256 @@ fn active_rollup_child_migrates_between_parent_keys() {
 }
 
 #[test]
+fn all_active_rollup_tracks_known_inactive_children() {
+    let views = Arc::new(Mutex::new(Vec::new()));
+    let mut pipeline = {
+        let views = Arc::clone(&views);
+        for_events::<PriceTick>()
+            .record_windows()
+            .window(
+                "SelectionPriced",
+                |tick| tick.selection_id,
+                |tick| tick.price > 0.0,
+            )
+            .roll_up(
+                "MarketPriced",
+                |tick| tick.market_id,
+                move |children| {
+                    views.lock().unwrap().push(children);
+                    children.all_active()
+                },
+            )
+            .build_or_panic()
+    };
+
+    for tick in [
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.01,
+            observed_at: 100,
+        },
+        PriceTick {
+            selection_id: "selection-2",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.02,
+            observed_at: 101,
+        },
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 0.0,
+            observed_at: 102,
+        },
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.03,
+            observed_at: 103,
+        },
+    ] {
+        pipeline.ingest(tick, None, None).expect("ingest");
+    }
+
+    assert_eq!(
+        &*views.lock().unwrap(),
+        &[
+            ChildActivityView {
+                active_count: 1,
+                total_count: 1,
+            },
+            ChildActivityView {
+                active_count: 2,
+                total_count: 2,
+            },
+            ChildActivityView {
+                active_count: 1,
+                total_count: 2,
+            },
+            ChildActivityView {
+                active_count: 2,
+                total_count: 2,
+            },
+        ]
+    );
+    assert_eq!(
+        pipeline
+            .history()
+            .closed_windows()
+            .iter()
+            .filter(|window| window.window_name == "MarketPriced")
+            .count(),
+        1
+    );
+    assert_eq!(
+        pipeline
+            .history()
+            .open_windows()
+            .iter()
+            .filter(|window| window.window_name == "MarketPriced")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn all_active_rollup_counts_a_first_observed_inactive_child() {
+    let views = Arc::new(Mutex::new(Vec::new()));
+    let mut pipeline = {
+        let views = Arc::clone(&views);
+        for_events::<PriceTick>()
+            .record_windows()
+            .window(
+                "SelectionPriced",
+                |tick| tick.selection_id,
+                |tick| tick.price > 0.0,
+            )
+            .roll_up(
+                "MarketPriced",
+                |tick| tick.market_id,
+                move |children| {
+                    views.lock().unwrap().push(children);
+                    children.all_active()
+                },
+            )
+            .build_or_panic()
+    };
+
+    for tick in [
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.01,
+            observed_at: 100,
+        },
+        PriceTick {
+            selection_id: "selection-2",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 0.0,
+            observed_at: 101,
+        },
+    ] {
+        pipeline.ingest(tick, None, None).expect("ingest");
+    }
+
+    assert_eq!(
+        &*views.lock().unwrap(),
+        &[
+            ChildActivityView {
+                active_count: 1,
+                total_count: 1,
+            },
+            ChildActivityView {
+                active_count: 1,
+                total_count: 2,
+            },
+        ]
+    );
+    assert_eq!(
+        pipeline
+            .history()
+            .closed_windows()
+            .iter()
+            .filter(|window| window.window_name == "MarketPriced")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn all_active_rollup_removes_migrated_child_from_old_parent_membership() {
+    let views = Arc::new(Mutex::new(Vec::new()));
+    let mut pipeline = {
+        let views = Arc::clone(&views);
+        for_events::<PriceTick>()
+            .record_windows()
+            .window(
+                "SelectionPriced",
+                |tick| tick.selection_id,
+                |tick| tick.price > 0.0,
+            )
+            .roll_up(
+                "MarketPriced",
+                |tick| tick.market_id,
+                move |children| {
+                    views.lock().unwrap().push(children);
+                    children.all_active()
+                },
+            )
+            .build_or_panic()
+    };
+
+    for tick in [
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.01,
+            observed_at: 100,
+        },
+        PriceTick {
+            selection_id: "selection-2",
+            market_id: "market-1",
+            fixture_id: "fixture-1",
+            price: 1.02,
+            observed_at: 101,
+        },
+        PriceTick {
+            selection_id: "selection-1",
+            market_id: "market-2",
+            fixture_id: "fixture-1",
+            price: 1.03,
+            observed_at: 102,
+        },
+    ] {
+        pipeline.ingest(tick, None, None).expect("ingest");
+    }
+
+    assert_eq!(
+        &*views.lock().unwrap(),
+        &[
+            ChildActivityView {
+                active_count: 1,
+                total_count: 1,
+            },
+            ChildActivityView {
+                active_count: 2,
+                total_count: 2,
+            },
+            ChildActivityView {
+                active_count: 1,
+                total_count: 1,
+            },
+            ChildActivityView {
+                active_count: 1,
+                total_count: 1,
+            },
+        ]
+    );
+    let open_parents = pipeline
+        .history()
+        .open_windows()
+        .iter()
+        .filter(|window| window.window_name == "MarketPriced")
+        .map(|window| window.key.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(open_parents, vec!["market-1", "market-2"]);
+    assert!(
+        pipeline
+            .history()
+            .closed_windows()
+            .iter()
+            .all(|window| window.window_name != "MarketPriced")
+    );
+}
+
+#[test]
 fn active_rollup_child_migrates_parent_and_segment_lane_together() {
     let mut pipeline = for_events::<PriceTick>()
         .record_windows()

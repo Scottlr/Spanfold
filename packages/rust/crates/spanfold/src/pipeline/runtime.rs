@@ -18,6 +18,7 @@ pub(super) struct OpenState {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct ParentState {
+    pub(super) known_children: HashSet<RollupChildId>,
     pub(super) active_children: HashSet<RollupChildId>,
 }
 
@@ -85,7 +86,7 @@ impl ParentState {
     pub(super) fn view(&self) -> ChildActivityView {
         ChildActivityView {
             active_count: self.active_children.len(),
-            total_count: self.active_children.len(),
+            total_count: self.known_children.len(),
         }
     }
 }
