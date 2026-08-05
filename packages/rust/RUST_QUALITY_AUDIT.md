@@ -190,6 +190,8 @@ The grouping key is `(window, key, partition, axis)`. Timestamp records from dif
 
 **Required correction:** export typed range endpoints (axis, magnitude, clock) and use axis-neutral field names. If a compact form is retained, make the governing temporal domain mandatory and local to each row/group.
 
+**Resolution (current revision):** `WindowArtifact` now carries typed `start`, `end`, and `knownAt` points with axis and clock identity. Scalar `RowRange` endpoints remain outstanding under this finding.
+
 ### RUST-015 — P1 — Direct overlap and residual APIs compare unrelated temporal domains
 
 **Evidence:** `crates/spanfold/src/records.rs:473-523`, `1269-1297`.

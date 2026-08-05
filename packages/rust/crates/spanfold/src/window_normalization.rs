@@ -89,11 +89,6 @@ impl RawWindowRef<'_> {
         }
     }
 
-    /// Returns the scalar availability magnitude, when present.
-    pub(crate) fn known_at_position(&self) -> Option<i64> {
-        self.known_at_point().map(|point| point.magnitude())
-    }
-
     /// Returns captured segments.
     pub(crate) fn segments(&self) -> &[crate::WindowSegment] {
         match self {

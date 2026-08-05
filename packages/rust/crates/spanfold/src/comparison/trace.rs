@@ -499,7 +499,12 @@ where
         left.window
             .source
             .cmp(&right.window.source)
-            .then_with(|| left.window.start_position.cmp(&right.window.start_position))
+            .then_with(|| {
+                left.window
+                    .start
+                    .magnitude()
+                    .cmp(&right.window.start.magnitude())
+            })
             .then_with(|| left.window.record_id.cmp(&right.window.record_id))
             .then_with(|| left.reason.cmp(&right.reason))
     });
@@ -531,8 +536,11 @@ fn record_order_key(
     let Some(normalized) = normalized else {
         return (
             2,
-            record.start_position,
-            record.end_position.unwrap_or(i64::MAX),
+            record.start.magnitude(),
+            record
+                .end
+                .as_ref()
+                .map_or(i64::MAX, TemporalPoint::magnitude),
             record.source.clone().unwrap_or_default(),
             record.record_id.clone(),
         );
@@ -789,6 +797,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![target_id.as_str(), against_id.as_str()]
         );
+        let open_artifact = trace
+            .contributing_records()
+            .iter()
+            .find(|record| record.record_id == against_id)
+            .expect("open artifact");
+        assert!(open_artifact.is_open);
+        assert_eq!(open_artifact.start, TemporalPoint::position(5));
+        assert!(open_artifact.end.is_none());
     }
 
     #[test]

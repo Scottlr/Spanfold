@@ -1522,15 +1522,13 @@ pub struct WindowArtifact {
     pub source: Option<String>,
     /// Optional partition.
     pub partition: Option<String>,
-    /// Start processing position.
-    #[serde(rename = "startPosition")]
-    pub start_position: i64,
-    /// End processing position, when closed or clipped.
-    #[serde(rename = "endPosition")]
-    pub end_position: Option<i64>,
-    /// Known-at processing position, when supplied.
-    #[serde(rename = "knownAtPosition")]
-    pub known_at_position: Option<i64>,
+    /// Start temporal point.
+    pub start: crate::TemporalPoint,
+    /// End temporal point when the source window is closed.
+    pub end: Option<crate::TemporalPoint>,
+    /// Known-at temporal point, when supplied.
+    #[serde(rename = "knownAt")]
+    pub known_at: Option<crate::TemporalPoint>,
     /// Whether the source window remained open.
     #[serde(rename = "isOpen")]
     pub is_open: bool,
@@ -2493,9 +2491,9 @@ fn to_window_artifact(candidate: &RawWindowRef<'_>) -> WindowArtifact {
         key: candidate.key().to_owned(),
         source: candidate.source().map(str::to_owned),
         partition: candidate.partition().map(str::to_owned),
-        start_position: candidate.start_position(),
-        end_position: candidate.end_position(),
-        known_at_position: candidate.known_at_position(),
+        start: candidate.start_point(),
+        end: candidate.end_point(),
+        known_at: candidate.known_at_point(),
         is_open: candidate.is_open(),
         segments: candidate.segments().to_vec(),
         tags: candidate.tags().to_vec(),
@@ -2753,7 +2751,9 @@ fn aligned_segments(
 mod tests {
     #![allow(unused_must_use)]
 
-    use crate::{WindowHistoryFixture, fixture::ContractFixture};
+    use crate::{
+        ClosedWindow, TemporalRange, WindowHistoryFixture, WindowRecordId, fixture::ContractFixture,
+    };
 
     use super::*;
 
@@ -2981,6 +2981,119 @@ mod tests {
         assert!(!object.contains_key("state"));
         assert!(!object.contains_key("plan"));
         assert!(!object.contains_key("overlap_rows"));
+    }
+
+    #[test]
+    fn processing_window_artifacts_export_typed_axis_neutral_points() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("DeviceOffline", "device-1", 1, 5, |window| {
+                window.source("provider-a").known_at_position(2)
+            })
+            .expect("target")
+            .closed_window("DeviceOffline", "device-1", 3, 7, |window| {
+                window.source("provider-b")
+            })
+            .expect("against")
+            .build();
+        let plan = ComparisonPlan::new(
+            "Typed processing artifacts",
+            "provider-a",
+            AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            vec![Comparator::Overlap],
+        )
+        .with_scope_window(Some("DeviceOffline".to_owned()));
+
+        let result = compare(&history, &plan);
+        let artifacts = &result.state.prepared().expect("prepared").selected_windows;
+        assert_eq!(artifacts.len(), 2);
+        let target = artifacts
+            .iter()
+            .find(|artifact| artifact.source.as_deref() == Some("provider-a"))
+            .expect("target artifact");
+        assert_eq!(target.start, TemporalPoint::position(1));
+        assert_eq!(target.end, Some(TemporalPoint::position(5)));
+        assert_eq!(target.known_at, Some(TemporalPoint::position(2)));
+
+        let json = serde_json::to_value(target).expect("artifact json");
+        let object = json.as_object().expect("artifact object");
+        assert!(object.contains_key("start"));
+        assert!(object.contains_key("end"));
+        assert!(object.contains_key("knownAt"));
+        assert!(!object.contains_key("startPosition"));
+        assert!(!object.contains_key("endPosition"));
+        assert!(!object.contains_key("knownAtPosition"));
+        assert_eq!(object["start"]["axis"], "ProcessingPosition");
+        assert_eq!(object["start"]["magnitude"], 1);
+        assert_eq!(object["knownAt"]["magnitude"], 2);
+    }
+
+    #[test]
+    fn timestamp_window_artifacts_retain_axis_and_clock_identity() {
+        let clock = "event-clock";
+        let point = |magnitude| TemporalPoint::timestamp_ticks_with_clock(magnitude, clock);
+        let window = |id: &str, source: &str, start: i64, end: i64| ClosedWindow {
+            id: WindowRecordId::new(id).expect("record id"),
+            window_name: "DeviceOffline".to_owned(),
+            key: "device-1".to_owned(),
+            range: TemporalRange::new(point(start), point(end)).expect("range"),
+            known_at: Some(point(100)),
+            source: Some(source.to_owned()),
+            partition: None,
+            segments: Vec::new(),
+            tags: Vec::new(),
+            boundary_reason: None,
+            boundary_changes: Vec::new(),
+        };
+        let history = WindowHistory::from_records(
+            [
+                window("target", "provider-a", 10, 20),
+                window("against", "provider-b", 15, 25),
+            ],
+            [],
+        )
+        .expect("history");
+        let mut plan = ComparisonPlan::new(
+            "Typed timestamp artifacts",
+            "provider-a",
+            AgainstSelection::Sources(vec!["provider-b".to_owned()]),
+            vec![Comparator::Overlap],
+        )
+        .with_scope_window(Some("DeviceOffline".to_owned()));
+        plan.time_axis = TemporalAxis::Timestamp;
+
+        let result = compare(&history, &plan);
+        let artifacts = &result.state.prepared().expect("prepared").selected_windows;
+        assert_eq!(artifacts.len(), 2);
+        for artifact in artifacts {
+            assert_eq!(artifact.start.axis(), TemporalAxis::Timestamp);
+            assert_eq!(artifact.start.clock(), Some(clock));
+            assert_eq!(
+                artifact.end.as_ref().map(TemporalPoint::axis),
+                Some(TemporalAxis::Timestamp)
+            );
+            assert_eq!(
+                artifact.end.as_ref().and_then(TemporalPoint::clock),
+                Some(clock)
+            );
+            assert_eq!(
+                artifact.known_at.as_ref().map(TemporalPoint::axis),
+                Some(TemporalAxis::Timestamp)
+            );
+            assert_eq!(
+                artifact.known_at.as_ref().and_then(TemporalPoint::clock),
+                Some(clock)
+            );
+
+            let json = serde_json::to_value(artifact).expect("artifact json");
+            let object = json.as_object().expect("artifact object");
+            assert!(!object.contains_key("startPosition"));
+            assert!(!object.contains_key("endPosition"));
+            assert!(!object.contains_key("knownAtPosition"));
+            assert_eq!(object["start"]["axis"], "Timestamp");
+            assert_eq!(object["start"]["clock"], clock);
+            assert_eq!(object["end"]["clock"], clock);
+            assert_eq!(object["knownAt"]["clock"], clock);
+        }
     }
 
     #[test]
