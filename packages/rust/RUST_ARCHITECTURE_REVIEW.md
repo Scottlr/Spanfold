@@ -55,12 +55,12 @@ The dashed edges are the important friction: behavior and ownership leak across 
 
 ## ARCH-001 — Strong — Comparison planning and phases lack locality
 
-**Status:** Partially resolved — selector, planning, and diagnostic locality (S007)
+**Status:** Partially resolved — selector/planning locality (S007) and preparation locality (S008)
 **Category:** In-process deepening  
 **Files:**
 
 - `crates/spanfold/src/comparison.rs` (facade and remaining execution/phase implementation)
-- `crates/spanfold/src/comparison/{selector,plan,diagnostics,critic}.rs` (S007)
+- `crates/spanfold/src/comparison/{selector,plan,diagnostics,critic,prepare}.rs` (S007-S008)
 - `crates/spanfold/src/comparison/{rows,comparators,finality}.rs`
 - `crates/spanfold/src/builders.rs`
 - `crates/spanfold/src/fixture.rs`
@@ -71,8 +71,10 @@ The dashed edges are the important friction: behavior and ownership leak across 
 
 The production portion of `comparison.rs` owns multiple independent change axes. S007 has
 given selector expressions, plan configuration/validation, and plan/runtime diagnostics
-dedicated implementation modules while retaining the existing facade and public exports.
-The remaining execution and phase ownership still needs the later slices:
+dedicated implementation modules, and S008 has moved selection, scope preparation,
+normalization, exclusion, and deduplication behind `comparison/prepare.rs`, while retaining
+the existing facade and public exports. The remaining execution and phase ownership still
+needs the later slices:
 
 - Comparator declaration and parsing: lines 25-144 and 1697-1801.
 - Selector expression, matching, composition, and export: `comparison/selector.rs` (S007).
@@ -81,7 +83,7 @@ The remaining execution and phase ownership still needs the later slices:
 - Plan/runtime diagnostics: `comparison/diagnostics.rs` (S007).
 - Plan/prepared-evidence runtime criticism: `comparison/critic.rs` (S007).
 - Execution and materialization: lines 1499-1916.
-- Preparation, normalization, and deduplication: lines 1918-2255 and 2322-2582.
+- Preparation, normalization, exclusion, and deduplication: `comparison/prepare.rs` (S008).
 - Grouping and alignment: remaining in `comparison.rs` (later slice).
 
 The existing child modules are useful, but each begins with `use super::*`. Their internal interfaces remain implicit and parent-wide.
@@ -131,12 +133,13 @@ Use explicit imports between these modules. Do not expose the internal phase sea
 
 ## ARCH-002 — Strong — Result and phase artifacts have competing representations
 
-**Status:** Partially resolved — canonical result rows
+**Status:** Partially resolved — canonical result rows (R009) and typed preparation ownership (S008)
 **Category:** Canonical state  
 **Files:**
 
 - `crates/spanfold/src/comparison/rows.rs:462-608`
-- `crates/spanfold/src/comparison.rs:1543-1666,1803-1837`
+- `crates/spanfold/src/comparison.rs` (facade/execution)
+- `crates/spanfold/src/comparison/prepare.rs` (S008 typed preparation artifacts)
 - `crates/spanfold/src/export.rs:160-223,674-778`
 - `crates/spanfold/src/export/debug.rs:60-109`
 - `crates/spanfold/src/testing.rs:219-233`
@@ -157,7 +160,7 @@ R009 removes the nine flat fields. `ComparisonRows` is now the only stored
 row-family representation on the public result, and the family accessors borrow
 slices from it without allocating compatibility vectors.
 
-Typed `PreparedComparison` and `AlignedComparison` artifacts are serialized into `serde_json::Value` during execution. Export and debug code later recover information using string keys such as `selectedWindows`, `normalizedWindows`, and `segments`.
+Typed `PreparedComparison` and `AlignedComparison` artifacts are serialized into `serde_json::Value` during execution. S008 now keeps `PreparedComparison` and its selected, excluded, and normalized artifact types owned by the private preparation module while preserving the existing serialization seam. Export and debug code later recover information using string keys such as `selectedWindows`, `normalizedWindows`, and `segments`.
 
 The remaining competing representations are the typed prepared/aligned
 artifacts serialized into `serde_json::Value` and the separate manual export
