@@ -307,11 +307,11 @@ Do not replace the existing closure selectors with bespoke traits. Heterogeneous
 
 ## ARCH-005 — Strong — Records is a god file with the wrong dependency direction
 
-**Status:** Partially resolved (S011 snapshot-finality slice; S012 record split remains open)
+**Status:** Partially resolved (S011 snapshot-finality slice; S012 records module/query slice; analytics and fixture follow-ups remain open)
 **Category:** Foundational module ownership  
 **Files:**
 
-- `crates/spanfold/src/records.rs:13-1900`
+- `crates/spanfold/src/records/{mod,model,annotations,history,query,snapshot,summary,fixture}.rs`
 - `crates/spanfold/src/records_tests.rs`
 - `crates/spanfold/src/analytics.rs`
 
@@ -347,29 +347,44 @@ states into records. `records` now owns `WindowSnapshotFinality` with only
 `Final` and `Provisional`; sequences explicitly translate those two states to
 `ComparisonFinality` when producing higher-layer matches. Snapshot queries,
 summaries, and their `Final`/`Provisional` wire values are unchanged. The
-remaining records god-file split, query deduplication, and analytics boundary
-work are intentionally left for S012 and later slices.
+remaining analytics boundary and fixture ownership work were intentionally left
+for later slices.
 
-### Scalable direction
+### S012 records module/query slice
 
-Keep `records` as the public facade and split implementation ownership:
+`records` is now a public facade over private model, annotation, history,
+query, snapshot, summary, and fixture modules. The repeated filter vocabulary
+is centralized in the private `WindowQuerySpec`/`WindowQueryRecord` seam while
+borrowed query materialization retains references until its existing terminal
+cloning boundary. Record serde validation, open-index rebuilding, snapshot
+finality, sorting, and query result order remain unchanged.
+
+This slice does not move direct analytics forwarding or fixture construction out
+of records, and it does not claim the deeper dependency-direction work is
+resolved. Those follow-ups, along with any further query deduplication beyond
+the shared filter seam, remain open.
+
+### Scalable direction and remaining work
+
+Keep `records` as the public facade and retain the S012 implementation
+ownership split:
 
 ```text
 records/
   mod.rs
-  model.rs
-  serde.rs
+  model.rs        # model and serde validation
   history.rs
   annotations.rs
   snapshot.rs
   query.rs
   summary.rs
+  fixture.rs
 ```
 
 - Move direct analyses to analytics or delegate them to an appropriate shared interval implementation.
 - Move fixture construction to fixture/testing ownership.
-- Define one private query seam shared by borrowed, owned, and snapshot adapters.
-- Move generic finality terminology below comparison, or introduce a records-owned snapshot finality type.
+- Extend the private query seam only where a stable shared invariant is demonstrated.
+- Retain the records-owned `WindowSnapshotFinality` and translate it at the comparison boundary.
 - Keep records foundational: pipeline, comparison, and analytics depend on records, not the reverse.
 
 ### Benefits
