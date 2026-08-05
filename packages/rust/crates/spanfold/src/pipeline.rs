@@ -1169,7 +1169,7 @@ impl PipelineRuntime {
                 previous.parent_key != current_membership.parent_key
                     || previous.segment_context != current_membership.segment_context
             }) {
-                self.update_rollup_parent(
+                self.remove_rollup_parent(
                     definition,
                     event,
                     None,
@@ -1180,7 +1180,6 @@ impl PipelineRuntime {
                     child.membership_context,
                     child.event_point.clone(),
                     previous,
-                    false,
                     emissions,
                 )?;
             }
@@ -1200,8 +1199,27 @@ impl PipelineRuntime {
                 true,
                 emissions,
             )?;
-        } else if let Some(previous) = previous_membership {
-            self.rollup_memberships.remove(&membership_key);
+        } else {
+            if let Some(previous) = previous_membership.as_ref().filter(|previous| {
+                previous.parent_key != current_membership.parent_key
+                    || previous.segment_context != current_membership.segment_context
+            }) {
+                self.remove_rollup_parent(
+                    definition,
+                    event,
+                    None,
+                    source,
+                    partition,
+                    &rollup_lineage,
+                    child.key,
+                    child.membership_context,
+                    child.event_point.clone(),
+                    previous,
+                    emissions,
+                )?;
+            }
+            self.rollup_memberships
+                .insert(membership_key, current_membership.clone());
             self.update_rollup_parent(
                 definition,
                 event,
@@ -1212,11 +1230,86 @@ impl PipelineRuntime {
                 child.key,
                 child.membership_context,
                 child.event_point,
-                &previous,
+                &current_membership,
                 false,
                 emissions,
             )?;
         }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn remove_rollup_parent<T>(
+        &mut self,
+        definition: &RollUpDefinition<T>,
+        event: &T,
+        observations: Option<Vec<EventRollupObservation>>,
+        source: Option<&str>,
+        partition: Option<&str>,
+        rollup_lineage: &str,
+        child_key: &str,
+        child_membership_context: &str,
+        event_point: TemporalPoint,
+        membership: &RollupMembership,
+        emissions: &mut Vec<WindowEmission>,
+    ) -> Result<(), IngestionError> {
+        let parent_state_key = (
+            rollup_lineage.to_owned(),
+            membership.parent_key.clone(),
+            source.map(str::to_owned),
+            partition.map(str::to_owned),
+            membership.segment_context.clone(),
+        );
+        let is_active = {
+            let Some(parent_state) = self.parents.get_mut(&parent_state_key) else {
+                return Ok(());
+            };
+            let child_id = RollupChildId {
+                key: child_key.to_owned(),
+                membership_context: child_membership_context.to_owned(),
+            };
+            if !parent_state.known_children.remove(&child_id) {
+                return Ok(());
+            }
+            parent_state.active_children.remove(&child_id);
+            (definition.is_active)(parent_state.view())
+        };
+
+        emissions.extend(self.sync_window_state(WindowObservation {
+            state_key: (
+                definition.name.clone(),
+                membership.parent_key.clone(),
+                source.map(str::to_owned),
+                partition.map(str::to_owned),
+                membership.segment_context.clone(),
+            ),
+            window_name: definition.name.clone(),
+            key: membership.parent_key.clone(),
+            event_point: event_point.clone(),
+            source: source.map(str::to_owned),
+            partition: partition.map(str::to_owned),
+            is_active,
+            segments: membership.segments.clone(),
+            tags: membership.tags.clone(),
+        })?);
+
+        self.sync_rollups(
+            &definition.rollups,
+            event,
+            observations,
+            source,
+            partition,
+            ChildContext {
+                lineage: &definition.name,
+                key: &membership.parent_key,
+                membership_context: &membership.segment_context,
+                event_point,
+                is_active,
+                segments: &membership.segments,
+                tags: &membership.tags,
+            },
+            emissions,
+        )?;
         Ok(())
     }
 
@@ -1243,25 +1336,20 @@ impl PipelineRuntime {
             partition.map(str::to_owned),
             membership.segment_context.clone(),
         );
-        let (is_active, is_empty) = {
+        let is_active = {
             let parent_state = self.parents.entry(parent_state_key.clone()).or_default();
             let child_id = RollupChildId {
                 key: child_key.to_owned(),
                 membership_context: child_membership_context.to_owned(),
             };
+            parent_state.known_children.insert(child_id.clone());
             if child_is_active {
                 parent_state.active_children.insert(child_id);
             } else {
                 parent_state.active_children.remove(&child_id);
             }
-            (
-                (definition.is_active)(parent_state.view()),
-                parent_state.active_children.is_empty(),
-            )
+            (definition.is_active)(parent_state.view())
         };
-        if is_empty && !is_active {
-            self.parents.remove(&parent_state_key);
-        }
 
         emissions.extend(self.sync_window_state(WindowObservation {
             state_key: (
