@@ -204,16 +204,26 @@
   // Compact variant (no eyebrow/title) for use inside existing page sections.
   function FigCompact(svgContent, keyItems, svgW, svgH) {
     svgW = svgW || 700; svgH = svgH || 260;
-    // max-width caps full-width size; height:auto gives proportional scaling in narrow containers.
+    // Keep the authored SVG width available on narrow screens so axis labels do
+    // not become unreadable. The scroll region only overflows when its card is
+    // narrower than the diagram; on larger screens this remains the same
+    // full-width rendering as before.
+    var canvasW = svgW + 48; // 24px horizontal padding on each side
     return '<div style="background:' + SF.paper + ';'
       + 'background-image:radial-gradient(rgba(26,23,20,0.035) 1px,transparent 1px);'
       + 'background-size:3px 3px;border:1px solid ' + SF.rule + ';overflow:hidden;">'
-      + '<div style="padding:28px 24px 20px;">'
+      + '<div data-sf-scroll-region role="region" tabindex="0"'
+      + ' aria-label="Timeline diagram. Scroll horizontally to read the full axis and labels."'
+      + ' style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;">'
+      + '<div data-sf-diagram-canvas style="--sf-diagram-width:' + canvasW + 'px;box-sizing:border-box;padding:28px 24px 20px;">'
       + '<svg viewBox="0 0 ' + svgW + ' ' + svgH
-        + '" style="width:100%;height:auto;overflow:visible;display:block;" aria-hidden="true">'
+      + '" style="width:100%;height:auto;overflow:visible;display:block;" aria-hidden="true">'
       + DEFS + svgContent
       + '</svg>'
       + '</div>'
+      + '</div>'
+      + '<div data-sf-scroll-cue hidden style="padding:0 20px 10px;font-family:' + SF.fontUI + ';font-size:11px;line-height:1.4;color:' + SF.ink2 + ';">'
+      + '\u2194 Scroll horizontally to read the full timeline</div>'
       + (keyItems && keyItems.length ? KeyStrip(keyItems) : '')
       + '</div>';
   }
@@ -1057,6 +1067,17 @@
   };
 
   // ── Auto-render ────────────────────────────────────────────────────────
+  function updateScrollCues() {
+    var regions = document.querySelectorAll('[data-sf-scroll-region]');
+    for (var i = 0; i < regions.length; i++) {
+      var region = regions[i];
+      var cue = region.parentElement.querySelector('[data-sf-scroll-cue]');
+      if (cue) {
+        cue.hidden = region.scrollWidth <= region.clientWidth;
+      }
+    }
+  }
+
   function render() {
     var els = document.querySelectorAll('[data-fig]');
     for (var i = 0; i < els.length; i++) {
@@ -1066,7 +1087,10 @@
         el.innerHTML = figs[name]();
       }
     }
+    updateScrollCues();
   }
+
+  window.addEventListener('resize', updateScrollCues);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', render);
