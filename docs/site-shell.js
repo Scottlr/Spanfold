@@ -18,6 +18,7 @@
       title: "Guides",
       links: [
         { key: "cross-language", label: "C# ↔ Rust map", href: "cross-language-guide.html" },
+        { key: "import-history", label: "Import existing history", href: "import-existing-history.html" },
         { key: "query-history", label: "Query history", href: "concepts-querying-history.html" },
         { key: "compare-histories", label: "Compare histories", href: "concepts-comparing-histories.html" },
         { key: "live-finality", label: "Live finality", href: "concepts-live-finality.html" },
@@ -50,6 +51,7 @@
     ["concepts.html", "concepts"],
     ["use-cases.html", "use-cases"],
     ["cross-language-guide.html", "cross-language"],
+    ["import-existing-history.html", "import-history"],
     ["concepts-querying-history.html", "query-history"],
     ["concepts-comparing-histories.html", "compare-histories"],
     ["concepts-live-finality.html", "live-finality"],
