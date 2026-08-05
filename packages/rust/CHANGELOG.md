@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace the raw `PrimitiveValue::Float(f64)` payload with validated
+  `FiniteFloat`. Callers must migrate direct construction and pattern matches
+  to `PrimitiveValue::try_float`, `FiniteFloat::try_new`, and `as_f64`.
 - Add Episode formation over normalized window evidence, same-side gap
   stitching, exhaustive cross-side relation graphs, neutral summaries, and
   explicit reference scorecards.

@@ -1084,18 +1084,20 @@ fn compare_numbers(
     let right = csv_numeric(right)?;
     let ordering = match (&left, &right) {
         (PrimitiveValue::Integer(left), PrimitiveValue::Integer(right)) => left.cmp(right),
-        (PrimitiveValue::Float(left), PrimitiveValue::Float(right)) => left.partial_cmp(right)?,
+        (PrimitiveValue::Float(left), PrimitiveValue::Float(right)) => {
+            left.as_f64().partial_cmp(&right.as_f64())?
+        }
         (PrimitiveValue::Integer(left), PrimitiveValue::Float(right)) => {
             if left.unsigned_abs() > (1_u64 << 53) {
                 return None;
             }
-            (*left as f64).partial_cmp(right)?
+            (*left as f64).partial_cmp(&right.as_f64())?
         }
         (PrimitiveValue::Float(left), PrimitiveValue::Integer(right)) => {
             if right.unsigned_abs() > (1_u64 << 53) {
                 return None;
             }
-            left.partial_cmp(&(*right as f64))?
+            left.as_f64().partial_cmp(&(*right as f64))?
         }
         _ => return None,
     };
@@ -1142,7 +1144,7 @@ fn primitive_to_string(value: &serde_json::Value) -> Option<String> {
     match primitive_from_json(value).ok()? {
         PrimitiveValue::String(value) => Some(value),
         PrimitiveValue::Integer(value) => Some(value.to_string()),
-        PrimitiveValue::Float(value) => Some(value.to_string()),
+        PrimitiveValue::Float(value) => Some(value.as_f64().to_string()),
         PrimitiveValue::Bool(value) => Some(value.to_string()),
         PrimitiveValue::Null => None,
     }
