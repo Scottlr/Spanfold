@@ -34,6 +34,9 @@ pub enum WindowSequenceError {
         /// Selected open record identifier.
         record_id: WindowRecordId,
     },
+    /// A published sequence metric could not be represented as an `i64`.
+    #[error("sequence magnitude overflow")]
+    MagnitudeOverflow,
     /// A live snapshot could not be materialized.
     #[error(transparent)]
     Temporal(#[from] TemporalRangeError),
@@ -183,12 +186,7 @@ impl<'a> WindowSequenceBuilder<'a> {
             });
         }
 
-        Ok(match_evidence(
-            &self.name,
-            &self.steps,
-            self.maximum_gap,
-            evidence,
-        ))
+        match_evidence(&self.name, &self.steps, self.maximum_gap, evidence)
     }
 
     /// Matches evidence visible at an explicit processing-position horizon.
@@ -217,12 +215,7 @@ impl<'a> WindowSequenceBuilder<'a> {
             .into_iter()
             .filter(|record| selected_families.contains(record.window.window_name()))
             .collect();
-        Ok(match_evidence(
-            &self.name,
-            &self.steps,
-            self.maximum_gap,
-            evidence,
-        ))
+        match_evidence(&self.name, &self.steps, self.maximum_gap, evidence)
     }
 
     fn validate(&self) -> Result<(), WindowSequenceError> {
@@ -276,7 +269,7 @@ fn match_evidence(
     steps: &[String],
     maximum_gap: Option<i64>,
     evidence: Vec<WindowSnapshotRecord>,
-) -> Vec<WindowSequenceMatch> {
+) -> Result<Vec<WindowSequenceMatch>, WindowSequenceError> {
     let mut lanes = evidence
         .iter()
         .map(SequenceLane::from_record)
@@ -310,11 +303,18 @@ fn match_evidence(
 
             for step_candidates in &candidates {
                 let previous = selected.last().expect("first sequence step");
-                let next = step_candidates.iter().copied().find(|candidate| {
-                    !used.contains(candidate.window.id())
-                        && !selected_ids.contains(candidate.window.id())
-                        && transition_is_compatible(previous, candidate, maximum_gap)
-                });
+                let mut next = None;
+                for candidate in step_candidates {
+                    if used.contains(candidate.window.id())
+                        || selected_ids.contains(candidate.window.id())
+                    {
+                        continue;
+                    }
+                    if transition_is_compatible(previous, candidate, maximum_gap)? {
+                        next = Some(*candidate);
+                        break;
+                    }
+                }
                 let Some(next) = next else {
                     break;
                 };
@@ -324,13 +324,13 @@ fn match_evidence(
 
             if selected.len() == steps.len() {
                 used.extend(selected_ids);
-                matches.push(materialize_match(name, &lane, &selected));
+                matches.push(materialize_match(name, &lane, &selected)?);
             }
         }
     }
 
     matches.sort_by(compare_matches);
-    matches
+    Ok(matches)
 }
 
 fn compare_candidates(left: &WindowSnapshotRecord, right: &WindowSnapshotRecord) -> Ordering {
@@ -351,30 +351,35 @@ fn transition_is_compatible(
     previous: &WindowSnapshotRecord,
     candidate: &WindowSnapshotRecord,
     maximum_gap: Option<i64>,
-) -> bool {
+) -> Result<bool, WindowSequenceError> {
     let start = candidate.range.start();
     if start.magnitude() < previous.range.start().magnitude() {
-        return false;
+        return Ok(false);
     }
-    let inactive_gap = (start.magnitude() - previous.range.end().magnitude()).max(0);
-    maximum_gap.is_none_or(|maximum| inactive_gap <= maximum)
+    let inactive_gap = checked_inactive_gap(previous.range.end().magnitude(), start.magnitude())?;
+    Ok(maximum_gap.is_none_or(|maximum| inactive_gap <= maximum))
 }
 
 fn materialize_match(
     name: &str,
     lane: &SequenceLane,
     evidence: &[&WindowSnapshotRecord],
-) -> WindowSequenceMatch {
+) -> Result<WindowSequenceMatch, WindowSequenceError> {
     let start = evidence.first().expect("complete sequence").range.start();
     let end = evidence
         .iter()
         .map(|record| record.range.end())
         .max_by_key(TemporalPoint::magnitude)
         .expect("complete sequence");
-    let total_gap = evidence
-        .windows(2)
-        .map(|pair| (pair[1].range.start().magnitude() - pair[0].range.end().magnitude()).max(0))
-        .sum();
+    let total_gap = evidence.windows(2).try_fold(0i64, |total, pair| {
+        let gap = checked_inactive_gap(
+            pair[0].range.end().magnitude(),
+            pair[1].range.start().magnitude(),
+        )?;
+        total
+            .checked_add(gap)
+            .ok_or(WindowSequenceError::MagnitudeOverflow)
+    })?;
     let finality = if evidence
         .iter()
         .any(|record| record.finality == ComparisonFinality::Provisional)
@@ -384,18 +389,33 @@ fn materialize_match(
         ComparisonFinality::Final
     };
 
-    WindowSequenceMatch {
+    let end_to_end_magnitude = end
+        .magnitude()
+        .checked_sub(start.magnitude())
+        .ok_or(WindowSequenceError::MagnitudeOverflow)?;
+
+    Ok(WindowSequenceMatch {
         name: name.to_owned(),
         key: lane.key.clone(),
         source: lane.source.clone(),
         partition: lane.partition.clone(),
         evidence: evidence.iter().map(|record| (*record).clone()).collect(),
-        end_to_end_magnitude: end.magnitude() - start.magnitude(),
+        end_to_end_magnitude,
         start,
         end,
         total_gap,
         finality,
+    })
+}
+
+fn checked_inactive_gap(previous_end: i64, next_start: i64) -> Result<i64, WindowSequenceError> {
+    if next_start <= previous_end {
+        return Ok(0);
     }
+
+    next_start
+        .checked_sub(previous_end)
+        .ok_or(WindowSequenceError::MagnitudeOverflow)
 }
 
 fn compare_matches(left: &WindowSequenceMatch, right: &WindowSequenceMatch) -> Ordering {
@@ -588,5 +608,62 @@ mod tests {
             .run_live(TemporalPoint::position(5));
 
         assert_eq!(result, Err(WindowSequenceError::UnsupportedTemporalAxis));
+    }
+
+    #[test]
+    fn transition_gap_overflow_returns_typed_error() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("A", "item", i64::MIN, i64::MIN, no_metadata)
+            .unwrap()
+            .closed_window("B", "item", i64::MAX, i64::MAX, no_metadata)
+            .unwrap()
+            .build();
+
+        assert_eq!(
+            history.match_sequence("overflow").step("A").then("B").run(),
+            Err(WindowSequenceError::MagnitudeOverflow)
+        );
+    }
+
+    #[test]
+    fn total_gap_aggregation_overflow_returns_typed_error() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("A", "item", i64::MIN, i64::MIN, no_metadata)
+            .unwrap()
+            .closed_window("B", "item", -1, -1, no_metadata)
+            .unwrap()
+            .closed_window("C", "item", i64::MAX - 1, i64::MAX, no_metadata)
+            .unwrap()
+            .build();
+
+        assert_eq!(
+            history
+                .match_sequence("overflow")
+                .step("A")
+                .then("B")
+                .then("C")
+                .run(),
+            Err(WindowSequenceError::MagnitudeOverflow)
+        );
+    }
+
+    #[test]
+    fn end_to_end_magnitude_overflow_returns_typed_error() {
+        let history = WindowHistoryFixture::new()
+            .closed_window("A", "item", i64::MIN, -1, no_metadata)
+            .unwrap()
+            .closed_window("B", "item", 0, i64::MAX, no_metadata)
+            .unwrap()
+            .build();
+
+        assert_eq!(
+            history.match_sequence("overflow").step("A").then("B").run(),
+            Err(WindowSequenceError::MagnitudeOverflow)
+        );
+    }
+
+    #[test]
+    fn overlapping_extreme_endpoints_have_no_inactive_gap() {
+        assert_eq!(checked_inactive_gap(i64::MAX, i64::MIN), Ok(0));
     }
 }
