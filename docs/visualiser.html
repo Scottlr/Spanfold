@@ -27,14 +27,6 @@
   </header>
 
   <main>
-    <div class="content-header">
-      <div class="language-control">
-        <span>Code</span>
-        <div class="language-switcher" aria-label="Code language">
-          <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-        </div>
-      </div>
-    </div>
     <section class="page-hero compact">
       <p class="eyebrow">Visual Auditing</p>
       <h1>Inspect comparison results as timelines.</h1>
@@ -55,8 +47,11 @@
           boundary split the result.
         </p>
       </div>
-      <div class="language-panel" data-language="csharp">
-        <pre><code>var result = pipeline.History
+      <div>
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">using Spanfold.Artifacts;
+
+var result = pipeline.History
     .Compare("Source comparison")
     .Target("source-a", s =&gt; s.Source("source-a"))
     .Against("source-b", s =&gt; s.Source("source-b"))
@@ -65,6 +60,26 @@
     .RunLive(TemporalPoint.ForPosition(40));
 
 result.ExportDebugHtml("artifacts/source-comparison.html");</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::{ComparisonDebugHtmlOptions, TemporalPoint};
+
+let result = pipeline
+    .history()
+    .compare("Source comparison")
+    .target_source("source-a")
+    .against_source("source-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .run_live_with_debug_html(
+        TemporalPoint::position(40),
+        &amp;ComparisonDebugHtmlOptions::to_file(
+            "artifacts/source-comparison.html",
+        ),
+    )?;</code></pre>
+        </div>
       </div>
     </section>
 

@@ -27,14 +27,6 @@
   </header>
 
   <main>
-    <div class="content-header">
-      <div class="language-control">
-        <span>Code</span>
-        <div class="language-switcher" aria-label="Code language">
-          <button type="button" data-language-toggle="csharp" aria-pressed="true">C#</button>
-        </div>
-      </div>
-    </div>
     <section class="page-hero compact">
       <p class="eyebrow">Agentic Auditing</p>
       <h1>Export the full comparison context for agents.</h1>
@@ -55,8 +47,11 @@
           screenshot or prose summary.
         </p>
       </div>
-      <div class="language-panel" data-language="csharp">
-        <pre><code>var result = pipeline.History
+      <div>
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">using Spanfold.Artifacts;
+
+var result = pipeline.History
     .Compare("Provider QA")
     .Target("provider-a", s =&gt; s.Source("provider-a"))
     .Against("provider-b", s =&gt; s.Source("provider-b"))
@@ -66,6 +61,31 @@
 
 result.ExportDebugHtml("artifacts/provider-qa.html");
 result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::{
+    ComparisonDebugHtmlOptions,
+    ComparisonLlmContextOptions,
+};
+
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .missing()
+    .run_with_exports(
+        &amp;ComparisonDebugHtmlOptions::to_file(
+            "artifacts/provider-qa.html",
+        ),
+        &amp;ComparisonLlmContextOptions::to_file(
+            "artifacts/provider-qa.llm.json",
+        ),
+    )?;</code></pre>
+        </div>
       </div>
     </section>
 
@@ -99,7 +119,7 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
         </div>
         <div>
           <strong><code>rowDocuments</code></strong>
-          <span>JSON documents for streaming or chunking: the first entry is the result summary, followed by individual row records.</span>
+          <span>JSON documents for streaming or chunking: the first entry is the result summary. Later entries preserve row type, identity, and finality; Rust includes the row payload while C# emits a compact row reference back into <code>fullResult</code>.</span>
         </div>
       </div>
     </section>
@@ -110,12 +130,15 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
         <h2>An abbreviated <code>.llm.json</code> artifact.</h2>
         <p>
           Real exports include the complete <code>fullResult</code> object. This
-          excerpt keeps the shape visible without hiding the parts agents rely on.
+          language-neutral excerpt keeps the common envelope visible without
+          hiding the parts agents rely on. Markdown wording and the row-document
+          payload differ slightly by runtime. The opaque row ID below is an
+          illustrative placeholder; exporters assign the runtime-specific value.
         </p>
       </div>
 
       <div class="wide-example">
-        <pre><code>{
+        <pre><code class="language-json">{
   "schema": "spanfold.comparison.llm-context",
   "schemaVersion": 0,
   "artifact": "llm-context",
@@ -123,7 +146,7 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
   "analysisInstructions": [
     "Treat fullResult as the source of truth for exact fields, ranges, windows, segments, tags, diagnostics, summaries, and row evidence.",
     "Use resultMarkdown for a concise natural-language orientation before drilling into fullResult.",
-    "Use rowDocuments when chunking or streaming row-level analysis; rowDocuments[0] is the result summary and later entries are individual comparison rows."
+    "Preserve rowId, recordIds, window ids, temporal ranges, knownAt, evaluationHorizon, and finality metadata when citing evidence."
   ],
   "summary": {
     "planName": "Provider QA",
@@ -178,10 +201,11 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
     "rows": {
       "overlap": [
         {
-          "rowId": "overlap[0]",
+          "rowId": "&lt;opaque-runtime-row-id&gt;",
           "windowName": "DeviceOffline",
           "key": "device-17",
           "range": { "start": { "position": 4 }, "end": { "position": 5 } },
+          "finality": "Final",
           "targetRecordIds": [ "DeviceOffline|device-17|provider-a|3" ],
           "againstRecordIds": [ "DeviceOffline|device-17|provider-b|4" ]
         }
@@ -197,13 +221,9 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
       "residualRowCount": 2
     },
     {
-      "schema": "spanfold.comparison.result-row",
-      "artifact": "result-row",
       "rowType": "overlap",
-      "rowId": "overlap[0]",
-      "windowName": "DeviceOffline",
-      "key": "device-17",
-      "range": { "start": { "position": 4 }, "end": { "position": 5 } }
+      "rowId": "&lt;opaque-runtime-row-id&gt;",
+      "finality": "Final"
     }
   ]
 }</code></pre>
@@ -217,11 +237,16 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
         <p>
           Export after comparison execution when runtime configuration decides
           to write an artifact. Use the CLI when a fixture should become an agent-readable
-          report without writing a custom host application.
+          report without writing a custom host application. Library exporters
+          publish their files atomically; shell redirection writes directly to
+          the destination and does not provide that guarantee.
         </p>
       </div>
       <div>
-        <pre><code>var result = pipeline.History
+        <div class="language-panel" data-language="csharp">
+          <pre><code class="language-csharp">using Spanfold.Artifacts;
+
+var result = pipeline.History
     .Compare("Provider QA")
     .Target("provider-a", s =&gt; s.Source("provider-a"))
     .Against("provider-b", s =&gt; s.Source("provider-b"))
@@ -230,8 +255,34 @@ result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
     .Run();
 
 result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
-        <pre class="stacked-code"><code>dotnet run --project src/Spanfold.Cli/Spanfold.Cli.csproj -- \
-  compare fixture.json --format llm-context</code></pre>
+          <pre class="stacked-code"><code class="language-bash"># From a repository checkout until the .NET packages are published:
+mkdir -p artifacts
+dotnet run --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj -- \
+  compare fixture.json --format llm-context \
+  &gt; artifacts/provider-qa.llm.json</code></pre>
+        </div>
+        <div class="language-panel" data-language="rust">
+          <pre><code class="language-rust">use spanfold::ComparisonLlmContextOptions;
+
+let result = pipeline
+    .history()
+    .compare("Provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope_window("DeviceOffline")
+    .overlap()
+    .residual()
+    .run_with_llm_context(
+        &amp;ComparisonLlmContextOptions::to_file(
+            "artifacts/provider-qa.llm.json",
+        ),
+    )?;</code></pre>
+          <pre class="stacked-code"><code class="language-bash">cargo add spanfold@0.1.1
+cargo install spanfold-cli --version 0.1.1
+mkdir -p artifacts
+spanfold compare fixture.json --format llm-context \
+  &gt; artifacts/provider-qa.llm.json</code></pre>
+        </div>
       </div>
     </section>
   </main>
