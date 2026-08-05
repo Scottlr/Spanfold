@@ -354,43 +354,130 @@ struct WindowPayload<'a> {
     boundary_changes: &'a [WindowBoundaryChange],
 }
 
-fn validate_window_payload(payload: WindowPayload<'_>) -> Result<(), &'static str> {
-    if payload.window_name.trim().is_empty() {
-        return Err("window name cannot be empty");
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum WindowPayloadValidationError {
+    EmptyWindowName,
+    EmptyWindowKey,
+    EmptySource,
+    EmptyPartition,
+    DuplicateSegmentName {
+        name: String,
+    },
+    InvalidSegmentParent {
+        segment_name: String,
+        parent_name: String,
+    },
+    DuplicateTagName {
+        name: String,
+    },
+}
+
+impl std::fmt::Display for WindowPayloadValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyWindowName => formatter.write_str("window name cannot be empty"),
+            Self::EmptyWindowKey => formatter.write_str("window key cannot be empty"),
+            Self::EmptySource => formatter.write_str("source cannot be empty"),
+            Self::EmptyPartition => formatter.write_str("partition cannot be empty"),
+            Self::DuplicateSegmentName { .. } => {
+                formatter.write_str("segment names must be unique within a window")
+            }
+            Self::InvalidSegmentParent { .. } => {
+                formatter.write_str("segment parent must precede and reference a captured segment")
+            }
+            Self::DuplicateTagName { .. } => {
+                formatter.write_str("tag names must be unique within a window")
+            }
+        }
     }
-    if payload.key.trim().is_empty() {
-        return Err("window key cannot be empty");
+}
+
+pub(crate) fn validate_window_metadata(
+    window_name: &str,
+    key: &str,
+    source: Option<&str>,
+    partition: Option<&str>,
+    segments: &[WindowSegment],
+    tags: &[WindowTag],
+) -> Result<(), WindowPayloadValidationError> {
+    if window_name.trim().is_empty() {
+        return Err(WindowPayloadValidationError::EmptyWindowName);
     }
-    if payload.source.is_some_and(|value| value.trim().is_empty()) {
-        return Err("source cannot be empty");
+    if key.trim().is_empty() {
+        return Err(WindowPayloadValidationError::EmptyWindowKey);
     }
-    if payload
-        .partition
-        .is_some_and(|value| value.trim().is_empty())
-    {
-        return Err("partition cannot be empty");
+    if source.is_some_and(|value| value.trim().is_empty()) {
+        return Err(WindowPayloadValidationError::EmptySource);
     }
-    if let Some(known_at) = payload.known_at
-        && !payload.start.is_compatible_with(known_at)
-    {
-        return Err("known-at point must share the window temporal domain");
+    if partition.is_some_and(|value| value.trim().is_empty()) {
+        return Err(WindowPayloadValidationError::EmptyPartition);
     }
+    validate_window_segments(segments)?;
+    validate_window_tags(tags)
+}
+
+pub(crate) fn validate_window_segments(
+    segments: &[WindowSegment],
+) -> Result<(), WindowPayloadValidationError> {
     let mut segment_names = BTreeSet::new();
-    for segment in payload.segments {
+    for segment in segments {
         if !segment_names.insert(segment.name.as_str()) {
-            return Err("segment names must be unique within a window");
+            return Err(WindowPayloadValidationError::DuplicateSegmentName {
+                name: segment.name.clone(),
+            });
         }
         if let Some(parent) = segment.parent_name.as_deref()
             && !segment_names.contains(parent)
         {
-            return Err("segment parent must precede and reference a captured segment");
+            return Err(WindowPayloadValidationError::InvalidSegmentParent {
+                segment_name: segment.name.clone(),
+                parent_name: parent.to_owned(),
+            });
         }
     }
+    Ok(())
+}
+
+pub(crate) fn validate_window_tags(tags: &[WindowTag]) -> Result<(), WindowPayloadValidationError> {
     let mut tag_names = BTreeSet::new();
-    for tag in payload.tags {
+    for tag in tags {
         if !tag_names.insert(tag.name.as_str()) {
-            return Err("tag names must be unique within a window");
+            return Err(WindowPayloadValidationError::DuplicateTagName {
+                name: tag.name.clone(),
+            });
         }
+    }
+    Ok(())
+}
+
+fn validate_window_payload(payload: WindowPayload<'_>) -> Result<(), &'static str> {
+    validate_window_metadata(
+        payload.window_name,
+        payload.key,
+        payload.source,
+        payload.partition,
+        payload.segments,
+        payload.tags,
+    )
+    .map_err(|error| match error {
+        WindowPayloadValidationError::EmptyWindowName => "window name cannot be empty",
+        WindowPayloadValidationError::EmptyWindowKey => "window key cannot be empty",
+        WindowPayloadValidationError::EmptySource => "source cannot be empty",
+        WindowPayloadValidationError::EmptyPartition => "partition cannot be empty",
+        WindowPayloadValidationError::DuplicateSegmentName { .. } => {
+            "segment names must be unique within a window"
+        }
+        WindowPayloadValidationError::InvalidSegmentParent { .. } => {
+            "segment parent must precede and reference a captured segment"
+        }
+        WindowPayloadValidationError::DuplicateTagName { .. } => {
+            "tag names must be unique within a window"
+        }
+    })?;
+    if let Some(known_at) = payload.known_at
+        && !payload.start.is_compatible_with(known_at)
+    {
+        return Err("known-at point must share the window temporal domain");
     }
     if payload
         .boundary_changes

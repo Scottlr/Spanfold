@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::rollup::{ParentState, RollupMembership, RollupMembershipKey};
-use crate::{TemporalPoint, WindowHistory, WindowRecordId, WindowSegment, WindowTag};
+use crate::{TemporalPoint, WindowRecorder, WindowSegment, WindowTag};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct RuntimeStateKey {
@@ -10,16 +10,6 @@ pub(super) struct RuntimeStateKey {
     pub(super) source: Option<String>,
     pub(super) partition: Option<String>,
     pub(super) segment_context: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct OpenState {
-    pub(super) id: WindowRecordId,
-    pub(super) start: TemporalPoint,
-    pub(super) source: Option<String>,
-    pub(super) partition: Option<String>,
-    pub(super) segments: Vec<WindowSegment>,
-    pub(super) tags: Vec<WindowTag>,
 }
 
 #[derive(Clone)]
@@ -63,6 +53,7 @@ pub(super) enum SourceWindowLifecycle {
 }
 
 pub(super) struct EventRollupObservation {
+    pub(super) key: String,
     pub(super) segments: Vec<WindowSegment>,
     pub(super) segment_context: String,
     pub(super) rollups: Vec<EventRollupObservation>,
@@ -70,12 +61,9 @@ pub(super) struct EventRollupObservation {
 
 pub(super) struct PipelineRuntime {
     pub(super) observation_buffer: Vec<EventWindowObservation>,
-    pub(super) record_windows: bool,
-    pub(super) history: WindowHistory,
-    pub(super) active: HashMap<RuntimeStateKey, OpenState>,
+    pub(super) recorder: WindowRecorder,
     pub(super) pending_confirmations: HashMap<RuntimeStateKey, usize>,
     pub(super) parents: HashMap<RuntimeStateKey, ParentState>,
     pub(super) rollup_memberships: HashMap<RollupMembershipKey, RollupMembership>,
     pub(super) position: i64,
-    pub(super) next_record_id: u64,
 }
