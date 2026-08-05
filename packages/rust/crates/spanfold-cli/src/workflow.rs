@@ -179,17 +179,20 @@ fn parse_comparators(values: &[String]) -> Result<Vec<Comparator>, String> {
 }
 
 pub(super) fn import_events(path: &Path, map_path: &Path) -> Result<Vec<ImportedWindow>, CliError> {
-    let import_map = read_import_map(map_path)?;
+    let operation = ImportOperation::AuditEvents;
+    let import_map =
+        read_import_map(map_path).map_err(|error| error.relabel_operation(operation))?;
     let input = import_map.input();
     let mut windows = Vec::new();
     match input {
         "jsonl" => import_events_jsonl(path, &import_map, &mut windows),
         "csv" => import_events_csv(path, &import_map, &mut windows),
         _ => Err(ImportError::Input(format!(
-            "unsupported event input format: {input}"
+            "import-events: unsupported event input format: {input}"
         ))),
     }
-    .map_err(CliError::from)?;
+    .map_err(CliError::from)
+    .map_err(|error| error.relabel_operation(operation))?;
     Ok(windows)
 }
 
@@ -198,19 +201,140 @@ pub(super) fn import_events_to_file(
     map_path: &Path,
     output: &Path,
 ) -> Result<(), CliError> {
-    let import_map = read_import_map(map_path)?;
+    let operation = ImportOperation::ImportEvents;
+    validate_import_paths(path, map_path, output)?;
+    let import_map =
+        read_import_map(map_path).map_err(|error| error.relabel_operation(operation))?;
     let input = import_map.input();
-    let file = fs::File::create(output).map_err(CliError::io)?;
-    let mut sink = JsonlWindowSink { writer: file };
-    match input {
-        "jsonl" => import_events_jsonl(path, &import_map, &mut sink),
-        "csv" => import_events_csv(path, &import_map, &mut sink),
-        _ => Err(ImportError::Input(format!(
-            "unsupported event input format: {input}"
+    if !matches!(input, "jsonl" | "csv") {
+        return Err(CliError::input(format!(
+            "import-events: unsupported event input format: {input}"
+        )));
+    }
+
+    let (temporary, file) = create_import_stage(output)?;
+    let result = (|| {
+        let mut sink = JsonlWindowSink {
+            writer: file,
+            output: output.to_owned(),
+        };
+        match input {
+            "jsonl" => import_events_jsonl(path, &import_map, &mut sink),
+            "csv" => import_events_csv(path, &import_map, &mut sink),
+            _ => unreachable!("the input format was validated above"),
+        }
+        .map_err(CliError::from)?;
+        sink.finish().map_err(CliError::from)?;
+        publish_import_stage(&temporary, output).map_err(|error| {
+            CliError::io(format!(
+                "import-events: publish output '{}': {error}",
+                output.display()
+            ))
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn validate_import_paths(events: &Path, map: &Path, output: &Path) -> Result<(), CliError> {
+    if output.is_dir() {
+        return Err(CliError::io(format!(
+            "import-events: output path '{}' is a directory",
+            output.display()
+        )));
+    }
+
+    let paths = [
+        ("events", events, resolve_import_path("events", events)?),
+        ("map", map, resolve_import_path("map", map)?),
+        ("output", output, resolve_import_path("output", output)?),
+    ];
+    for (index, (left_label, left_path, left_resolved)) in paths.iter().enumerate() {
+        for (right_label, right_path, right_resolved) in paths.iter().skip(index + 1) {
+            if left_resolved == right_resolved {
+                return Err(CliError::input(format!(
+                    "import-events: {left_label} path '{}' resolves to the same path as {right_label} path '{}'; canonical path aliases must be distinct (hard-linked files are supported by staged publication)",
+                    left_path.display(),
+                    right_path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_import_path(label: &str, path: &Path) -> Result<PathBuf, CliError> {
+    match fs::canonicalize(path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let parent = fs::canonicalize(parent).map_err(|error| {
+                CliError::io(format!(
+                    "import-events: resolve {label} path '{}': {error}",
+                    path.display()
+                ))
+            })?;
+            let file_name = path.file_name().ok_or_else(|| {
+                CliError::io(format!(
+                    "import-events: resolve {label} path '{}': path has no file name",
+                    path.display()
+                ))
+            })?;
+            Ok(parent.join(file_name))
+        }
+        Err(error) => Err(CliError::io(format!(
+            "import-events: resolve {label} path '{}': {error}",
+            path.display()
         ))),
     }
-    .map_err(CliError::from)
 }
+
+fn create_import_stage(output: &Path) -> Result<(PathBuf, fs::File), CliError> {
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("windows.jsonl");
+    for _ in 0..100 {
+        let temporary = output.with_file_name(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            IMPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(CliError::io(format!(
+                    "import-events: create staging output '{}': {error}",
+                    temporary.display()
+                )));
+            }
+        }
+    }
+    Err(CliError::io(format!(
+        "import-events: create staging output beside '{}' failed after repeated name collisions",
+        output.display()
+    )))
+}
+
+fn publish_import_stage(temporary: &Path, output: &Path) -> Result<(), std::io::Error> {
+    // The staged file is a sibling, so rename is an atomic directory-entry
+    // replacement on Unix. If replacement fails, the existing destination is
+    // untouched. Windows reports an error when the destination already exists;
+    // that leaves the existing destination intact and is surfaced to the CLI.
+    fs::rename(temporary, output)
+}
+
+static IMPORT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 enum ImportError {
     Input(String),
@@ -223,7 +347,7 @@ impl ImportError {
     }
 
     fn csv(context: &str, error: csv::Error) -> Self {
-        let message = format!("{context}: {error}");
+        let message = format!("import-events: {context}: {error}");
         if error.is_io_error() {
             Self::Io(message)
         } else {
@@ -234,7 +358,11 @@ impl ImportError {
 
 impl From<String> for ImportError {
     fn from(message: String) -> Self {
-        Self::Input(message)
+        if message.starts_with("import-events:") {
+            Self::Input(message)
+        } else {
+            Self::Input(format!("import-events: {message}"))
+        }
     }
 }
 
@@ -260,12 +388,36 @@ impl ImportedWindowSink for Vec<ImportedWindow> {
 
 struct JsonlWindowSink<W> {
     writer: W,
+    output: PathBuf,
 }
 
 impl<W: Write> ImportedWindowSink for JsonlWindowSink<W> {
     fn push(&mut self, window: ImportedWindow) -> Result<(), ImportError> {
         let line = serde_json::to_string(&window).map_err(|error| error.to_string())?;
-        writeln!(self.writer, "{line}").map_err(ImportError::io)
+        writeln!(self.writer, "{line}").map_err(|error| {
+            ImportError::io(format!(
+                "import-events: write output '{}': {error}",
+                self.output.display()
+            ))
+        })
+    }
+}
+
+impl JsonlWindowSink<fs::File> {
+    fn finish(mut self) -> Result<(), ImportError> {
+        self.writer.flush().map_err(|error| {
+            ImportError::io(format!(
+                "import-events: flush output '{}': {error}",
+                self.output.display()
+            ))
+        })?;
+        self.writer.sync_all().map_err(|error| {
+            ImportError::io(format!(
+                "import-events: sync output '{}': {error}",
+                self.output.display()
+            ))
+        })?;
+        Ok(())
     }
 }
 
@@ -275,18 +427,31 @@ fn import_events_jsonl(
     sink: &mut impl ImportedWindowSink,
 ) -> Result<(), ImportError> {
     let path_label = path.display().to_string();
-    let file = fs::File::open(path).map_err(ImportError::io)?;
+    let file = fs::File::open(path).map_err(|error| {
+        ImportError::io(format!(
+            "import-events: read events '{path_label}': {error}"
+        ))
+    })?;
     let reader = BufReader::new(file);
     let mut active: BTreeMap<ImportStateKey, ImportState> = BTreeMap::new();
     let mut last_position: Option<i64> = None;
 
     for (index, line) in reader.lines().enumerate() {
-        let line = line.map_err(ImportError::io)?;
+        let line = line.map_err(|error| {
+            ImportError::io(format!(
+                "import-events: read event record '{path_label}':{}: {error}",
+                index + 1
+            ))
+        })?;
         if line.trim().is_empty() {
             continue;
         }
-        let event: serde_json::Value = serde_json::from_str(&line)
-            .map_err(|error| format!("{path_label}:{}: {error}", index + 1))?;
+        let event: serde_json::Value = serde_json::from_str(&line).map_err(|error| {
+            format!(
+                "import-events: parse event record '{path_label}':{}: {error}",
+                index + 1
+            )
+        })?;
         process_import_event(
             &event,
             import_map,
@@ -327,12 +492,18 @@ fn import_events_csv(
         })
         .collect::<Vec<_>>();
     if headers.is_empty() {
-        return Err(format!("{path_label}:1: CSV header must contain at least one column").into());
+        return Err(format!(
+            "import-events: parse CSV header '{path_label}:1': CSV header must contain at least one column"
+        )
+        .into());
     }
     let mut header_names = std::collections::BTreeSet::new();
     for header in &headers {
         if header.trim().is_empty() || !header_names.insert(header.as_str()) {
-            return Err(format!("{path_label}:1: CSV headers must be non-empty and unique").into());
+            return Err(format!(
+                "import-events: parse CSV header '{path_label}:1': CSV headers must be non-empty and unique"
+            )
+            .into());
         }
     }
 
@@ -384,10 +555,11 @@ fn process_import_event(
         .transpose()?;
 
     for window in &import_map.windows {
-        let key_selector = window
-            .key
-            .as_ref()
-            .ok_or_else(|| ImportError::Input("$.windows[].key or $.key is required".to_owned()))?;
+        let key_selector = window.key.as_ref().ok_or_else(|| {
+            ImportError::Input(format!(
+                "import-events: {path}:{line_number}: $.windows[].key or $.key is required"
+            ))
+        })?;
         let key = select_string(event, key_selector, path, line_number)?;
         let state_key = ImportStateKey {
             window_name: window.name.clone(),
@@ -495,10 +667,17 @@ pub(super) fn compare_imported_windows(
 
 fn read_import_map(path: &Path) -> Result<CompiledImportMap, CliError> {
     let path_label = path.display().to_string();
-    let json = fs::read_to_string(path).map_err(CliError::io)?;
+    let json = fs::read_to_string(path).map_err(|error| {
+        CliError::io(format!(
+            "import-events: read import map '{path_label}': {error}"
+        ))
+    })?;
     let import_map: EventImportMap = serde_json::from_str(&json)
-        .map_err(|error| CliError::from(format!("{path_label}: {error}")))?;
-    import_map.compile(&path_label).map_err(CliError::from)
+        .map_err(|error| format!("import-events: parse import map '{path_label}': {error}"))?;
+    import_map
+        .compile(&path_label)
+        .map_err(|error| format!("import-events: compile import map '{path_label}': {error}"))
+        .map_err(CliError::from)
 }
 
 impl EventImportMap {

@@ -173,6 +173,107 @@ fn import_events_writes_window_jsonl() {
 }
 
 #[test]
+fn import_events_writes_new_relative_output_in_current_directory() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    write_event_import_files(&events, &map);
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .current_dir(workspace.path())
+        .args([
+            "import-events",
+            "events.jsonl",
+            "--map",
+            "map.json",
+            "--out",
+            "windows.jsonl",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        fs::read_to_string(workspace.path().join("windows.jsonl"))
+            .expect("windows output")
+            .contains("\"windowName\":\"DeviceOffline\"")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn import_events_replaces_existing_output_and_cleans_staging_files() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    write_event_import_files(&events, &map);
+    fs::write(&out, "stale output\n").expect("existing output");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .success();
+
+    let output = fs::read_to_string(&out).expect("windows output");
+    assert!(output.contains("\"windowName\":\"DeviceOffline\""));
+    assert!(!output.contains("stale output"));
+    let leftovers = fs::read_dir(workspace.path())
+        .expect("workspace entries")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .filter_map(|name| name.to_str().map(str::to_owned))
+        .filter(|name| {
+            name.contains(".windows.jsonl.") && (name.ends_with(".tmp") || name.ends_with(".bak"))
+        })
+        .collect::<Vec<_>>();
+    assert!(leftovers.is_empty(), "staging files remain: {leftovers:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn import_events_allows_hard_linked_output_without_mutating_events() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    write_event_import_files(&events, &map);
+    fs::hard_link(&events, &out).expect("hard link output to events");
+    let existing_events = fs::read_to_string(&events).expect("events file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&events).expect("unchanged events"),
+        existing_events
+    );
+    assert!(
+        fs::read_to_string(&out)
+            .expect("windows output")
+            .contains("\"windowName\":\"DeviceOffline\"")
+    );
+}
+
+#[test]
 fn import_events_updates_tags_without_reopening_unchanged_segments() {
     let workspace = tempdir().expect("tempdir");
     let events = workspace.path().join("events.jsonl");
@@ -284,6 +385,133 @@ fn import_events_reports_malformed_json_as_input_error() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("\"code\":\"input\""));
+}
+
+#[test]
+fn import_events_late_failure_preserves_existing_output() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("windows.jsonl");
+    write_event_import_files(&events, &map);
+    let valid_events = fs::read_to_string(&events).expect("events file");
+    fs::write(&events, format!("{valid_events}\n{{not json}}\n")).expect("events file");
+    fs::write(&out, "existing output\n").expect("existing output");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("\"code\":\"input\""))
+        .stderr(predicate::str::contains(
+            "import-events: parse event record",
+        ))
+        .stderr(predicate::str::contains("events.jsonl"))
+        .stderr(predicate::str::contains(":5:"));
+
+    assert_eq!(
+        fs::read_to_string(&out).expect("preserved output"),
+        "existing output\n"
+    );
+}
+
+#[test]
+fn import_events_rejects_output_aliasing_events_without_truncation() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    write_event_import_files(&events, &map);
+    let existing_events = fs::read_to_string(&events).expect("events file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            events.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("\"code\":\"input\""))
+        .stderr(predicate::str::contains("aliases"))
+        .stderr(predicate::str::contains("events.jsonl"));
+
+    assert_eq!(
+        fs::read_to_string(&events).expect("preserved events"),
+        existing_events
+    );
+}
+
+#[test]
+fn import_events_rejects_output_aliasing_map_without_truncation() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = map.clone();
+    write_event_import_files(&events, &map);
+    let existing_map = fs::read_to_string(&map).expect("map file");
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "import-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("\"code\":\"input\""))
+        .stderr(predicate::str::contains("aliases"))
+        .stderr(predicate::str::contains("map.json"));
+
+    assert_eq!(
+        fs::read_to_string(&map).expect("preserved map"),
+        existing_map
+    );
+}
+
+#[test]
+fn audit_events_reports_import_failures_with_audit_operation() {
+    let workspace = tempdir().expect("tempdir");
+    let events = workspace.path().join("missing-events.jsonl");
+    let map = workspace.path().join("map.json");
+    let out = workspace.path().join("audit");
+    write_event_import_map(&map);
+
+    Command::cargo_bin("spanfold")
+        .expect("binary")
+        .args([
+            "audit-events",
+            events.to_str().expect("utf8 events path"),
+            "--map",
+            map.to_str().expect("utf8 map path"),
+            "--target",
+            "provider-a",
+            "--against",
+            "provider-b",
+            "--out",
+            out.to_str().expect("utf8 output path"),
+        ])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("\"code\":\"io\""))
+        .stderr(predicate::str::contains("audit-events: read events"))
+        .stderr(predicate::str::contains("missing-events.jsonl"))
+        .stderr(predicate::str::contains("import-events:").not());
 }
 
 #[test]

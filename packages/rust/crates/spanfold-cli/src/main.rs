@@ -12,10 +12,11 @@ use spanfold::{
 };
 use std::{
     collections::BTreeMap,
-    fs,
+    fs::{self, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::ExitCode,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 mod workflow;
@@ -201,7 +202,29 @@ struct CliError {
     message: String,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ImportOperation {
+    ImportEvents,
+    AuditEvents,
+}
+
+impl ImportOperation {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::ImportEvents => "import-events",
+            Self::AuditEvents => "audit-events",
+        }
+    }
+}
+
 impl CliError {
+    fn input(error: impl std::fmt::Display) -> Self {
+        Self {
+            kind: CliErrorKind::Input,
+            message: error.to_string(),
+        }
+    }
+
     fn io(error: impl std::fmt::Display) -> Self {
         Self {
             kind: CliErrorKind::Io,
@@ -214,6 +237,13 @@ impl CliError {
             kind: CliErrorKind::Export,
             message: error.to_string(),
         }
+    }
+
+    fn relabel_operation(mut self, operation: ImportOperation) -> Self {
+        if let Some(suffix) = self.message.strip_prefix("import-events") {
+            self.message = format!("{}{suffix}", operation.label());
+        }
+        self
     }
 }
 
