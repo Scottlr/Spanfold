@@ -17,12 +17,42 @@ pub enum TemporalAxis {
 ///
 /// Timestamp points are comparable only when their clock identities match.
 /// Processing positions have no clock identity.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TemporalPoint {
     axis: TemporalAxis,
     magnitude: i64,
     clock: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for TemporalPoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawTemporalPoint {
+            axis: TemporalAxis,
+            magnitude: i64,
+            clock: Option<String>,
+        }
+
+        let raw = RawTemporalPoint::deserialize(deserializer)?;
+        match raw.axis {
+            TemporalAxis::ProcessingPosition => {
+                if raw.clock.is_some() {
+                    return Err(serde::de::Error::custom(
+                        "processing-position temporal points cannot carry a clock",
+                    ));
+                }
+                Ok(Self::position(raw.magnitude))
+            }
+            TemporalAxis::Timestamp => Ok(match raw.clock {
+                Some(clock) => Self::timestamp_ticks_with_clock(raw.magnitude, clock),
+                None => Self::timestamp_ticks(raw.magnitude),
+            }),
+        }
+    }
 }
 
 impl TemporalPoint {
@@ -274,6 +304,45 @@ mod tests {
         assert_eq!(point.axis(), TemporalAxis::Timestamp);
         assert_eq!(point.magnitude(), 10);
         assert_eq!(point.clock(), Some("provider"));
+    }
+
+    #[test]
+    fn temporal_points_round_trip_through_serde() {
+        for point in [
+            TemporalPoint::position(10),
+            TemporalPoint::timestamp_ticks(20),
+            TemporalPoint::timestamp_ticks_with_clock(30, "provider"),
+        ] {
+            let encoded = serde_json::to_string(&point).expect("serialize temporal point");
+            let decoded: TemporalPoint =
+                serde_json::from_str(&encoded).expect("deserialize temporal point");
+
+            assert_eq!(decoded, point);
+        }
+    }
+
+    #[test]
+    fn processing_positions_reject_deserialized_clocks() {
+        let error = serde_json::from_str::<TemporalPoint>(
+            r#"{"axis":"ProcessingPosition","magnitude":10,"clock":"provider"}"#,
+        )
+        .expect_err("processing positions cannot carry clocks");
+
+        assert!(
+            error
+                .to_string()
+                .contains("processing-position temporal points cannot carry a clock")
+        );
+    }
+
+    #[test]
+    fn temporal_points_retain_unknown_field_rejection() {
+        let error = serde_json::from_str::<TemporalPoint>(
+            r#"{"axis":"ProcessingPosition","magnitude":10,"clock":null,"unexpected":true}"#,
+        )
+        .expect_err("unknown temporal point fields should be rejected");
+
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]
