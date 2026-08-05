@@ -146,7 +146,25 @@
     if (toggle) {
       toggle.setAttribute("aria-controls", "site-navigation");
     }
+
+    updateScrollableCode();
   }
+
+  function updateScrollableCode() {
+    document.querySelectorAll("pre").forEach((block) => {
+      const isScrollable = block.scrollWidth > block.clientWidth + 1;
+      block.toggleAttribute("data-scrollable", isScrollable);
+      if (isScrollable) {
+        block.setAttribute("aria-label", "Code sample. Scroll horizontally to read the full line.");
+        block.setAttribute("tabindex", "0");
+      } else {
+        block.removeAttribute("aria-label");
+        block.removeAttribute("tabindex");
+      }
+    });
+  }
+
+  window.addEventListener("resize", updateScrollableCode);
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", installPageShell);

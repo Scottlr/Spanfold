@@ -276,8 +276,22 @@ h3 {
 .bar.target { background: var(--accent-slate); }
 .bar.against { background: var(--accent-forest); }
 .bar.overlap { background: var(--accent-forest); }
-.bar.residual { background: var(--accent-rust); }
-.bar.missing { background: var(--accent-amber); }
+.bar.residual,
+.swatch.residual {
+  background-color: var(--accent-rust);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ink) 42%, transparent) 0 2px,
+    transparent 2px 6px);
+}
+.bar.missing,
+.swatch.missing {
+  background-color: var(--accent-amber);
+  background-image: repeating-linear-gradient(
+    0deg,
+    color-mix(in srgb, var(--ink) 42%, transparent) 0 2px,
+    transparent 2px 6px);
+}
 .bar.gap { background: var(--ink-faint); }
 .bar.open {
   border-style: dashed;
@@ -326,6 +340,7 @@ h3 {
 .swatch {
   width: 12px;
   height: 12px;
+  border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
   border-radius: 3px;
 }
 
@@ -595,8 +610,8 @@ tr:last-child td { border-bottom: 0; }
     <span class="legend-item"><span class="swatch" style="background:var(--accent-slate)"></span>Target window</span>
     <span class="legend-item"><span class="swatch" style="background:var(--accent-forest)"></span>Comparison window</span>
     <span class="legend-item"><span class="swatch" style="background:var(--accent-forest)"></span>Overlap</span>
-    <span class="legend-item"><span class="swatch" style="background:var(--accent-rust)"></span>Target only</span>
-    <span class="legend-item"><span class="swatch" style="background:var(--accent-amber)"></span>Comparison only</span>
+    <span class="legend-item"><span class="swatch residual"></span>Target only</span>
+    <span class="legend-item"><span class="swatch missing"></span>Comparison only</span>
     <span class="legend-item"><span class="swatch" style="background:var(--ink-faint)"></span>Gap</span>
   </div>
   <div class="table-wrap" style="margin-top:18px">

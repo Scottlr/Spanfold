@@ -73,7 +73,7 @@ a {
   align-items: stretch;
   justify-content: flex-start;
   width: var(--sidebar-width);
-  padding: 24px 0;
+  padding: 18px 0;
   overflow-y: auto;
   border-right: 1px solid var(--rule);
   background: var(--bg-panel);
@@ -100,8 +100,8 @@ a {
   display: flex;
   flex-direction: column;
   width: 100%;
-  margin-top: 18px;
-  gap: 16px;
+  margin-top: 12px;
+  gap: 3px;
   color: var(--ink-muted);
   font-size: 14px;
 }
@@ -128,8 +128,8 @@ a {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 34px;
-  padding: 7px 18px;
+  min-height: 30px;
+  padding: 4px 18px;
   border-left: 3px solid transparent;
   border-radius: 0;
   color: var(--ink-muted);
@@ -252,6 +252,8 @@ main,
 
 .language-panel {
   display: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
 body[data-language="csharp"] .language-panel[data-language="csharp"],
@@ -270,6 +272,8 @@ body[data-language="rust"] .language-panel[data-language="rust"] {
 .api-reference-layout {
   width: min(1120px, calc(100% - 44px));
   margin: 0 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .page-hero {
@@ -599,7 +603,26 @@ li,
 }
 
 .diagram-card {
+  min-width: 0;
+  max-width: 100%;
   padding: 20px;
+}
+
+.diagram-panel,
+.visualiser-frame {
+  min-width: 0;
+  max-width: 100%;
+}
+
+[data-fig] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+[data-sf-diagram-canvas] {
+  width: 100%;
 }
 
 .card-grid {
@@ -1332,6 +1355,17 @@ li,
   align-items: start;
 }
 
+.two-col > *,
+.code-strip > *,
+.code-grid > *,
+.language-panel > *,
+.diagram-card > *,
+.diagram-panel > *,
+.visualiser-frame > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .summary-list {
   display: grid;
   gap: 10px;
@@ -1453,7 +1487,7 @@ li,
 
 .code-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.45fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -1485,9 +1519,13 @@ li,
 }
 
 pre {
+  position: relative;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   margin: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   border-radius: 8px;
   background: var(--code-bg);
   color: var(--code-fg);
@@ -1500,8 +1538,16 @@ code {
 
 pre code {
   display: block;
+  width: max-content;
+  min-width: 100%;
   padding: 18px;
   line-height: 1.55;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.language-panel pre code {
+  word-break: normal;
 }
 
 pre .comment,
@@ -1920,6 +1966,43 @@ pre .hljs-comment {
 }
 
 @media (max-width: 760px) {
+  [data-sf-diagram-canvas] {
+    width: var(--sf-diagram-width);
+    min-width: var(--sf-diagram-width);
+  }
+
+  pre[data-scrollable]::before,
+  pre[data-scrollable]::after {
+    position: absolute;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  pre[data-scrollable]::before {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 42px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--code-bg) 0%, transparent), var(--code-bg));
+    content: "";
+  }
+
+  pre[data-scrollable]::after {
+    top: 8px;
+    right: 8px;
+    padding: 2px 5px;
+    border: 1px solid color-mix(in srgb, var(--code-fg) 34%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--code-bg) 88%, white);
+    color: var(--code-fg);
+    content: "↔ scroll";
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
   .journey-switch {
     display: flex;
     width: 100%;

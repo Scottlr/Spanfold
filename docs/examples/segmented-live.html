@@ -276,8 +276,22 @@ h3 {
 .bar.target { background: var(--accent-slate); }
 .bar.against { background: var(--accent-forest); }
 .bar.overlap { background: var(--accent-forest); }
-.bar.residual { background: var(--accent-rust); }
-.bar.missing { background: var(--accent-amber); }
+.bar.residual,
+.swatch.residual {
+  background-color: var(--accent-rust);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ink) 42%, transparent) 0 2px,
+    transparent 2px 6px);
+}
+.bar.missing,
+.swatch.missing {
+  background-color: var(--accent-amber);
+  background-image: repeating-linear-gradient(
+    0deg,
+    color-mix(in srgb, var(--ink) 42%, transparent) 0 2px,
+    transparent 2px 6px);
+}
 .bar.gap { background: var(--ink-faint); }
 .bar.open {
   border-style: dashed;
@@ -326,6 +340,7 @@ h3 {
 .swatch {
   width: 12px;
   height: 12px;
+  border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
   border-radius: 3px;
 }
 
@@ -359,13 +374,14 @@ h3 {
   height: 22px;
   min-width: 4px;
   overflow: hidden;
-  padding: 2px 8px;
+  padding: 2px 4px;
   border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
   border-radius: 0;
   color: var(--ink);
   font-size: 12px;
   font-weight: 700;
   line-height: 18px;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
   box-shadow: none;
@@ -377,6 +393,79 @@ h3 {
 .band-segment.c3 { background: color-mix(in srgb, var(--accent-rust) 20%, var(--bg-card)); }
 .band-segment.c4 { background: var(--bg-panel); }
 .band-segment.c5 { background: color-mix(in srgb, var(--ink-faint) 24%, var(--bg-card)); }
+
+.band-segment.phase-warmup,
+.band-key-swatch.phase-warmup {
+  background-color: color-mix(in srgb, var(--accent-forest) 22%, var(--bg-card));
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ink) 34%, transparent) 0 2px,
+    transparent 2px 6px);
+}
+
+.band-segment.phase-active,
+.band-key-swatch.phase-active {
+  background-color: color-mix(in srgb, var(--accent-forest) 22%, var(--bg-card));
+  background-image: none;
+}
+
+.band-segment.period-p1,
+.band-key-swatch.period-p1 {
+  background-color: var(--bg-panel);
+  background-image: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ink) 30%, transparent) 0 2px,
+    transparent 2px 6px);
+}
+
+.band-segment.period-p2,
+.band-key-swatch.period-p2 {
+  background-color: color-mix(in srgb, var(--ink-faint) 24%, var(--bg-card));
+  background-image: none;
+}
+
+.band-segment.period-p3,
+.band-key-swatch.period-p3 {
+  background-color: color-mix(in srgb, var(--accent-slate) 24%, var(--bg-card));
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ink) 28%, transparent) 0 2px,
+    transparent 2px 6px);
+}
+
+.band-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 12px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.band-key-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.band-key-title {
+  color: var(--ink);
+  font-weight: 720;
+}
+
+.band-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.band-key-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid color-mix(in srgb, var(--ink) 28%, transparent);
+  border-radius: 2px;
+}
 
 .table-wrap {
   overflow-x: auto;
@@ -560,31 +649,44 @@ tr:last-child td { border-bottom: 0; }
     <div class="band-lane">
       <div class="band-title">phase<span class="lane-meta">StageBacklog / key job-42</span></div>
       <div class="band-track">
-        <div class="band-segment c1" style="left:0%;width:4.762%" title="phase=Warmup / StageBacklog / key job-42 / [pos 3, pos 4) Closed">Warmup</div>
-        <div class="band-segment c1" style="left:4.762%;width:4.762%" title="phase=Warmup / StageBacklog / key job-42 / [pos 4, pos 5) Closed">Warmup</div>
-        <div class="band-segment c1" style="left:9.524%;width:9.524%" title="phase=Active / StageBacklog / key job-42 / [pos 5, pos 7) Closed">Active</div>
-        <div class="band-segment c1" style="left:9.524%;width:4.762%" title="phase=Warmup / StageBacklog / key job-42 / [pos 5, pos 6) Closed">Warmup</div>
-        <div class="band-segment c1" style="left:19.048%;width:4.762%" title="phase=Active / StageBacklog / key job-42 / [pos 7, pos 8) Closed">Active</div>
-        <div class="band-segment c1" style="left:23.81%;width:4.762%" title="phase=Active / StageBacklog / key job-42 / [pos 8, pos 9) Closed">Active</div>
-        <div class="band-segment c1" style="left:28.571%;width:71.429%" title="phase=Active / StageBacklog / key job-42 / [pos 9, pos 24) Closed">Active</div>
+        <div class="band-segment c1 phase-warmup" style="left:0%;width:4.762%" title="phase=Warmup / StageBacklog / key job-42 / [pos 3, pos 4) Closed">W</div>
+        <div class="band-segment c1 phase-warmup" style="left:4.762%;width:4.762%" title="phase=Warmup / StageBacklog / key job-42 / [pos 4, pos 5) Closed">W</div>
+        <div class="band-segment c1 phase-active" style="left:9.524%;width:9.524%" title="phase=Active / StageBacklog / key job-42 / [pos 5, pos 7) Closed">A</div>
+        <div class="band-segment c1 phase-warmup" style="left:9.524%;width:4.762%" title="phase=Warmup / StageBacklog / key job-42 / [pos 5, pos 6) Closed">W</div>
+        <div class="band-segment c1 phase-active" style="left:19.048%;width:4.762%" title="phase=Active / StageBacklog / key job-42 / [pos 7, pos 8) Closed">A</div>
+        <div class="band-segment c1 phase-active" style="left:23.81%;width:4.762%" title="phase=Active / StageBacklog / key job-42 / [pos 8, pos 9) Closed">A</div>
+        <div class="band-segment c1 phase-active" style="left:28.571%;width:71.429%" title="phase=Active / StageBacklog / key job-42 / [pos 9, pos 24) Closed">A</div>
       </div>
     </div>
     <div class="band-lane">
       <div class="band-title">period<span class="lane-meta">StageBacklog / key job-42 / parent phase</span></div>
       <div class="band-track">
-        <div class="band-segment c4" style="left:0%;width:4.762%" title="period=P1 / StageBacklog / key job-42 / parent phase / [pos 3, pos 4) Closed">P1</div>
-        <div class="band-segment c4" style="left:4.762%;width:4.762%" title="period=P1 / StageBacklog / key job-42 / parent phase / [pos 4, pos 5) Closed">P1</div>
-        <div class="band-segment c5" style="left:9.524%;width:9.524%" title="period=P2 / StageBacklog / key job-42 / parent phase / [pos 5, pos 7) Closed">P2</div>
-        <div class="band-segment c4" style="left:9.524%;width:4.762%" title="period=P1 / StageBacklog / key job-42 / parent phase / [pos 5, pos 6) Closed">P1</div>
-        <div class="band-segment c5" style="left:19.048%;width:4.762%" title="period=P2 / StageBacklog / key job-42 / parent phase / [pos 7, pos 8) Closed">P2</div>
-        <div class="band-segment c5" style="left:23.81%;width:4.762%" title="period=P2 / StageBacklog / key job-42 / parent phase / [pos 8, pos 9) Closed">P2</div>
-        <div class="band-segment c0" style="left:28.571%;width:71.429%" title="period=P3 / StageBacklog / key job-42 / parent phase / [pos 9, pos 24) Closed">P3</div>
+        <div class="band-segment c4 period-p1" style="left:0%;width:4.762%" title="period=P1 / StageBacklog / key job-42 / parent phase / [pos 3, pos 4) Closed">P1</div>
+        <div class="band-segment c4 period-p1" style="left:4.762%;width:4.762%" title="period=P1 / StageBacklog / key job-42 / parent phase / [pos 4, pos 5) Closed">P1</div>
+        <div class="band-segment c5 period-p2" style="left:9.524%;width:9.524%" title="period=P2 / StageBacklog / key job-42 / parent phase / [pos 5, pos 7) Closed">P2</div>
+        <div class="band-segment c4 period-p1" style="left:9.524%;width:4.762%" title="period=P1 / StageBacklog / key job-42 / parent phase / [pos 5, pos 6) Closed">P1</div>
+        <div class="band-segment c5 period-p2" style="left:19.048%;width:4.762%" title="period=P2 / StageBacklog / key job-42 / parent phase / [pos 7, pos 8) Closed">P2</div>
+        <div class="band-segment c5 period-p2" style="left:23.81%;width:4.762%" title="period=P2 / StageBacklog / key job-42 / parent phase / [pos 8, pos 9) Closed">P2</div>
+        <div class="band-segment c0 period-p3" style="left:28.571%;width:71.429%" title="period=P3 / StageBacklog / key job-42 / parent phase / [pos 9, pos 24) Closed">P3</div>
       </div>
     </div>
       </div>
   <div class="axis">
     <span>pos 3</span><span>pos 24</span>
   </div>
+    </div>
+  </div>
+  <div class="band-key" aria-label="Segment context key">
+    <div class="band-key-group">
+      <span class="band-key-title">phase</span>
+      <span class="band-key-item"><span class="band-key-swatch phase-warmup"></span>W = Warmup</span>
+      <span class="band-key-item"><span class="band-key-swatch phase-active"></span>A = Active</span>
+    </div>
+    <div class="band-key-group">
+      <span class="band-key-title">period</span>
+      <span class="band-key-item"><span class="band-key-swatch period-p1"></span>P1</span>
+      <span class="band-key-item"><span class="band-key-swatch period-p2"></span>P2</span>
+      <span class="band-key-item"><span class="band-key-swatch period-p3"></span>P3</span>
     </div>
   </div>
 </section>
@@ -634,8 +736,8 @@ tr:last-child td { border-bottom: 0; }
     <span class="legend-item"><span class="swatch" style="background:var(--accent-slate)"></span>Target window</span>
     <span class="legend-item"><span class="swatch" style="background:var(--accent-forest)"></span>Comparison window</span>
     <span class="legend-item"><span class="swatch" style="background:var(--accent-forest)"></span>Overlap</span>
-    <span class="legend-item"><span class="swatch" style="background:var(--accent-rust)"></span>Target only</span>
-    <span class="legend-item"><span class="swatch" style="background:var(--accent-amber)"></span>Comparison only</span>
+    <span class="legend-item"><span class="swatch residual"></span>Target only</span>
+    <span class="legend-item"><span class="swatch missing"></span>Comparison only</span>
     <span class="legend-item"><span class="swatch" style="background:var(--ink-faint)"></span>Gap</span>
   </div>
   <div class="table-wrap" style="margin-top:18px">
