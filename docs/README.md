@@ -6,7 +6,10 @@ scripts and styles rather than a generated framework.
 
 Public discovery starts at [the site overview](index.html). The
 [machine-readable documentation index](llms.txt) lists the main guides, language
-journeys, API references, and package entry points.
+journeys, API references, and package entry points. The
+[C# and Rust portability guide](cross-language-guide.html) is the canonical
+task-by-task map between the two public APIs and their current package and CLI
+boundaries.
 
 ## Adding a page
 

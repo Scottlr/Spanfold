@@ -308,6 +308,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [Get started](docs/get-started.html)
 - [Get started with C#](docs/get-started-csharp.html)
 - [Get started with Rust](docs/get-started-rust.html)
+- [C# and Rust portability guide](docs/cross-language-guide.html)
 - [Use cases](docs/use-cases.html)
 - [Visual Auditing](docs/visualiser.html)
 - [API reference](docs/api.html)
