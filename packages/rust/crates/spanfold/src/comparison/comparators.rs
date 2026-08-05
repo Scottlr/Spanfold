@@ -1,5 +1,11 @@
 //! Comparator-family row derivation and transition matching.
 
+use std::cmp::Ordering;
+
+use super::align::{
+    AlignedComparison, AlignedSegmentArtifact, GroupKey, GroupWindows, TransitionPoint,
+    row_point_from_temporal_point,
+};
 use super::*;
 
 pub(super) fn build_overlap_rows(aligned: &AlignedComparison) -> Vec<OverlapRow> {
