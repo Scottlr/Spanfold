@@ -17,6 +17,7 @@ const SCHEMA_VERSION: u32 = 1;
 
 /// One named source participating in a portable Episode analysis.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EpisodeAnalysisSource {
     name: String,
     source: String,
@@ -296,7 +297,7 @@ pub enum EpisodeAnalysisDocumentError {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct RawEpisodeAnalysisDocument {
     schema: String,
     schema_version: u32,
@@ -896,6 +897,51 @@ mod tests {
             error.to_string(),
             "$.liveHorizon must be a non-negative integer or null"
         );
+    }
+
+    #[test]
+    fn document_rejects_unknown_top_level_fields() {
+        let error = EpisodeAnalysisDocument::parse_json(
+            r#"{
+                "schema":"spanfold.episode.analysis",
+                "schemaVersion":1,
+                "name":"comparison",
+                "target":{"name":"provider","source":"provider-a"},
+                "against":{"name":"detector","source":"detector-b"},
+                "windowName":"Offline",
+                "normalizationAxis":"processingPosition",
+                "stitchTolerance":0,
+                "relationTolerance":0,
+                "liveHorizn":5
+            }"#,
+        )
+        .expect_err("unknown top-level field");
+
+        assert!(matches!(error, EpisodeAnalysisDocumentError::Json(_)));
+    }
+
+    #[test]
+    fn document_rejects_unknown_source_fields() {
+        let error = EpisodeAnalysisDocument::parse_json(
+            r#"{
+                "schema":"spanfold.episode.analysis",
+                "schemaVersion":1,
+                "name":"comparison",
+                "target":{
+                    "name":"provider",
+                    "source":"provider-a",
+                    "liveHorizon":5
+                },
+                "against":{"name":"detector","source":"detector-b"},
+                "windowName":"Offline",
+                "normalizationAxis":"processingPosition",
+                "stitchTolerance":0,
+                "relationTolerance":0
+            }"#,
+        )
+        .expect_err("unknown source field");
+
+        assert!(matches!(error, EpisodeAnalysisDocumentError::Json(_)));
     }
 
     #[test]
