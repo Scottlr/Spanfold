@@ -13,9 +13,11 @@ use crate::{
 };
 
 mod definitions;
+mod rollup;
 mod runtime;
 
 use definitions::*;
+use rollup::*;
 use runtime::*;
 
 type SegmentTransform =
@@ -924,13 +926,13 @@ impl PipelineRuntime {
         observations.clear();
         for definition in &definitions.windows {
             let key = (definition.key)(event);
-            let state_key = (
-                definition.name.clone(),
-                key.clone(),
-                source.map(str::to_owned),
-                partition.map(str::to_owned),
-                String::new(),
-            );
+            let state_key = RuntimeStateKey {
+                window_name: definition.name.clone(),
+                key: key.clone(),
+                source: source.map(str::to_owned),
+                partition: partition.map(str::to_owned),
+                segment_context: String::new(),
+            };
             let was_active = self.active.contains_key(&state_key);
             let predicate_matches = if was_active {
                 definition.exit_when.as_ref().map_or_else(
@@ -1149,13 +1151,13 @@ impl PipelineRuntime {
         };
         let parent_key = (definition.key)(event);
         let rollup_lineage = format!("{}>{}", child.lineage, definition.name);
-        let membership_key = (
-            rollup_lineage.clone(),
-            child.key.to_owned(),
-            source.map(str::to_owned),
-            partition.map(str::to_owned),
-            child.membership_context.to_owned(),
-        );
+        let membership_key = RollupMembershipKey {
+            lineage: rollup_lineage.clone(),
+            child_key: child.key.to_owned(),
+            source: source.map(str::to_owned),
+            partition: partition.map(str::to_owned),
+            membership_context: child.membership_context.to_owned(),
+        };
         let current_membership = RollupMembership {
             parent_key,
             segment_context,
@@ -1253,13 +1255,13 @@ impl PipelineRuntime {
         membership: &RollupMembership,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
-        let parent_state_key = (
-            rollup_lineage.to_owned(),
-            membership.parent_key.clone(),
-            source.map(str::to_owned),
-            partition.map(str::to_owned),
-            membership.segment_context.clone(),
-        );
+        let parent_state_key = RuntimeStateKey {
+            window_name: rollup_lineage.to_owned(),
+            key: membership.parent_key.clone(),
+            source: source.map(str::to_owned),
+            partition: partition.map(str::to_owned),
+            segment_context: membership.segment_context.clone(),
+        };
         let is_active = {
             let Some(parent_state) = self.parents.get_mut(&parent_state_key) else {
                 return Ok(());
@@ -1268,21 +1270,20 @@ impl PipelineRuntime {
                 key: child_key.to_owned(),
                 membership_context: child_membership_context.to_owned(),
             };
-            if !parent_state.known_children.remove(&child_id) {
+            let Some(view) = parent_state.remove_child(&child_id) else {
                 return Ok(());
-            }
-            parent_state.active_children.remove(&child_id);
-            (definition.is_active)(parent_state.view())
+            };
+            (definition.is_active)(view)
         };
 
         emissions.extend(self.sync_window_state(WindowObservation {
-            state_key: (
-                definition.name.clone(),
-                membership.parent_key.clone(),
-                source.map(str::to_owned),
-                partition.map(str::to_owned),
-                membership.segment_context.clone(),
-            ),
+            state_key: RuntimeStateKey {
+                window_name: definition.name.clone(),
+                key: membership.parent_key.clone(),
+                source: source.map(str::to_owned),
+                partition: partition.map(str::to_owned),
+                segment_context: membership.segment_context.clone(),
+            },
             window_name: definition.name.clone(),
             key: membership.parent_key.clone(),
             event_point: event_point.clone(),
@@ -1329,36 +1330,31 @@ impl PipelineRuntime {
         child_is_active: bool,
         emissions: &mut Vec<WindowEmission>,
     ) -> Result<(), IngestionError> {
-        let parent_state_key = (
-            rollup_lineage.to_owned(),
-            membership.parent_key.clone(),
-            source.map(str::to_owned),
-            partition.map(str::to_owned),
-            membership.segment_context.clone(),
-        );
+        let parent_state_key = RuntimeStateKey {
+            window_name: rollup_lineage.to_owned(),
+            key: membership.parent_key.clone(),
+            source: source.map(str::to_owned),
+            partition: partition.map(str::to_owned),
+            segment_context: membership.segment_context.clone(),
+        };
         let is_active = {
             let parent_state = self.parents.entry(parent_state_key.clone()).or_default();
             let child_id = RollupChildId {
                 key: child_key.to_owned(),
                 membership_context: child_membership_context.to_owned(),
             };
-            parent_state.known_children.insert(child_id.clone());
-            if child_is_active {
-                parent_state.active_children.insert(child_id);
-            } else {
-                parent_state.active_children.remove(&child_id);
-            }
-            (definition.is_active)(parent_state.view())
+            let view = parent_state.set_child_activity(child_id, child_is_active);
+            (definition.is_active)(view)
         };
 
         emissions.extend(self.sync_window_state(WindowObservation {
-            state_key: (
-                definition.name.clone(),
-                membership.parent_key.clone(),
-                source.map(str::to_owned),
-                partition.map(str::to_owned),
-                membership.segment_context.clone(),
-            ),
+            state_key: RuntimeStateKey {
+                window_name: definition.name.clone(),
+                key: membership.parent_key.clone(),
+                source: source.map(str::to_owned),
+                partition: partition.map(str::to_owned),
+                segment_context: membership.segment_context.clone(),
+            },
             window_name: definition.name.clone(),
             key: membership.parent_key.clone(),
             event_point: event_point.clone(),
@@ -1497,8 +1493,8 @@ impl PipelineRuntime {
         self.active.remove(state_key);
         let emission = WindowEmission {
             kind: WindowTransitionKind::Closed,
-            window_name: state_key.0.clone(),
-            key: state_key.1.clone(),
+            window_name: state_key.window_name.clone(),
+            key: state_key.key.clone(),
             record_id: open_state.id.clone(),
             position: self.position,
             source: open_state.source.clone(),
@@ -1512,8 +1508,8 @@ impl PipelineRuntime {
             self.history.remove_open(&open_state.id);
             self.history.push_closed(ClosedWindow {
                 id: open_state.id,
-                window_name: state_key.0.clone(),
-                key: state_key.1.clone(),
+                window_name: state_key.window_name.clone(),
+                key: state_key.key.clone(),
                 range,
                 known_at: None,
                 source: open_state.source,
