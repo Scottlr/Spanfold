@@ -12,11 +12,9 @@ use spanfold::{
 };
 use std::{
     collections::BTreeMap,
-    fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    fs,
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 mod workflow;
