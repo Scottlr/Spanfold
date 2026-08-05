@@ -416,7 +416,7 @@ foreach (var released in advance.Released)
         <h2>Portable model, deliberately different operational helpers.</h2>
       </div>
       <div class="comparison-list">
-        <article><h3>Both runtimes</h3><p>Ordered synchronous ingestion, lane-aware windows, consecutive stabilization, event-time recording, processing-position history, live snapshots, provisional finality, comparison changelogs, materialized history import, and explicit liveness tracking.</p></article>
+        <article><h3>Both runtimes</h3><p>Ordered synchronous ingestion, lane-aware windows, consecutive stabilization, event-time recording, processing-position history, live snapshots, provisional finality, comparison changelogs, materialized history adoption, and explicit liveness tracking. The <a href="import-existing-history.html">adoption guide</a> explains the current language-specific import boundaries.</p></article>
         <article><h3>.NET only</h3><p><code>BoundedWatermarkTracker</code>, <code>WindowHistory.TrimClosedBefore(...)</code>, and <code>EventPipeline.TrimInactiveState()</code>. These are current repository source APIs and may be ahead of the published NuGet package.</p></article>
         <article><h3>Caller in both runtimes</h3><p>Queue consumption, delivery guarantees, input deduplication, lane discovery, timers, checkpointing, durable persistence, distributed completeness, correction policy, replay scheduling, and atomic publication.</p></article>
       </div>

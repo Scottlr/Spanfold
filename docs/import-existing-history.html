@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Adopt Spanfold when interval or window history is already materialized, with source-backed C# and Rust import, query, snapshot, comparison, and ownership guidance.">
+  <title>Import existing history - Spanfold</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="csharp">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <p class="eyebrow">Adopt existing history</p>
+      <h1>Analyze the windows you already have.</h1>
+      <p class="lead">
+        If your system already materializes intervals, you do not need to replay
+        raw events through a Spanfold pipeline. Map those intervals into a
+        <code>WindowHistory</code>, then use the same query, snapshot, and
+        comparison APIs as pipeline-recorded history.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="#paired-example">Import provider windows</a>
+        <a class="button secondary" href="#ownership">Check ownership boundaries</a>
+      </div>
+    </section>
+
+    <section class="doc-section" id="choose-path">
+      <div class="section-heading">
+        <p class="eyebrow">Choose the boundary</p>
+        <h2>Library adoption and CLI workflows solve different integration problems.</h2>
+        <p>
+          Use the library when your application already owns loading and mapping.
+          Use fixture or flat-window files when a portable command-line workflow
+          is the better boundary. Neither route makes Spanfold your database.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Application library</h3><p>Load records from your store, map them to the runtime's history contract, keep the history in memory, and call query or comparison APIs directly.</p></article>
+        <article><h3>Contract fixture</h3><p>Use the versioned <code>spanfold.contract-fixture</code> JSON envelope when windows and a comparison plan should travel together for examples or regression contracts.</p></article>
+        <article><h3>Flat window JSONL</h3><p>Use <code>spanfold audit-windows</code> when each line is already one processing-position window and you want comparison artifacts without application code.</p></article>
+        <article><h3>Raw event import</h3><p>Rust's <code>import-events</code> and <code>audit-events</code> map event JSONL or CSV into windows. They are event-reconstruction tools, not the route for data that is already materialized.</p></article>
+      </div>
+      <p class="language-note">
+        Contract fixture and flat-window formats are tool contracts, not a
+        promised persistence schema for <code>WindowHistory</code>. The Rust CLI
+        owns event-map import; the .NET CLI does not provide an equivalent event-map route.
+      </p>
+    </section>
+
+    <section class="doc-section" id="record-model">
+      <div class="section-heading">
+        <p class="eyebrow">Map the evidence</p>
+        <h2>Preserve the identity and temporal domain that make an interval meaningful.</h2>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Concern</th><th>C# / .NET</th><th>Rust</th></tr></thead>
+        <tbody>
+          <tr><td>Record shape</td><td>Public <code>ClosedWindow</code> and <code>OpenWindow</code> constructors.</td><td><code>ClosedWindow</code> and <code>OpenWindow</code> are public but <code>#[non_exhaustive]</code> and have no public constructors.</td></tr>
+          <tr><td>Record identity</td><td><code>WindowRecord.Id</code> is derived deterministically from the record data; it is not supplied by the importer or a distributed global ID.</td><td>Each record carries an explicit non-blank <code>WindowRecordId</code>.</td></tr>
+          <tr><td>Range</td><td>Every record has non-negative processing positions. Optional <code>DateTimeOffset</code> bounds and a timestamp clock add an event-time view.</td><td>A closed record owns one half-open <code>TemporalRange</code>; an open record owns one <code>TemporalPoint</code>. The chosen axis is processing position or opaque timestamp ticks.</td></tr>
+          <tr><td>Lane and scope</td><td><code>WindowName</code>, object <code>Key</code>, optional object <code>Source</code>, and optional object <code>Partition</code>.</td><td>Non-blank string <code>window_name</code> and <code>key</code>, plus optional non-blank string <code>source</code> and <code>partition</code>.</td></tr>
+          <tr><td>Availability</td><td>Imported records do not carry a separate known-at field. A processing-position known-at comparison excludes records that start later and clips records still active at the horizon; annotations may carry their own <code>KnownAt</code>.</td><td>Records can carry an explicit <code>known_at</code> point in the same temporal domain. When absent, closed records default to their end for known-at comparison; an open record defaults to its start.</td></tr>
+          <tr><td>Context</td><td><code>WindowSegment</code> and <code>WindowTag</code> accept object values. Segments are analytical boundaries; tags are descriptive metadata.</td><td>Segments and tags use JSON-compatible <code>PrimitiveValue</code>s. Names must be unique within a record; a parent segment must appear before the child that names it.</td></tr>
+          <tr><td>Close evidence</td><td>Closed records may preserve a boundary reason and segment boundary changes.</td><td>Closed records expose the equivalent optional boundary reason and boundary-change list.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Both temporal ranges are half-open: start is included and end is excluded.
+        C# creates points with <code>TemporalPoint.ForPosition(...)</code> or
+        <code>ForTimestamp(...)</code>, then ranges with
+        <code>TemporalRange.Closed(...)</code> or <code>Open(...)</code>. Rust uses
+        <code>TemporalPoint::position(...)</code>,
+        <code>timestamp_ticks(...)</code>, or
+        <code>timestamp_ticks_with_clock(...)</code>, and validates closed ranges
+        through <code>TemporalRange::new(...)</code> or <code>positions(...)</code>.
+      </p>
+    </section>
+
+    <section class="doc-section" id="import-contracts">
+      <div class="section-heading">
+        <p class="eyebrow">Current source contract</p>
+        <h2>The two library import surfaces are not symmetrical.</h2>
+      </div>
+      <div class="code-grid">
+        <article class="language-panel" data-language="csharp">
+          <h3>C# · public construction and import</h3>
+          <pre><code class="language-csharp">public static WindowHistory FromRecords(
+    IEnumerable&lt;ClosedWindow&gt; closedWindows,
+    IEnumerable&lt;OpenWindow&gt; openWindows)</code></pre>
+          <p>
+            Both sequences are required. Record constructors validate their own
+            window identity, key, position, timestamp, and clock fields. Import
+            copies closed records and indexes open records by window name, key,
+            source, partition, and segment context; a duplicate open key fails
+            when that index is built.
+          </p>
+        </article>
+        <article class="language-panel" data-language="rust">
+          <h3>Rust · public function, restricted record construction</h3>
+          <pre><code class="language-rust">pub fn from_records(
+    closed: impl IntoIterator&lt;Item = ClosedWindow&gt;,
+    open: impl IntoIterator&lt;Item = OpenWindow&gt;,
+) -&gt; Result&lt;WindowHistory, WindowHistoryImportError&gt;</code></pre>
+          <p>
+            The function rebuilds the open-record index and returns
+            <code>DuplicateOpenRecordId</code> for a repeated open ID. However,
+            external crates cannot construct the non-exhaustive record structs
+            with literals, and no public constructors currently bridge that gap.
+          </p>
+        </article>
+      </div>
+      <div class="comparison-list">
+        <article><h3>C# validation</h3><p>Window names cannot be blank, keys cannot be null, positions cannot be negative, ends cannot precede starts, end timestamps require start timestamps, and timestamp clocks cannot be blank or exist without a start timestamp. <code>WindowSegment</code>, <code>WindowTag</code>, and <code>WindowBoundaryChange</code> metadata is not checked for blank or duplicate names, parent consistency, or equivalent domain rules; validate those fields in your adapter.</p></article>
+        <article><h3>Rust validated deserialization</h3><p><code>serde_json::from_str::&lt;WindowHistory&gt;(...)</code> applies strict unknown-field and domain validation to the history and window-record payloads, including ranges, identity fields, known-at domains, segment/tag metadata, and duplicate open record IDs. Annotation structs are less strict: they do not deny unknown fields or apply the same name and temporal-domain validation. <code>WindowHistory::annotate</code> only appends and assigns a revision; even when using it, validate annotation names, targets, and known-at domains in your adapter.</p></article>
+        <article><h3>What import does not validate</h3><p><code>FromRecords</code>/<code>from_records</code> is not a global deduplication or business-consistency pass. Closed-record duplication and overlap remain questions for your mapping policy or later analysis.</p></article>
+        <article><h3>Annotations start separately</h3><p>Both record-import functions create a history with no annotations. Add append-only annotations after import; importing records does not infer them from tags or replace the original window.</p></article>
+      </div>
+      <p class="language-note">
+        Until Rust exposes public record constructors or another typed adoption
+        boundary, use validated <code>WindowHistory</code> deserialization for
+        exact externally materialized records, or use
+        <code>WindowHistoryFixture</code>/<code>ContractFixture</code> for
+        processing-position fixture data. Do not copy private struct construction
+        from crate tests into application code.
+      </p>
+    </section>
+
+    <section class="doc-section" id="paired-example">
+      <div class="section-heading">
+        <p class="eyebrow">Paired provider example</p>
+        <h2>Import equivalent closed windows, inspect one lane, then compare both.</h2>
+        <p>
+          Both examples represent provider A active over <code>[10, 20)</code> and
+          provider B over <code>[12, 22)</code> for the same device and partition.
+          They preserve one segment and one tag, query provider A, snapshot at
+          position 25, and produce overlap, residual, and missing rows.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article class="language-panel" data-language="csharp">
+          <h3>C# · construct records directly</h3>
+          <pre><code class="language-csharp">using Spanfold;
+using Spanfold.Comparison;
+
+var providerARange = TemporalRange.Closed(
+    TemporalPoint.ForPosition(10),
+    TemporalPoint.ForPosition(20));
+var providerBRange = TemporalRange.Closed(
+    TemporalPoint.ForPosition(12),
+    TemporalPoint.ForPosition(22));
+
+var segments = new[] { new WindowSegment("region", "eu-west") };
+var tags = new[] { new WindowTag("service", "checkout") };
+
+var providerA = new ClosedWindow(
+    "DeviceOffline", "device-17",
+    providerARange.Start.Position, providerARange.End!.Value.Position,
+    Source: "provider-a", Partition: "fleet-1",
+    Segments: segments, Tags: tags);
+var providerB = new ClosedWindow(
+    "DeviceOffline", "device-17",
+    providerBRange.Start.Position, providerBRange.End!.Value.Position,
+    Source: "provider-b", Partition: "fleet-1",
+    Segments: segments, Tags: tags);
+
+var history = WindowHistory.FromRecords(
+    new[] { providerA, providerB },
+    Array.Empty&lt;OpenWindow&gt;());
+
+var lane = history.Query()
+    .Window("DeviceOffline")
+    .Lane("provider-a")
+    .Partition("fleet-1")
+    .Segment("region", "eu-west")
+    .ClosedWindows();
+
+var snapshot = history.SnapshotAt(TemporalPoint.ForPosition(25));
+
+var comparison = history.Compare("Provider QA")
+    .Target("provider-a", side =&gt; side.Source("provider-a"))
+    .Against("provider-b", side =&gt; side.Source("provider-b"))
+    .Within(scope =&gt; scope.Window("DeviceOffline"))
+    .Using(rows =&gt; rows.Overlap().Residual().Missing())
+    .Run();</code></pre>
+        </article>
+        <article class="language-panel" data-language="rust">
+          <h3>Rust · deserialize the validated history shape</h3>
+          <pre><code class="language-rust">use spanfold::{TemporalPoint, WindowHistory};
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+
+    let json = r#"{
+  "closed": [
+    {
+      "id": "provider-a-device-17-10",
+      "window_name": "DeviceOffline",
+      "key": "device-17",
+      "range": {
+        "start": { "axis": "ProcessingPosition", "magnitude": 10, "clock": null },
+        "end": { "axis": "ProcessingPosition", "magnitude": 20, "clock": null }
+      },
+      "known_at": { "axis": "ProcessingPosition", "magnitude": 20, "clock": null },
+      "source": "provider-a",
+      "partition": "fleet-1",
+      "segments": [{ "name": "region", "value": "eu-west", "parent_name": null }],
+      "tags": [{ "name": "service", "value": "checkout" }],
+      "boundary_reason": null,
+      "boundary_changes": []
+    },
+    {
+      "id": "provider-b-device-17-12",
+      "window_name": "DeviceOffline",
+      "key": "device-17",
+      "range": {
+        "start": { "axis": "ProcessingPosition", "magnitude": 12, "clock": null },
+        "end": { "axis": "ProcessingPosition", "magnitude": 22, "clock": null }
+      },
+      "known_at": { "axis": "ProcessingPosition", "magnitude": 22, "clock": null },
+      "source": "provider-b",
+      "partition": "fleet-1",
+      "segments": [{ "name": "region", "value": "eu-west", "parent_name": null }],
+      "tags": [{ "name": "service", "value": "checkout" }],
+      "boundary_reason": null,
+      "boundary_changes": []
+    }
+  ],
+  "open": [],
+  "annotations": []
+}"#;
+
+    let history: WindowHistory = serde_json::from_str(json)?;
+
+    let lane = history.query()
+        .where_window("DeviceOffline")
+        .where_source("provider-a")
+        .where_partition("fleet-1")
+        .where_segment("region", "eu-west")
+        .closed_windows();
+
+    let snapshot = history.snapshot_at(TemporalPoint::position(25))?;
+
+    let comparison = history.compare("Provider QA")
+        .target_source("provider-a")
+        .against_source("provider-b")
+        .scope_window("DeviceOffline")
+        .overlap()
+        .residual()
+        .missing()
+        .run();
+
+    Ok(())
+}</code></pre>
+        </article>
+      </div>
+      <p class="language-note">
+        The Rust example depends on <code>serde_json</code> in the application.
+        The serialized <code>WindowHistory</code> shape is the crate's current
+        serde contract, not a cross-language or durable-storage schema promise.
+        Put your own versioned DTO in front of it when long-lived compatibility matters.
+      </p>
+    </section>
+
+    <section class="doc-section" id="open-windows">
+      <div class="section-heading">
+        <p class="eyebrow">Open records</p>
+        <h2>Import open windows only when “still active” is genuinely known.</h2>
+        <p>
+          An open record is not a closed interval with a missing value. It is
+          evidence whose end is still unknown. Keep its source, partition,
+          segment context, start domain, and record identity stable.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Snapshot explicitly</h3><p><code>SnapshotAt</code>/<code>snapshot_at</code> clips records active at a compatible horizon and marks their snapshot records provisional without mutating the imported history.</p></article>
+        <article><h3>Compare live explicitly</h3><p>Final comparison rejects open windows by default. Use <code>RunLive(horizon)</code> in C# or <code>run_live(horizon)</code>/<code>clip_open_windows_to_position(...)</code> in Rust when provisional evidence belongs in the answer.</p></article>
+        <article><h3>Do not guess an end</h3><p>If the source cannot distinguish “still active” from “not yet refreshed,” keep that uncertainty in the source system. A fabricated close converts uncertainty into false final evidence.</p></article>
+        <article><h3>Do not expect pipeline continuation</h3><p>An imported history is an analysis snapshot. Importing an open record does not attach it to an event pipeline that will later close it.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="annotations">
+      <div class="section-heading">
+        <p class="eyebrow">Annotations</p>
+        <h2>Attach later knowledge without rewriting the source interval.</h2>
+        <p>
+          Both runtimes support append-only annotations targeted at a stable
+          window-start identity. Repeated names receive increasing revision
+          numbers. Known-at queries include only annotations with a compatible
+          point at or before the requested horizon; annotations without known-at
+          are excluded from that point-in-time-safe view.
+        </p>
+      </div>
+      <p class="language-note">
+        Tags are part of the imported window and can participate in query and
+        comparison scope. Annotations are later external metadata. Do not use an
+        annotation as a silent correction to the interval itself.
+      </p>
+    </section>
+
+    <section class="doc-section" id="ownership">
+      <div class="section-heading">
+        <p class="eyebrow">Correction and recovery</p>
+        <h2>Your source remains authoritative; rebuild the analysis view when it changes.</h2>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Own mapping</h3><p>Version the adapter from your domain records into Spanfold fields. Decide how source IDs become keys, lanes, partitions, segments, tags, clocks, and Rust record IDs.</p></article>
+        <article><h3>Own deduplication</h3><p>Resolve duplicate source rows and corrections before import. Spanfold can analyze overlaps; it does not decide which conflicting persisted row should survive.</p></article>
+        <article><h3>Rebuild on correction</h3><p>Create a new history from the corrected authoritative snapshot and rerun the query or comparison. There is no public merge, upsert, or retroactive window-rewrite API at this boundary.</p></article>
+        <article><h3>Own persistence</h3><p>Persist your source DTOs, checkpoints, and result versions outside Spanfold. The core history is in-memory and does not claim a database schema, migration path, repository, or distributed recovery protocol.</p></article>
+      </div>
+      <div class="actions">
+        <a class="button secondary" href="concepts-querying-history.html">Query imported history</a>
+        <a class="button secondary" href="concepts-comparing-histories.html">Compare provider lanes</a>
+        <a class="button secondary" href="live-stream-operations.html">Operate changing streams</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="fixture-schema.md">Fixture and JSONL tool schema</a></footer>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+  <script src="syntax.js"></script>
+  <script src="site-shell.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>
