@@ -6,10 +6,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use crate::{
-    ComparisonFinality, PrimitiveValue, TemporalAxis, TemporalPoint, TemporalRange,
-    TemporalRangeError,
-};
+use crate::{PrimitiveValue, TemporalAxis, TemporalPoint, TemporalRange, TemporalRangeError};
 
 /// Deterministic window record identifier.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize)]
@@ -598,6 +595,20 @@ impl WindowRecord {
     }
 }
 
+/// Finality state for a records-owned window snapshot.
+///
+/// Snapshot records intentionally describe only whether the visible range is
+/// complete at the requested horizon. Comparison lifecycle states such as
+/// revision and retraction belong to comparison-owned result metadata and are
+/// introduced only when a higher layer translates these records.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum WindowSnapshotFinality {
+    /// The source window is complete at the snapshot horizon.
+    Final,
+    /// The visible range depends on the snapshot horizon.
+    Provisional,
+}
+
 /// A snapshot view of one window at an explicit horizon.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WindowSnapshotRecord {
@@ -606,7 +617,7 @@ pub struct WindowSnapshotRecord {
     /// Visible range at the snapshot horizon.
     pub range: TemporalRange,
     /// Whether the visible range is final or provisional.
-    pub finality: ComparisonFinality,
+    pub finality: WindowSnapshotFinality,
 }
 
 /// Snapshot of a window history at one temporal horizon.
@@ -1732,7 +1743,7 @@ impl WindowSnapshotQuery {
         self.records
             .iter()
             .filter(|record| self.spec.matches(*record))
-            .filter(|record| record.finality == ComparisonFinality::Final)
+            .filter(|record| record.finality == WindowSnapshotFinality::Final)
             .cloned()
             .collect()
     }
@@ -1743,7 +1754,7 @@ impl WindowSnapshotQuery {
         self.records
             .iter()
             .filter(|record| self.spec.matches(*record))
-            .filter(|record| record.finality == ComparisonFinality::Provisional)
+            .filter(|record| record.finality == WindowSnapshotFinality::Provisional)
             .cloned()
             .collect()
     }
@@ -1848,10 +1859,8 @@ impl SummaryAccumulator {
     fn add_snapshot(&mut self, record: &WindowSnapshotRecord) {
         self.record_count += 1;
         match record.finality {
-            ComparisonFinality::Final => self.final_count += 1,
-            ComparisonFinality::Provisional
-            | ComparisonFinality::Revised
-            | ComparisonFinality::Retracted => self.provisional_count += 1,
+            WindowSnapshotFinality::Final => self.final_count += 1,
+            WindowSnapshotFinality::Provisional => self.provisional_count += 1,
         }
         if record.range.start().axis() == TemporalAxis::ProcessingPosition {
             self.measured_position_count += 1;
@@ -1975,14 +1984,14 @@ fn snapshot_record(
                 Ok(Some(WindowSnapshotRecord {
                     range: closed.range.clone(),
                     window: WindowRecord::Closed(closed),
-                    finality: ComparisonFinality::Final,
+                    finality: WindowSnapshotFinality::Final,
                 }))
             } else {
                 let range = TemporalRange::new(closed.range.start(), horizon)?;
                 Ok(Some(WindowSnapshotRecord {
                     window: WindowRecord::Closed(closed),
                     range,
-                    finality: ComparisonFinality::Provisional,
+                    finality: WindowSnapshotFinality::Provisional,
                 }))
             }
         }
@@ -1991,7 +2000,7 @@ fn snapshot_record(
             Ok(Some(WindowSnapshotRecord {
                 window: WindowRecord::Open(open),
                 range,
-                finality: ComparisonFinality::Provisional,
+                finality: WindowSnapshotFinality::Provisional,
             }))
         }
     }

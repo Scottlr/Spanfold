@@ -111,8 +111,8 @@ pub use records::{
     WindowHistoryFixture, WindowHistoryFixtureError, WindowHistoryFixtureWindow,
     WindowHistoryImportError, WindowHistoryQuery, WindowHistoryRefQuery, WindowHistorySnapshot,
     WindowMetadataError, WindowOverlap, WindowRecord, WindowRecordId, WindowResidualSegment,
-    WindowSegment, WindowSnapshotQuery, WindowSnapshotRecord, WindowTag, summarize_by_segment,
-    summarize_by_tag,
+    WindowSegment, WindowSnapshotFinality, WindowSnapshotQuery, WindowSnapshotRecord, WindowTag,
+    summarize_by_segment, summarize_by_tag,
 };
 pub use sequences::{WindowSequenceBuilder, WindowSequenceError, WindowSequenceMatch};
 pub use temporal::{

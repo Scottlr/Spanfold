@@ -292,7 +292,7 @@ Do not replace the existing closure selectors with bespoke traits. Heterogeneous
 
 ## ARCH-005 — Strong — Records is a god file with the wrong dependency direction
 
-**Status:** Open  
+**Status:** Partially resolved (S011 snapshot-finality slice; S012 record split remains open)
 **Category:** Foundational module ownership  
 **Files:**
 
@@ -324,6 +324,16 @@ Three query types repeat nearly the same filtering vocabulary:
 - `WindowSnapshotQuery:1361-1479`
 
 The dependency direction is also inverted. Foundational records import comparison-owned `ComparisonFinality`, and history methods forward into analytics while analytics imports `WindowHistory` and comparison types.
+
+### S011 snapshot-finality slice
+
+The snapshot-finality edge is resolved without moving comparison lifecycle
+states into records. `records` now owns `WindowSnapshotFinality` with only
+`Final` and `Provisional`; sequences explicitly translate those two states to
+`ComparisonFinality` when producing higher-layer matches. Snapshot queries,
+summaries, and their `Final`/`Provisional` wire values are unchanged. The
+remaining records god-file split, query deduplication, and analytics boundary
+work are intentionally left for S012 and later slices.
 
 ### Scalable direction
 
