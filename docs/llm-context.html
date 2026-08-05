@@ -255,7 +255,7 @@ var result = pipeline.History
     .Run();
 
 result.ExportLlmContext("artifacts/provider-qa.llm.json");</code></pre>
-          <pre class="stacked-code"><code class="language-bash"># From a repository checkout until the .NET packages are published:
+          <pre class="stacked-code"><code class="language-bash"># From a repository checkout for the current 0.2.0-preview.1 CLI:
 mkdir -p artifacts
 dotnet run --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj -- \
   compare fixture.json --format llm-context \

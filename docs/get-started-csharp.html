@@ -44,7 +44,8 @@
       </div>
       <pre><code class="language-powershell">dotnet new console --framework net10.0 --name SpanfoldQuickstart
 cd SpanfoldQuickstart
-dotnet add package Spanfold --version 0.2.0-preview.1</code></pre>
+dotnet add package Spanfold --version 0.1.0-preview.2</code></pre>
+      <p class="language-note">NuGet.org currently publishes 0.1.0-preview.2, so this journey uses that release's <code>Spanfold.Spanfold.For&lt;TEvent&gt;()</code> entry point. The repository's .NET source is versioned 0.2.0-preview.1 but is not yet published.</p>
     </section>
 
     <section class="doc-section" id="implementation">
@@ -56,7 +57,7 @@ dotnet add package Spanfold --version 0.2.0-preview.1</code></pre>
       <div class="wide-example">
         <pre><code class="language-csharp">using Spanfold;
 
-var pipeline = EventPipeline
+var pipeline = Spanfold.Spanfold
     .For&lt;DeviceStatus&gt;()
     .RecordWindows()
     .TrackWindow(

@@ -44,17 +44,30 @@ The core flow is:
 
 ## Install the preview
 
-Install the core library, optional artifact and testing layers, and CLI tool:
+NuGet.org currently publishes the core library and testing helpers at
+`0.1.0-preview.2`:
 
 ```bash
-dotnet add package Spanfold --version 0.2.0-preview.1
-dotnet add package Spanfold.Artifacts --version 0.2.0-preview.1
-dotnet add package Spanfold.Testing --version 0.2.0-preview.1
-dotnet tool install --global Spanfold.Cli --version 0.2.0-preview.1
+dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold.Testing --version 0.1.0-preview.2
 ```
 
 `Spanfold.Testing` is optional. It is useful in consumer test suites when you want
 small comparison fixtures without running a full pipeline.
+
+This checkout is versioned `0.2.0-preview.1`. Its `Spanfold.Artifacts` package
+and current `Spanfold.Cli` tool are not published to NuGet.org; reference or run
+those projects from the checkout. After creating a fixture described by the
+[fixture schema](../../docs/fixture-schema.md), run the documented comparison
+command through the source project:
+
+```bash
+dotnet run --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj -- compare fixture.json --format json
+```
+
+The first recording example immediately below is bounded to the published
+`0.1.0-preview.2` package and uses its `Spanfold.Spanfold.For<TEvent>()` entry
+point.
 
 ## First Example: Record Windows
 
@@ -65,7 +78,7 @@ when the window is active.
 using Spanfold;
 using Spanfold.Comparison;
 
-var pipeline = EventPipeline // Start a Spanfold pipeline definition.
+var pipeline = Spanfold.Spanfold // Start a Spanfold pipeline definition.
     .For<DeviceSignal>() // Configure the event type that will be ingested.
     .RecordWindows() // Store opened and closed windows for comparison.
     .TrackWindow( // Define one state-driven window.
@@ -83,6 +96,13 @@ public sealed record DeviceSignal(string DeviceId, bool IsOnline); // Define the
 
 `RecordWindows()` is the important switch. It keeps the temporal evidence that
 later comparisons, exports, and tests operate on.
+
+## Current Repository API (`0.2.0-preview.1`, Source Only)
+
+Everything from the stabilization example onward documents the current
+repository source. These APIs are not available in the published
+`0.1.0-preview.2` packages. Reference the projects from this checkout and use
+the current `EventPipeline.For<TEvent>()` entry point.
 
 ### Stabilize noisy window transitions
 
@@ -162,9 +182,10 @@ The core result is structured data:
 - summaries
 - finality metadata
 
-Exports are an optional package concern. Add `Spanfold.Artifacts`, then import
-`Spanfold.Artifacts` for JSON, JSON Lines, Markdown, debug HTML, parsed artifact
-models, and verifiable audit bundles.
+Exports are an optional project concern. In the current checkout, reference the
+`Spanfold.Artifacts` project, then import `Spanfold.Artifacts` for JSON, JSON
+Lines, Markdown, debug HTML, parsed artifact models, and verifiable audit
+bundles. The package is not currently published to NuGet.org.
 
 For visual debugging, export the result as a standalone HTML artifact:
 

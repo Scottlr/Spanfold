@@ -56,20 +56,21 @@
           <div class="install-methods">
             <article>
               <h3>.NET CLI</h3>
-              <pre><code>dotnet add package Spanfold
-dotnet add package Spanfold.Testing</code></pre>
+              <pre><code>dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold.Testing --version 0.1.0-preview.2</code></pre>
             </article>
             <article>
               <h3>NuGet Package Manager</h3>
-              <pre><code>Install-Package Spanfold
-Install-Package Spanfold.Testing</code></pre>
+              <pre><code>Install-Package Spanfold -Version 0.1.0-preview.2
+Install-Package Spanfold.Testing -Version 0.1.0-preview.2</code></pre>
             </article>
             <article>
               <h3>Project file</h3>
-              <pre><code>&lt;PackageReference Include="Spanfold" Version="0.2.0-preview.1" /&gt;
-&lt;PackageReference Include="Spanfold.Testing" Version="0.2.0-preview.1" /&gt;</code></pre>
+              <pre><code>&lt;PackageReference Include="Spanfold" Version="0.1.0-preview.2" /&gt;
+&lt;PackageReference Include="Spanfold.Testing" Version="0.1.0-preview.2" /&gt;</code></pre>
             </article>
           </div>
+          <p class="language-note">NuGet.org publishes these two packages at 0.1.0-preview.2, and the runnable C# example below uses that release's <code>Spanfold.Spanfold.For&lt;TEvent&gt;()</code> entry point. The repository's 0.2.0-preview.1 Spanfold.Artifacts and Spanfold.Cli projects are source-only.</p>
         </div>
         <div class="language-panel" data-language="rust">
           <div class="install-methods">
@@ -257,8 +258,8 @@ cargo test --workspace</code></pre>
         <article>
           <h3>Install</h3>
           <div class="language-panel" data-language="csharp">
-            <pre><code>dotnet add package Spanfold
-dotnet add package Spanfold.Testing</code></pre>
+            <pre><code>dotnet add package Spanfold --version 0.1.0-preview.2
+dotnet add package Spanfold.Testing --version 0.1.0-preview.2</code></pre>
             <p>`Spanfold.Testing` is optional. It provides fixtures, snapshots, and assertions for consumer tests.</p>
           </div>
           <div class="language-panel" data-language="rust">
@@ -272,7 +273,7 @@ cargo install spanfold-cli --version 0.1.1</code></pre>
           <div class="language-panel" data-language="csharp">
             <pre><code>using Spanfold;
 
-var pipeline = EventPipeline
+var pipeline = Spanfold.Spanfold
     .For&lt;DeviceSignal&gt;()
     .RecordWindows()
     .TrackWindow(
