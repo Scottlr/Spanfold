@@ -12,6 +12,10 @@ task-by-task map between the two public APIs and their current package and CLI
 boundaries. The [Episode analysis guide](episode-analysis.html) is the
 occurrence-level journey for both runtimes, including graph interpretation,
 live finality, native lineage, and the portable schema v1 boundary. The
+[ordered cross-window sequences guide](ordered-sequences.html) covers analytical
+unit choice, lane identity, deterministic non-reuse, optional gaps, native
+lineage, live horizon semantics, and current source-versus-release availability.
+The
 [import existing history guide](import-existing-history.html)
 is the adoption path for applications that already own materialized intervals,
 including the current C# and Rust construction asymmetry. The

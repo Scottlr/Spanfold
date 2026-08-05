@@ -183,7 +183,9 @@ Auditing a past decision means using only what was knowable at the time — not 
 
 **Episodes (.NET preview and Rust)** — stitch nearby windows on each side into occurrences, then classify the complete relation graph as one-to-one, split, merge, complex, or unmatched. Fragments remain the active evidence; episode envelopes describe elapsed occurrence extent.
 
-**Ordered sequences (.NET preview and Rust)** — match literal named window-family steps within one key/source/partition lane, with deterministic non-reuse, optional processing-position gaps, and provisional live evidence.
+**Ordered sequences (current .NET and Rust source)** — match literal named window-family steps within one key/source/partition lane, with deterministic non-reuse, optional processing-position gaps, and provisional live evidence.
+
+→ [Ordered cross-window sequences guide](docs/ordered-sequences.html)
 
 **Known-at safety** — separates when a state happened from when it was observable. Prevents future leakage in backtests and replays.
 
@@ -310,6 +312,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [Get started with Rust](docs/get-started-rust.html)
 - [C# and Rust portability guide](docs/cross-language-guide.html)
 - [Episode analysis guide](docs/episode-analysis.html)
+- [Ordered cross-window sequences guide](docs/ordered-sequences.html)
 - [Import existing history guide](docs/import-existing-history.html)
 - [Live stream operations guide](docs/live-stream-operations.html)
 - [Use cases](docs/use-cases.html)

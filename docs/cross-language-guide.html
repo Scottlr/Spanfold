@@ -46,7 +46,7 @@
       <div class="section-heading">
         <p class="eyebrow">Choose a runtime</p>
         <h2>Package status is not symmetrical today.</h2>
-        <p>The Rust releases expose the current documented surface. The current .NET source is ahead of the packages on NuGet.org, so check the status column before porting a source example into an installed package.</p>
+        <p>Repository source is ahead of published packages in places. The current .NET source is ahead of NuGet.org, and ordered sequences landed after the crates.io 0.1.1 release, so check feature-level availability before porting a source example into an installed package.</p>
       </div>
       <table class="member-table">
         <thead><tr><th>Concern</th><th>C# / .NET</th><th>Rust</th></tr></thead>
@@ -366,7 +366,8 @@ var journeys = history
         </article>
       </div>
       <p class="language-note">Portable Episode document schema version 1 is processing-position only. The .NET and Rust CLIs can execute the same document and emit aligned deterministic JSON or Markdown; runtime-specific Episode IDs are deliberately omitted from that portable result.</p>
-      <p class="link-line"><a href="episode-analysis.html">Read formation, graph, summary, finality, lineage, and portable-document semantics</a></p>
+      <p class="language-note">Ordered sequences are current-source APIs in both runtimes. They landed after the published NuGet 0.1.0-preview.2 and crates.io 0.1.1 packages, and there is no portable sequence document or CLI route.</p>
+      <p class="link-line"><a href="episode-analysis.html">Read Episode formation, graph, and portability semantics</a> · <a href="ordered-sequences.html">Read sequence lane, matching, gap, lineage, and live semantics</a></p>
     </section>
 
     <section class="doc-section" id="cli-testing">
@@ -418,6 +419,7 @@ var journeys = history
         <p>This guide is the translation layer. The dedicated references remain authoritative for overloads, errors, advanced comparators, cohorts, source matrices, hierarchy, liveness, and detailed result types.</p>
         <div class="actions">
           <a class="button secondary" href="episode-analysis.html">Episode analysis guide</a>
+          <a class="button secondary" href="ordered-sequences.html">Ordered sequences guide</a>
           <a class="button secondary" href="api-csharp.html">C# API reference</a>
           <a class="button secondary" href="api-rust.html">Rust API reference</a>
         </div>

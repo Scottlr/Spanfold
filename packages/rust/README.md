@@ -108,6 +108,8 @@ let result = history
 Match literal named window families in onset order within one exact
 key/source/partition lane. Complete matches consume their evidence and live
 matching preserves provisional finality.
+This API landed after the published crates.io `0.1.1` release; use current
+repository source until a later crate release explicitly includes it.
 
 ```rust
 let journeys = history
@@ -118,6 +120,11 @@ let journeys = history
     .with_maximum_gap(5)
     .run()?;
 ```
+
+The current repository source surface, including exact lane identity,
+candidate selection, gap arithmetic, lineage, live finality, and the
+published-crate boundary, is covered in the
+[ordered cross-window sequences guide](https://scottlr.github.io/Spanfold/ordered-sequences.html).
 
 ## Repository development commands
 
