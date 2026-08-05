@@ -33,17 +33,51 @@ if (live.HasProvisionalRows()) // Check whether any rows depend on open windows.
 }
 ```
 
+```rust
+let live = history
+    .compare("Live QA")
+    .target_selector(ComparisonSelector::for_source("provider-a"))
+    .against_selector(ComparisonSelector::for_source("provider-b"))
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .residual()
+    .run_live(TemporalPoint::position(100));
+
+if live.has_provisional_rows() {
+    for finality in live.provisional_row_finalities() {
+        println!("{}: {}", finality.row_id, finality.reason);
+    }
+}
+```
+
 ## Changelog
 
-`ComparisonChangelog.Create(previous, current)` compares row-finality metadata
-between snapshots. It emits deterministic entries for:
+In .NET, `ComparisonChangelog.Create(...)` accepts the previous and current
+`RowFinalities`. In Rust, `create_changelog(...)` accepts slices of the previous
+and current `row_finalities`. Both compare row-finality metadata between
+snapshots and emit deterministic entries for:
 
-- new row metadata
-- revised metadata
-- retracted metadata
+- new row metadata (`Added` in both runtimes)
+- finality or reason changes (`Revised` in .NET and `Updated` in Rust)
+- removed metadata (`Retracted` in both runtimes)
 
-`ComparisonChangelog.Replay(previous, entries)` rebuilds the current row-finality
-view from a prior view plus its changelog entries.
+`ComparisonChangelog.Replay(...)` in .NET and `replay_changelog(...)` in Rust
+rebuild the current row-finality view from a prior view plus its changelog
+entries.
+
+```csharp
+var entries = ComparisonChangelog.Create(
+    previous.RowFinalities,
+    current.RowFinalities);
+var replayed = ComparisonChangelog.Replay(previous.RowFinalities, entries);
+```
+
+```rust
+let entries = create_changelog(
+    &previous.row_finalities,
+    &current.row_finalities,
+);
+let replayed = replay_changelog(&previous.row_finalities, &entries);
+```
 
 This is useful for dashboards, agents, notebooks, and audit logs that need to
 explain why a live answer changed.
@@ -54,8 +88,16 @@ The .NET `BoundedWatermarkTracker` can sit before an application-owned pipeline
 when a source provides trustworthy per-lane event-time progress. A corrected
 decision identifies both the replacement revision and the accepted revision to
 retract. After applying that source correction, produce a new live snapshot and
-use `ComparisonChangelog.Create(previous, current)` to derive row-level finality
-changes. The watermark tracker does not mutate comparison rows directly.
+use `ComparisonChangelog.Create(...)` over the two results' `RowFinalities` to
+derive row-level finality changes. The watermark tracker does not mutate
+comparison rows directly.
+
+Rust supports the resulting live snapshots, row finality, changelog creation,
+and replay, but it does not currently expose `BoundedWatermarkTracker` or an
+equivalent late-event acceptance/correction helper. A Rust application must own
+that upstream policy and feed the corrected history into a new live comparison;
+the changelog API only explains changes between the resulting row-finality
+views.
 
 See [bounded watermarks and late correction](bounded-watermarks.md) for the
 acceptance boundaries, correction horizon, and objective limitations.
