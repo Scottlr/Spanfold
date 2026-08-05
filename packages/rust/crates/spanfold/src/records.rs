@@ -2020,7 +2020,7 @@ fn primitive_sort_key(value: &PrimitiveValue) -> String {
     match value {
         PrimitiveValue::String(value) => format!("string:{value}"),
         PrimitiveValue::Integer(value) => format!("integer:{value:020}"),
-        PrimitiveValue::Float(value) => format!("float:{value:?}"),
+        PrimitiveValue::Float(value) => format!("float:{:?}", value.as_f64()),
         PrimitiveValue::Bool(value) => format!("bool:{value}"),
         PrimitiveValue::Null => "null:".to_owned(),
     }

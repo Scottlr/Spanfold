@@ -102,7 +102,7 @@ pub use pipeline::{
     WindowEmission, WindowMetadata, WindowOptions, WindowPipelineBuilder, WindowTransitionKind,
     for_events,
 };
-pub use primitive::{PrimitiveValue, PrimitiveValueError};
+pub use primitive::{FiniteFloat, PrimitiveValue, PrimitiveValueError};
 pub use records::{
     ClosedWindow, OpenWindow, SummaryError, WindowAnnotation, WindowAnnotationTarget,
     WindowBoundaryChange, WindowBoundaryReason, WindowGroupKind, WindowGroupSummary, WindowHistory,

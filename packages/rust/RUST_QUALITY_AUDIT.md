@@ -304,6 +304,8 @@ Reordering identical named dimensions emits false changes, and insertion/removal
 
 **Required correction:** use a finite-float wrapper with fallible construction and define explicit integer/float comparison semantics.
 
+**Resolution (current revision):** `FiniteFloat` keeps its payload private, rejects non-finite construction and deserialization, and preserves the explicit exact-range integer/float equality rule.
+
 ### RUST-028 — P2 — Missing and empty source identities collapse internally
 
 **Evidence:** `crates/spanfold/src/comparison.rs:2246-2264`, `2564-2581`; `records.rs:1247-1256` uses a similar sentinel.
