@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Operate Spanfold over live and changing streams with explicit ordering, horizons, finality, liveness, correction, retention, and persistence boundaries.">
+  <title>Live stream operations - Spanfold</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="csharp">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <p class="eyebrow">Live stream operations</p>
+      <h1>Keep changing evidence useful without calling it settled.</h1>
+      <p class="lead">
+        Spanfold can record an ordered stream, evaluate open windows at a declared
+        horizon, and explain how comparison rows change. Your application still
+        owns delivery, ordering, correction, retention, and durable recovery.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="#operating-loop">Follow the operating loop</a>
+        <a class="button secondary" href="#runtime-boundaries">Check runtime boundaries</a>
+      </div>
+    </section>
+
+    <section class="doc-section" id="operating-loop">
+      <div class="section-heading">
+        <p class="eyebrow">Operating model</p>
+        <h2>One owner advances each pipeline; every published view names its horizon.</h2>
+        <p>
+          Treat a pipeline instance as an in-memory projection of an authoritative
+          ordered input. The projection records windows; a snapshot or comparison
+          answers a question about that recorded state. It is not the input log.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article><strong>1. Serialize ingestion</strong><span>Choose one deterministic event order and one writer for each pipeline instance.</span></article>
+        <article><strong>2. Preserve lane identity</strong><span>Pass the same source and partition identity on every event belonging to a lane.</span></article>
+        <article><strong>3. Stabilize at recording</strong><span>Use consecutive entry and exit confirmation when signal noise should not become window churn.</span></article>
+        <article><strong>4. Evaluate explicitly</strong><span>Choose processing position or event time, then take a snapshot or run a live comparison at a compatible horizon.</span></article>
+        <article><strong>5. Publish finality</strong><span>Keep provisional rows visibly separate and derive a changelog before replacing a consumer view.</span></article>
+        <article><strong>6. Recover from source truth</strong><span>Persist inputs or materialized records outside Spanfold, and rebuild when corrections change earlier evidence.</span></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="ingestion">
+      <div class="section-heading">
+        <p class="eyebrow">Ordered ingestion</p>
+        <h2>Processing position is commit order; source and partition define independent lanes.</h2>
+        <p>
+          Each committed event advances the pipeline position once. Window
+          state and stabilization counts are isolated by window name, key, source,
+          and partition. Do not merge partitions by omitting an
+          identity that matters to the question.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article class="language-panel" data-language="csharp">
+          <h3>C# · serialize lane-aware ingestion</h3>
+          <pre><code class="language-csharp">var pipeline = EventPipeline
+    .For&lt;DeviceSignal&gt;()
+    .RecordWindows()
+    .WithEventTime(signal =&gt; signal.OccurredAt, "source-utc")
+    .TrackWindow(
+        "DeviceOffline",
+        signal =&gt; signal.DeviceId,
+        signal =&gt; !signal.IsOnline,
+        options =&gt; options.Stabilize(
+            exitWhen: signal =&gt; signal.IsOnline,
+            enterAfter: 2,
+            exitAfter: 3));
+
+foreach (var signal in orderedProviderEvents)
+{
+    pipeline.Ingest(signal, source: "provider-a", partition: "eu-west");
+}</code></pre>
+        </article>
+        <article class="language-panel" data-language="rust">
+          <h3>Rust · serialize lane-aware ingestion</h3>
+          <pre><code class="language-rust">let mut pipeline = spanfold::for_events::&lt;DeviceSignal&gt;()
+    .record_windows()
+    .with_event_time(|signal| signal.occurred_at_ticks)
+    .window(
+        "DeviceOffline",
+        |signal| signal.device_id.clone(),
+        |signal| !signal.is_online,
+    )
+    .stabilize(|signal| signal.is_online, 2, 3)
+    .build()?;
+
+for signal in ordered_provider_events {
+    pipeline.ingest(signal, Some("provider-a"), Some("eu-west"))?;
+}</code></pre>
+        </article>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Single writer</h3><p>The .NET pipeline explicitly fails concurrent or re-entrant ingestion. Rust requires mutable access for ingestion. In both cases, serialize writes and avoid querying a pipeline while another owner is changing it.</p></article>
+        <article><h3>Batch differences</h3><p>Rust <code>ingest_many(...)</code> applies one source and partition to the batch. C# <code>IngestMany(events)</code> has no lane parameters, so use individual <code>Ingest(...)</code> calls when lane identity matters.</p></article>
+        <article><h3>Transition callbacks</h3><p>Callbacks are notifications, not durable delivery. In .NET, callback failure is reported after the event and history commit; blindly retrying that event can advance the projection twice.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section two-col" id="stabilization">
+      <div>
+        <p class="eyebrow">Stabilization</p>
+        <h2>Confirm noisy transitions before they become evidence.</h2>
+        <p>
+          Both runtimes count consecutive entry and exit observations separately
+          for each lane. A non-matching observation resets the applicable count.
+          The event that reaches the threshold supplies the boundary; a pending
+          exit leaves the committed open window and roll-up membership unchanged.
+        </p>
+      </div>
+      <div>
+        <p>
+          Stabilization is observation-count hysteresis, not elapsed-time
+          debouncing. It does not wait on a timer, reorder events, or decide whether
+          late event time is acceptable. Omit it when every predicate transition
+          should open or close immediately.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="time-and-horizons">
+      <div class="section-heading">
+        <p class="eyebrow">Time and horizons</p>
+        <h2>Processing position and event time answer different questions.</h2>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Coordinate</th><th>Meaning</th><th>Operational use</th></tr></thead>
+        <tbody>
+          <tr><td>Processing position</td><td>The monotonic order in which one pipeline committed events.</td><td>Replay order, known-at filtering, and live views tied to ingestion progress.</td></tr>
+          <tr><td>Event time</td><td>A timestamp or tick value selected from the event. Values intended to compare need the same clock identity; different clock contracts remain distinct.</td><td>Compare when source events claim a condition happened, even if ingestion order differs.</td></tr>
+          <tr><td>Live horizon</td><td>The explicit point where open evidence is clipped for one evaluation.</td><td>Make a current answer reproducible and keep horizon-dependent evidence provisional.</td></tr>
+        </tbody>
+      </table>
+      <div class="code-grid">
+        <article class="language-panel" data-language="csharp">
+          <h3>C# · snapshot and compare at one horizon</h3>
+          <pre><code class="language-csharp">var horizon = TemporalPoint.ForTimestamp(now, "source-utc");
+var snapshot = pipeline.History.SnapshotAt(horizon);
+
+var live = pipeline.History
+    .Compare("Live provider QA")
+    .Target("provider-a", side =&gt; side.Source("provider-a"))
+    .Against("provider-b", side =&gt; side.Source("provider-b"))
+    .Within(scope =&gt; scope.Window("DeviceOffline", TemporalAxis.Timestamp))
+    .Normalize(policy =&gt; policy.OnEventTime())
+    .Using(rows =&gt; rows.Overlap().Residual().Missing())
+    .RunLive(horizon);</code></pre>
+        </article>
+        <article class="language-panel" data-language="rust">
+          <h3>Rust · snapshot and compare at one horizon</h3>
+          <pre><code class="language-rust">let horizon = TemporalPoint::timestamp_ticks(now_ticks);
+let snapshot = pipeline.history().snapshot_at(horizon.clone())?;
+
+let live = pipeline
+    .history()
+    .compare("Live provider QA")
+    .target_source("provider-a")
+    .against_source("provider-b")
+    .scope(ComparisonScope::window("DeviceOffline").on_event_time())
+    .normalization(ComparisonNormalizationPolicy::event_time())
+    .overlap()
+    .residual()
+    .missing()
+    .run_live(horizon);</code></pre>
+        </article>
+      </div>
+      <p class="language-note">
+        A history snapshot is read-only and does not close or rewrite the source
+        history. A live comparison clips open windows for the result only. Its
+        horizon must use the same axis—and, for timestamps, the same clock
+        contract—as the windows being evaluated.
+      </p>
+    </section>
+
+    <section class="doc-section" id="finality-and-revisions">
+      <div class="section-heading">
+        <p class="eyebrow">Finality and revisions</p>
+        <h2>Publish the row metadata with the row, then describe replacements as a changelog.</h2>
+        <p>
+          Final rows depend only on closed evidence. Provisional rows depend on
+          at least one open window clipped to the live horizon. A later run can
+          add, revise or update, and retract row-finality metadata as the source
+          history changes.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article class="language-panel" data-language="csharp">
+          <h3>C# · advance a consumer view</h3>
+          <pre><code class="language-csharp">var changes = ComparisonChangelog.Create(
+    previous.RowFinalities,
+    current.RowFinalities);
+
+var replayed = ComparisonChangelog.Replay(
+    previous.RowFinalities,
+    changes);</code></pre>
+        </article>
+        <article class="language-panel" data-language="rust">
+          <h3>Rust · advance a consumer view</h3>
+          <pre><code class="language-rust">let changes = create_changelog(
+    &amp;previous.row_finalities,
+    &amp;current.row_finalities,
+);
+
+let replayed = replay_changelog(
+    &amp;previous.row_finalities,
+    &amp;changes,
+);</code></pre>
+        </article>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Version the whole view</h3><p>Store the horizon and plan identity beside the row set. A changelog compares two results; it is not a global event log and does not prove source completeness.</p></article>
+        <article><h3>Apply atomically</h3><p>Build the next result and changelog before replacing the published view. Consumers can then apply additions, revisions or updates, and retractions as one versioned transition.</p></article>
+        <article><h3>Keep provisional visible</h3><p>Do not flatten row finality into a run-level flag. One live result can contain stable closed-history rows and provisional horizon-dependent rows together.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="liveness">
+      <div class="section-heading">
+        <p class="eyebrow">Liveness</p>
+        <h2>Turn silence into ordinary window evidence at caller-chosen horizons.</h2>
+        <p>
+          Both runtimes provide a deterministic <code>LaneLivenessTracker</code>.
+          Call <code>Observe</code>/<code>observe</code> when a known lane reports,
+          and <code>Check</code>/<code>check</code> when your scheduler reaches a
+          horizon. Feed only the emitted state changes into a normal pipeline.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article class="language-panel" data-language="csharp">
+          <h3>C# · record lane silence</h3>
+          <pre><code class="language-csharp">var liveness = LaneLivenessTracker.ForLanes(
+    startedAt,
+    TimeSpan.FromSeconds(30),
+    "provider-a",
+    "provider-b");
+
+var silencePipeline = EventPipeline
+    .For&lt;LaneLivenessSignal&gt;()
+    .RecordWindows()
+    .WithEventTime(signal =&gt; signal.OccurredAt)
+    .TrackWindow("LaneSilent", signal =&gt; signal.Lane, signal =&gt; signal.IsSilent);
+
+foreach (var signal in liveness.Check(horizon))
+    silencePipeline.Ingest(signal, source: "liveness");</code></pre>
+        </article>
+        <article class="language-panel" data-language="rust">
+          <h3>Rust · record lane silence</h3>
+          <pre><code class="language-rust">let mut liveness = LaneLivenessTracker::for_lanes(
+    started_at.clone(),
+    30 * ticks_per_second,
+    ["provider-a", "provider-b"],
+)?;
+
+let mut silence_pipeline = for_events::&lt;LaneLivenessSignal&gt;()
+    .record_windows()
+    .with_event_time(|signal| signal.occurred_at.magnitude())
+    .track_window(
+        "LaneSilent",
+        |signal| signal.lane.clone(),
+        |signal| signal.is_silent,
+    )
+    .build()?;
+
+for signal in liveness.check(horizon)? {
+    silence_pipeline.ingest(signal, Some("liveness"), None)?;
+}</code></pre>
+        </article>
+      </div>
+      <p class="language-note">
+        The liveness trackers own no timers, IO, distributed heartbeat discovery,
+        or persistence. Observations and check horizons must be monotonic. Rust
+        thresholds are magnitudes on the chosen temporal axis, so the caller owns
+        the tick unit for timestamp tracking.
+      </p>
+    </section>
+
+    <section class="doc-section" id="late-corrections">
+      <div class="section-heading">
+        <p class="eyebrow">Late and out-of-order corrections</p>
+        <h2>Admission and replay are separate decisions.</h2>
+        <p>
+          Event time does not change ingestion order. Neither pipeline rewinds an
+          earlier transition when a late event arrives. Decide upstream whether a
+          revision is admissible, update the authoritative source, then rebuild the
+          affected projection or materialized history and run a new snapshot.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Application-owned replay</h3><p>Keep stable event and revision IDs in the source log. When a correction replaces prior input, replay the affected deterministic order into a fresh pipeline rather than treating a changelog as an ingestion undo log.</p></article>
+        <article><h3>Materialized-history path</h3><p>Both runtimes can construct queryable history from closed and open records using <code>WindowHistory.FromRecords(...)</code> or <code>WindowHistory::from_records(...)</code>. The caller remains responsible for producing coherent corrected records.</p></article>
+        <article><h3>Result-level explanation</h3><p>After rerunning, compare the old and new row-finality collections. The comparison changelog explains the visible row transition; it does not apply the source correction.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="bounded-watermarks">
+      <div class="section-heading">
+        <p class="eyebrow">Bounded watermarks</p>
+        <h2>.NET has an opt-in late-event decision helper; Rust does not.</h2>
+        <p>
+          <code>BoundedWatermarkTracker</code> is a .NET-only, in-memory,
+          single-writer primitive that sits before a pipeline. It accepts explicit
+          per-lane event-time progress and returns decisions; it never rewires or
+          mutates pipeline history.
+        </p>
+      </div>
+      <div class="code-grid">
+        <article>
+          <h3>.NET source API</h3>
+          <pre><code class="language-csharp">var watermarks = new BoundedWatermarkTracker(
+    allowedLateness: TimeSpan.FromMinutes(2));
+
+var decision = watermarks.Observe(
+    laneId: "provider-a/eu-west",
+    eventId: envelope.EventId,
+    revisionId: envelope.RevisionId,
+    eventTime: envelope.OccurredAt);
+
+HandleWatermarkDecision(decision);
+
+var advance = watermarks.AdvanceLane(
+    "provider-a/eu-west",
+    sourceProgress);
+
+foreach (var released in advance.Released)
+{
+    HandleWatermarkDecision(released);
+}</code></pre>
+        </article>
+        <article>
+          <h3>Rust boundary</h3>
+          <p>
+            Rust has no equivalent bounded-watermark or late-revision admission
+            helper. Own buffering, lateness, rejection, correction retention, and
+            lane progress upstream; feed only the chosen corrected input into a
+            fresh projection.
+          </p>
+        </article>
+      </div>
+      <p class="language-note">
+        The .NET helper implements its documented bounded policy: observations
+        before a lane has reported progress are buffered, as are observations
+        ahead of current progress. Progress derives and advances a lane watermark.
+        Operators must handle the immediate decision and route every decision in
+        <code>advance.Released</code>; decisions can be buffered, accepted,
+        rejected, or corrected. The application-owned handler decides how accepted
+        input and corrections reach a rebuilt projection—the tracker does not
+        mutate a pipeline. It does not infer completeness, advance idle lanes,
+        persist state, schedule progress, or coordinate distributed partitions.
+        Do not copy these semantics into Rust unless your application deliberately
+        owns that policy.
+      </p>
+    </section>
+
+    <section class="doc-section" id="retention">
+      <div class="section-heading">
+        <p class="eyebrow">Retention and persistence</p>
+        <h2>Persist what you need before trimming or replacing an in-memory projection.</h2>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Responsibility</th><th>.NET</th><th>Rust</th></tr></thead>
+        <tbody>
+          <tr><td>Persist source events, checkpoints, and replay order</td><td>Caller</td><td>Caller</td></tr>
+          <tr><td>Persist window records, snapshots, results, and changelogs</td><td>Caller</td><td>Caller</td></tr>
+          <tr><td>Import materialized open and closed records</td><td><code>WindowHistory.FromRecords(...)</code></td><td><code>WindowHistory::from_records(...)</code></td></tr>
+          <tr><td>Remove closed history by processing-position boundary</td><td><code>TrimClosedBefore(...)</code>; open windows and annotations remain</td><td>No equivalent history-drain API</td></tr>
+          <tr><td>Release inactive roll-up runtime state</td><td><code>TrimInactiveState()</code>; recorded history remains</td><td>No equivalent public pipeline trim API</td></tr>
+        </tbody>
+      </table>
+      <p class="language-note">
+        A retention boundary changes which historical questions the in-memory
+        projection can answer. Persist or export required evidence first, keep the
+        replay checkpoint aligned with the retained range, and never assume a
+        result changelog can reconstruct discarded source history.
+      </p>
+    </section>
+
+    <section class="doc-section" id="consumer-workflow">
+      <div class="section-heading">
+        <p class="eyebrow">Safe consumer workflow</p>
+        <h2>Hand consumers one coherent version at a time.</h2>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Capture</h3><p>Choose a compatible horizon after the serialized ingestion owner reaches a known checkpoint. Record the source checkpoint, plan identity, axis, clock, and horizon.</p></article>
+        <article><h3>Compute</h3><p>Run the live comparison from a stable history view. Keep finality metadata and evidence IDs with every row; do not publish a provisional row as historical fact.</p></article>
+        <article><h3>Transition</h3><p>Build the changelog from the prior and current results, persist the new version, then atomically expose it. Make retractions first-class for caches and dashboards.</p></article>
+        <article><h3>Correct</h3><p>If upstream revises earlier input, rebuild from the authoritative replay boundary. Publish the rerun as another version and explain result changes with the changelog.</p></article>
+        <article><h3>Retain</h3><p>Trim only after the durable source, materialized evidence, and replay checkpoint cover the questions consumers are still allowed to ask.</p></article>
+        <article><h3>Recover</h3><p>After restart, restore from your durable records or replay the source. Spanfold does not persist a live pipeline, liveness tracker, or watermark tracker for you.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="runtime-boundaries">
+      <div class="section-heading">
+        <p class="eyebrow">Runtime boundaries</p>
+        <h2>Portable model, deliberately different operational helpers.</h2>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Both runtimes</h3><p>Ordered synchronous ingestion, lane-aware windows, consecutive stabilization, event-time recording, processing-position history, live snapshots, provisional finality, comparison changelogs, materialized history import, and explicit liveness tracking.</p></article>
+        <article><h3>.NET only</h3><p><code>BoundedWatermarkTracker</code>, <code>WindowHistory.TrimClosedBefore(...)</code>, and <code>EventPipeline.TrimInactiveState()</code>. These are current repository source APIs and may be ahead of the published NuGet package.</p></article>
+        <article><h3>Caller in both runtimes</h3><p>Queue consumption, delivery guarantees, input deduplication, lane discovery, timers, checkpointing, durable persistence, distributed completeness, correction policy, replay scheduling, and atomic publication.</p></article>
+      </div>
+      <div class="actions">
+        <a class="button secondary" href="concepts-live-finality.html">Live finality concepts</a>
+        <a class="button secondary" href="cross-language-guide.html">C# ↔ Rust portability map</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="concepts-live-finality.html">Live finality concepts</a></footer>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+  <script src="syntax.js"></script>
+  <script src="site-shell.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>
