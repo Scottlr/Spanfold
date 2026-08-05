@@ -55,12 +55,12 @@ The dashed edges are the important friction: behavior and ownership leak across 
 
 ## ARCH-001 — Strong — Comparison planning and phases lack locality
 
-**Status:** Partially resolved — selector/planning (S007), preparation (S008), and alignment locality (S009)
+**Status:** Partially resolved — selector/planning (S007), preparation (S008), alignment (S009), and execution/materialization locality (S010)
 **Category:** In-process deepening  
 **Files:**
 
 - `crates/spanfold/src/comparison.rs` (facade and remaining execution/phase implementation)
-- `crates/spanfold/src/comparison/{selector,plan,diagnostics,critic,prepare,align}.rs` (S007-S009)
+- `crates/spanfold/src/comparison/{selector,plan,diagnostics,critic,prepare,align,execute}.rs` (S007-S010)
 - `crates/spanfold/src/comparison/{rows,comparators,finality}.rs`
 - `crates/spanfold/src/builders.rs`
 - `crates/spanfold/src/fixture.rs`
@@ -74,9 +74,11 @@ given selector expressions, plan configuration/validation, and plan/runtime diag
 dedicated implementation modules, S008 has moved selection, scope preparation,
 normalization, exclusion, and deduplication behind `comparison/prepare.rs`, and S009 has
 moved normalized-window grouping, axis/clock/key/partition boundaries, cohort activity,
-and endpoint-sweep alignment behind `comparison/align.rs`, while retaining the existing
-facade and public exports. The remaining execution and phase ownership still needs the
-later slices:
+and endpoint-sweep alignment behind `comparison/align.rs`, and S010 has moved orchestration,
+comparator dispatch, finality assembly, summaries, extension metadata, and result
+materialization behind `comparison/execute.rs`, while retaining the existing facade and
+public exports. The remaining comparator algorithm and export-phase ownership still needs
+the later slices:
 
 - Comparator declaration and parsing: lines 25-144 and 1697-1801.
 - Selector expression, matching, composition, and export: `comparison/selector.rs` (S007).
@@ -84,7 +86,7 @@ later slices:
 - Plan construction and validation: `comparison/plan.rs` (S007).
 - Plan/runtime diagnostics: `comparison/diagnostics.rs` (S007).
 - Plan/prepared-evidence runtime criticism: `comparison/critic.rs` (S007).
-- Execution and materialization: lines 1499-1916.
+- Execution and materialization: `comparison/execute.rs` (S010).
 - Preparation, normalization, exclusion, and deduplication: `comparison/prepare.rs` (S008).
 - Grouping and alignment: `comparison/align.rs` (S009).
 
@@ -135,7 +137,7 @@ Use explicit imports between these modules. Do not expose the internal phase sea
 
 ## ARCH-002 — Strong — Result and phase artifacts have competing representations
 
-**Status:** Partially resolved — canonical result rows (R009), typed preparation (S008), and typed alignment ownership (S009)
+**Status:** Partially resolved — canonical result rows (R009), typed preparation/alignment (S008-S009), and execution/materialization projection (S010)
 **Category:** Canonical state  
 **Files:**
 
@@ -143,6 +145,7 @@ Use explicit imports between these modules. Do not expose the internal phase sea
 - `crates/spanfold/src/comparison.rs` (facade/execution)
 - `crates/spanfold/src/comparison/prepare.rs` (S008 typed preparation artifacts)
 - `crates/spanfold/src/comparison/align.rs` (S009 typed alignment artifacts)
+- `crates/spanfold/src/comparison/execute.rs` (S010 canonical result materialization)
 - `crates/spanfold/src/export.rs:160-223,674-778`
 - `crates/spanfold/src/export/debug.rs:60-109`
 - `crates/spanfold/src/testing.rs:219-233`
@@ -163,7 +166,7 @@ R009 removes the nine flat fields. `ComparisonRows` is now the only stored
 row-family representation on the public result, and the family accessors borrow
 slices from it without allocating compatibility vectors.
 
-Typed `PreparedComparison` and `AlignedComparison` artifacts are serialized into `serde_json::Value` during execution. S008 keeps `PreparedComparison` and its selected, excluded, and normalized artifact types owned by the private preparation module, and S009 keeps `AlignedComparison` and its endpoint-sweep artifacts owned by the private alignment module, while preserving the existing serialization seam. Export and debug code later recover information using string keys such as `selectedWindows`, `normalizedWindows`, and `segments`.
+Typed `PreparedComparison` and `AlignedComparison` artifacts are serialized into `serde_json::Value` during execution. S008 keeps `PreparedComparison` and its selected, excluded, and normalized artifact types owned by the private preparation module, S009 keeps `AlignedComparison` and its endpoint-sweep artifacts owned by the private alignment module, and S010 centralizes typed-artifact retention, row/finality assembly, and public `ComparisonResult` construction in the private execution module. Export and debug code still recover information using string keys such as `selectedWindows`, `normalizedWindows`, and `segments`.
 
 The remaining competing representations are the typed prepared/aligned
 artifacts serialized into `serde_json::Value` and the separate manual export
