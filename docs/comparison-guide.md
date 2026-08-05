@@ -69,6 +69,10 @@ the target side is deliberately the reference. The API is available through
 `Spanfold.Episodes` in the .NET preview and through `WindowHistory::form_episodes`
 and `WindowHistory::compare_episodes` in Rust.
 
+See the public [Episode analysis guide](episode-analysis.html) for the paired
+C# and Rust APIs, all six component kinds, live finality, lineage boundaries,
+and portable schema version 1.
+
 ## Ordered Journeys Across Window Families
 
 Use an ordered sequence when each step is a different interpreted state and

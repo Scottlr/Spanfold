@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use Spanfold Episode analysis in C# and Rust to form occurrences, compare relation components, interpret live finality, and run portable schema v1 documents.">
+  <title>Episode analysis guide - Spanfold</title>
+  <link rel="icon" href="assets/brand/spanfold-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-language="csharp">
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Spanfold home"><img src="assets/brand/spanfold-logo.svg" alt="Spanfold"></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+        <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+      </svg>
+    </button>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="index.html">Overview</a>
+      <a href="get-started.html">Get started</a>
+      <a href="concepts.html">Concepts</a>
+      <a href="api.html">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="page-hero compact">
+      <p class="eyebrow">Guide · C# and Rust</p>
+      <h1>Analyze occurrences without losing the interval evidence.</h1>
+      <p class="lead">
+        Episode analysis groups nearby windows into occurrence-shaped evidence,
+        then compares the complete target-against relation graph. Use it beside
+        exact comparison rows when the decision concerns outages, detections,
+        sessions, or other occurrences rather than only exact coverage.
+      </p>
+      <div class="actions">
+        <a class="button primary" href="#direct-api">Use the direct API</a>
+        <a class="button secondary" href="#portable-document">Run one portable document</a>
+      </div>
+    </section>
+
+    <section class="doc-section" id="why-episodes">
+      <div class="section-heading">
+        <p class="eyebrow">Choose the analytical unit</p>
+        <h2>Exact rows explain coverage. Episodes explain occurrences.</h2>
+        <p>
+          An exact comparison can show that a detector started late, recovered
+          early, or went inactive briefly. Episode analysis answers the next
+          question: did those fragments still describe the same occurrence?
+          The two views are complementary; forming an Episode does not rewrite
+          the underlying windows or erase their exact differences.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article>
+          <h3>Stay with exact rows when</h3>
+          <p>You need every overlap, residual, missing, coverage, containment, or lead/lag span as the result. Those rows preserve the precise temporal disagreement.</p>
+        </article>
+        <article>
+          <h3>Add Episodes when</h3>
+          <p>You need occurrence counts, fragmented-versus-continuous behavior, missed occurrences, duplicate detections, or the shape of one-to-many and many-to-one relationships.</p>
+        </article>
+        <article>
+          <h3>Read both together</h3>
+          <p>An Episode can say both sources observed one outage while exact rows still show its late onset, early recovery, and inactive gap. Occurrence agreement is not exact interval agreement.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="formation">
+      <div class="section-heading">
+        <p class="eyebrow">Formation</p>
+        <h2>Normalize, group by lane, then stitch nearby fragments.</h2>
+        <p>
+          Each side is formed independently from normalized window evidence.
+          A formation lane is one window family, key, source, partition,
+          temporal axis, and—on event time—clock. Fragments never stitch across
+          one of those boundaries. Within a lane, overlapping fragments or
+          fragments separated by no more than the stitch tolerance become one
+          Episode.
+        </p>
+      </div>
+      <div class="stage-flow">
+        <article class="stage-card">
+          <p class="stage-kicker">1. Select</p>
+          <h4>Choose the source evidence.</h4>
+          <p>Target and against selectors decide which recorded windows can contribute. The named-window scope and temporal axis must agree with normalization.</p>
+        </article>
+        <article class="stage-card">
+          <p class="stage-kicker">2. Normalize</p>
+          <h4>Apply one temporal policy.</h4>
+          <p>Known-at filtering, closed-window requirements, or live clipping happen before formation, so retained fragments already carry their effective range and finality.</p>
+        </article>
+        <article class="stage-card">
+          <p class="stage-kicker">3. Group</p>
+          <h4>Keep lane identity intact.</h4>
+          <p>Window name, logical key, source, partition, axis, and clock define the formation boundary. A tolerance never joins distinct devices, partitions, providers, or clocks.</p>
+        </article>
+        <article class="stage-card">
+          <p class="stage-kicker">4. Stitch</p>
+          <h4>Bridge only bounded inactivity.</h4>
+          <p><code>StitchGapsUpTo</code> / <code>stitch_gaps_up_to</code> controls same-side formation. It can change Episode counts and elapsed extent, but not active coverage.</p>
+        </article>
+      </div>
+      <p>
+        Suppose target has <code>[10:00, 10:30)</code> and against has
+        <code>[10:02, 10:10)</code> plus <code>[10:12, 10:28)</code> in the same
+        lane. A two-minute stitch forms one against Episode with two fragments.
+        Its envelope is <code>[10:02, 10:28)</code>, its active magnitude is the
+        union of the two fragments, and its internal-gap magnitude is two
+        minutes. Lower the tolerance below two minutes and it remains two
+        Episodes instead.
+      </p>
+    </section>
+
+    <section class="doc-section" id="relations">
+      <div class="section-heading">
+        <p class="eyebrow">Relation graph</p>
+        <h2>Relate actual fragments, then classify complete components.</h2>
+        <p>
+          <code>RelateWithin</code> / <code>relate_within</code> applies across
+          already-formed target and against Episodes. An edge exists only when
+          at least one target fragment and one against fragment overlap or are
+          within the relation tolerance. Spanfold then finds connected
+          components; it does not greedily choose a nearest pair and discard the
+          rest of the graph.
+        </p>
+      </div>
+      <table class="member-table">
+        <thead><tr><th>Relation kind</th><th>Target Episodes</th><th>Against Episodes</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>OneToOne</code></td><td>1</td><td>1</td><td>One occurrence on each side belongs to the component.</td></tr>
+          <tr><td><code>Split</code></td><td>1</td><td>2 or more</td><td>One target occurrence relates to several against occurrences.</td></tr>
+          <tr><td><code>Merge</code></td><td>2 or more</td><td>1</td><td>Several target occurrences relate to one against occurrence.</td></tr>
+          <tr><td><code>Complex</code></td><td>2 or more</td><td>2 or more</td><td>A many-to-many component cannot be reduced without losing evidence.</td></tr>
+          <tr><td><code>UnmatchedTarget</code></td><td>1</td><td>0</td><td>A target occurrence has no qualifying against edge.</td></tr>
+          <tr><td><code>UnmatchedAgainst</code></td><td>0</td><td>1</td><td>An against occurrence has no qualifying target edge.</td></tr>
+        </tbody>
+      </table>
+      <div class="comparison-list">
+        <article>
+          <h3>Envelope overlap is not evidence</h3>
+          <p>An Episode envelope includes its internal inactive gaps. If the other side lies only inside such a gap, the envelopes overlap but no fragments do. Spanfold correctly creates no zero-tolerance edge.</p>
+        </article>
+        <article>
+          <h3>Tolerances own different decisions</h3>
+          <p>Stitch tolerance changes formation within each side. Relation tolerance changes graph edges across sides. Neither changes the source fragments or their active union.</p>
+        </article>
+        <article>
+          <h3>Metrics use active unions</h3>
+          <p>Overlap and coverage are calculated from fragment unions. Signed onset and recovery deltas are against minus target. Timing distributions include only one-to-one components, avoiding arbitrary attribution inside split, merge, or complex graphs.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="interpretation">
+      <div class="section-heading">
+        <p class="eyebrow">Interpretation</p>
+        <h2>Target and against are neutral until you opt into a reference.</h2>
+        <p>
+          Target and against define direction for counts, coverage ratios, and
+          signed deltas; they do not say which side is correct. The materialized
+          set and comparison summaries therefore use neutral terms such as
+          matched target, unmatched against, split target rate, and Episode
+          count bias.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article>
+          <h3>Neutral summary</h3>
+          <p>Use <code>Summary</code> / <code>summary()</code> to describe both sides and the graph without assigning truth. This is the safer default for peer providers, pipeline stages, or model versions.</p>
+        </article>
+        <article>
+          <h3>Explicit scorecard</h3>
+          <p>Call <code>AsReference()</code> / <code>as_reference()</code> only when target is intentionally authoritative. It renames target Episodes as references and against Episodes as detections, then exposes recall, precision, and F1.</p>
+        </article>
+        <article>
+          <h3>Graph-safe denominators</h3>
+          <p>A reference is detected when it belongs to any matched component; a detection is matched on the same basis. Split, merge, and complex components remain complete rather than being forced into invented pairs.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="live-finality">
+      <div class="section-heading">
+        <p class="eyebrow">Live analysis</p>
+        <h2>A horizon makes open evidence measurable, not complete.</h2>
+        <p>
+          <code>RunLive(horizon)</code> / <code>run_live(horizon)</code> clips open
+          windows to an explicit effective end. Episodes remain provisional when
+          they contain provisional fragments or have not passed their stitch
+          settling boundary. Relations remain provisional when a component is
+          provisional or has not passed its relation settling boundary.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article><h3>Final</h3><p>The materialized evidence has settled relative to the supplied horizon and configured tolerances.</p></article>
+        <article><h3>Provisional</h3><p>The Episode or relation can still change as an open window extends or as a future fragment arrives within its settling tolerance.</p></article>
+        <article><h3>No watermark promise</h3><p>A live horizon does not assert source completeness, allowed lateness, retention, or watermark semantics. The caller owns those operational guarantees and reruns analysis as history changes.</p></article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="lineage-identity">
+      <div class="section-heading">
+        <p class="eyebrow">Evidence and identity</p>
+        <h2>Keep native lineage; compare portable meaning.</h2>
+        <p>
+          Every native Episode retains its ordered normalized fragments. Each
+          fragment points back to its source window and record identifier and
+          carries the effective range and finality used by formation. Internal
+          gaps are derived from the envelope minus the union of those fragments;
+          a gap is measured inactivity, not synthetic positive evidence.
+        </p>
+      </div>
+      <div class="comparison-list">
+        <article>
+          <h3>Native deterministic IDs</h3>
+          <p>Episode IDs are deterministic only under each runtime's own identity inputs. Rust includes Episode finality, so an otherwise unchanged live Episode ID can change when the Episode settles from provisional to final; .NET currently omits Episode finality from its ID input. The algorithms and source-record identity contracts remain runtime-specific.</p>
+        </article>
+        <article>
+          <h3>Portable result indexes</h3>
+          <p>Portable output deliberately omits native Episode IDs. It orders Episodes deterministically and relates them through zero-based per-side indexes, so cross-runtime consumers compare semantic fields rather than opaque identifiers.</p>
+        </article>
+        <article>
+          <h3>Trace boundary</h3>
+          <p>The portable result includes Episode counts, ranges, magnitudes, finality, summaries, and relation indexes. It does not export each native fragment or record ID, so retain the direct result when record-level lineage is required for an audit.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="direct-api">
+      <div class="section-heading">
+        <p class="eyebrow">Direct API</p>
+        <h2>Use corresponding journeys, expressed idiomatically.</h2>
+        <p>
+          Both examples form and compare the same processing-position Episode
+          graph. C# uses configuring delegates and throws at invalid boundaries;
+          Rust uses consuming builders, typed tolerances, and <code>Result</code>.
+        </p>
+      </div>
+      <p class="language-note">
+        Release availability differs: the C# Episode API, <code>Spanfold.Artifacts</code>,
+        and current CLI are repository <code>0.2.0-preview.1</code> source-only
+        surfaces. The Rust <code>spanfold</code> library and <code>spanfold-cli</code>
+        <code>0.1.1</code> are published.
+      </p>
+      <div class="language-panel" data-language="csharp">
+        <pre><code class="language-csharp">using Spanfold;
+using Spanfold.Episodes;
+
+var result = history
+    .CompareEpisodes("Provider outage QA")
+    .Target("provider", selector =&gt; selector.Source("provider-a"))
+    .Against("detector", selector =&gt; selector.Source("detector-b"))
+    .Within(scope =&gt; scope.Window("DeviceOffline"))
+    .Normalize(normalization =&gt; normalization.OnPosition())
+    .StitchGapsUpTo(1L)
+    .RelateWithin(0L)
+    .Run();
+
+var splits = result.RelationsOfKind(EpisodeRelationKind.Split);
+var neutral = result.Summary;
+
+// Only do this when the target really is authoritative.
+var scorecard = result.AsReference();</code></pre>
+      </div>
+      <div class="language-panel" data-language="rust">
+        <pre><code class="language-rust">use spanfold::{
+    ComparisonNormalizationPolicy, ComparisonScope, ComparisonSelector,
+    EpisodeRelationKind, TemporalTolerance,
+};
+
+let result = history
+    .compare_episodes("Provider outage QA")
+    .target(
+        "provider",
+        ComparisonSelector::for_source("provider-a"),
+    )
+    .against(
+        "detector",
+        ComparisonSelector::for_source("detector-b"),
+    )
+    .scope(ComparisonScope::window("DeviceOffline"))
+    .normalization(ComparisonNormalizationPolicy::default_policy())
+    .stitch_gaps_up_to(TemporalTolerance::processing_positions(1)?)
+    .relate_within(TemporalTolerance::processing_positions(0)?)
+    .run()?;
+
+let splits = result.relations_of_kind(EpisodeRelationKind::Split);
+let neutral = result.summary();
+
+// Only do this when the target really is authoritative.
+let scorecard = result.as_reference();</code></pre>
+      </div>
+      <p class="language-note">
+        For event-time analysis, select event-time scope and normalization in
+        both runtimes and use a duration/timestamp-tick tolerance with one
+        compatible clock. Portable schema version 1 does not carry that clock
+        contract, so event-time Episodes currently remain a direct-API journey.
+      </p>
+    </section>
+
+    <section class="doc-section" id="portable-document">
+      <div class="section-heading">
+        <p class="eyebrow">Portable document · schema v1</p>
+        <h2>Run one definition through either runtime.</h2>
+        <p>
+          <code>spanfold.episode.analysis</code> schema version 1 is a narrow,
+          language-neutral plan. It selects two distinct source strings, one
+          named window family, processing-position normalization, same-side and
+          cross-side tolerances, and an optional live horizon. Both runtimes
+          compile it into their existing Episode builders rather than using a
+          second analysis engine.
+        </p>
+      </div>
+      <pre><code class="language-json">{
+  "schema": "spanfold.episode.analysis",
+  "schemaVersion": 1,
+  "name": "Provider and detector offline episodes",
+  "target": { "name": "provider", "source": "provider-a" },
+  "against": { "name": "detector", "source": "detector-b" },
+  "windowName": "DeviceOffline",
+  "normalizationAxis": "processingPosition",
+  "stitchTolerance": 1,
+  "relationTolerance": 0,
+  "liveHorizon": 14
+}</code></pre>
+      <p>
+        The accompanying flat window JSON Lines use string keys, string-or-null
+        partitions, non-negative processing positions, and a numeric or null
+        <code>endPosition</code>. Version 1 rejects equal target and against
+        sources, negative tolerances or horizons, and timestamp normalization.
+        Portable execution is intentionally narrower than the direct APIs.
+      </p>
+      <pre><code class="language-json">{"windowName":"DeviceOffline","key":"device-1","source":"provider-a","partition":"eu","startPosition":1,"endPosition":4}
+{"windowName":"DeviceOffline","key":"device-1","source":"provider-a","partition":"eu","startPosition":5,"endPosition":8}
+{"windowName":"DeviceOffline","key":"device-1","source":"detector-b","partition":"eu","startPosition":2,"endPosition":7}
+{"windowName":"DeviceOffline","key":"device-2","source":"provider-a","partition":null,"startPosition":10,"endPosition":12}
+{"windowName":"DeviceOffline","key":"device-2","source":"detector-b","partition":null,"startPosition":11,"endPosition":null}</code></pre>
+
+      <div class="code-grid">
+        <article>
+          <h3>C# · source CLI</h3>
+          <pre><code class="language-bash">dotnet run \
+  --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj \
+  -- episodes episode-plan.json windows.jsonl --format json
+
+dotnet run \
+  --project packages/dotnet/src/Spanfold.Cli/Spanfold.Cli.csproj \
+  -- episodes episode-plan.json windows.jsonl --format markdown</code></pre>
+        </article>
+        <article>
+          <h3>Rust · installed or workspace CLI</h3>
+          <pre><code class="language-bash">spanfold episodes \
+  episode-plan.json windows.jsonl --format json
+
+cd packages/rust
+cargo run -p spanfold-cli -- episodes \
+  ../../episode-plan.json ../../windows.jsonl --format markdown</code></pre>
+        </article>
+      </div>
+
+      <table class="member-table">
+        <thead><tr><th>Portable contract</th><th>Schema version 1 behavior</th></tr></thead>
+        <tbody>
+          <tr><td>Plan schema</td><td><code>spanfold.episode.analysis</code>, <code>schemaVersion: 1</code>.</td></tr>
+          <tr><td>Result schema</td><td><code>spanfold.episode.analysis.result</code>, <code>schemaVersion: 1</code>.</td></tr>
+          <tr><td>Axis</td><td><code>processingPosition</code> only; timestamp clocks and portable known-at input are deferred.</td></tr>
+          <tr><td>Identity</td><td>String keys and string-or-null partitions. Native Episode IDs are omitted; relations use deterministic per-side indexes.</td></tr>
+          <tr><td>Formats</td><td>Deterministic pretty JSON or deterministic Markdown from either CLI.</td></tr>
+          <tr><td>Live behavior</td><td>A non-null <code>liveHorizon</code> clips open windows and preserves provisional Episode and relation finality.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Result v1 carries the analysis and window names, axis, tolerances,
+        evaluation horizon, target and against source metadata, each side's
+        summary and ordered Episodes, the neutral comparison summary, and
+        exhaustive relations referencing those Episode indexes. The repository
+        includes the complete shared
+        <a href="../features/episodes/fixtures/portable-provider-detector-plan.json">plan</a>,
+        <a href="../features/episodes/fixtures/portable-provider-detector-windows.jsonl">window JSONL</a>,
+        and <a href="../features/episodes/fixtures/portable-provider-detector-result.json">expected JSON result</a>.
+        Use the portable result for cross-runtime exchange; keep a native direct
+        result alongside it when you need full fragment objects and source-record
+        lineage.
+      </p>
+    </section>
+
+    <section class="doc-section two-col">
+      <div>
+        <p class="eyebrow">Next</p>
+        <h2>Choose the neighboring guide for the next question.</h2>
+      </div>
+      <div>
+        <p>
+          Read exact row semantics in the comparison guide, translate the wider
+          API surface in the C# and Rust map, or use live stream operations to
+          define the ordering and completeness guarantees that Episode analysis
+          intentionally does not own.
+        </p>
+        <div class="actions">
+          <a class="button secondary" href="concepts-comparing-histories.html">Compare exact rows</a>
+          <a class="button secondary" href="cross-language-guide.html">C# ↔ Rust map</a>
+          <a class="button secondary" href="live-stream-operations.html">Live operations</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>Spanfold</span><a href="https://github.com/Scottlr/spanfold">GitHub repository</a></footer>
+  <script src="site-shell.js"></script>
+  <script src="syntax.js"></script>
+  <script src="language.js"></script>
+</body>
+</html>

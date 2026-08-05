@@ -243,13 +243,13 @@ var episodes = pipeline.History
     .Run();
 ```
 
-→ [Episode workflow and interpretation](packages/dotnet/README.md#compare-occurrences-as-episodes)
+→ [Episode analysis guide](docs/episode-analysis.html) · [C# package workflow](packages/dotnet/README.md#compare-occurrences-as-episodes)
 
 The .NET and Rust CLIs can also execute the same versioned Episode analysis
 document over flat window JSON Lines and emit aligned deterministic JSON or
 Markdown. Runtime-specific Episode IDs are not part of that portable contract.
 
-→ [Portable Episode analysis](features/episodes/portable-analysis.md)
+→ [Portable Episode analysis guide](docs/episode-analysis.html#portable-document) · [schema contract](features/episodes/portable-analysis.md)
 
 ## Rust Package
 
@@ -309,6 +309,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [Get started with C#](docs/get-started-csharp.html)
 - [Get started with Rust](docs/get-started-rust.html)
 - [C# and Rust portability guide](docs/cross-language-guide.html)
+- [Episode analysis guide](docs/episode-analysis.html)
 - [Import existing history guide](docs/import-existing-history.html)
 - [Live stream operations guide](docs/live-stream-operations.html)
 - [Use cases](docs/use-cases.html)
