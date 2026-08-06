@@ -23,7 +23,9 @@ cargo add spanfold@0.1.1
 ```
 
 The repository's .NET source is versioned `0.2.0-preview.1`, but that version
-has not been published to NuGet.org.
+has not been published to NuGet.org. Its supported release set is `Spanfold`,
+`Spanfold.Artifacts`, and `Spanfold.Testing`; `Spanfold.Cli` remains available
+only from a repository checkout.
 
 ## Quick Start
 
@@ -217,9 +219,12 @@ dotnet add package Spanfold --version 0.1.0-preview.2
 dotnet add package Spanfold.Testing --version 0.1.0-preview.2
 ```
 
-The `Spanfold.Artifacts` package and the current `Spanfold.Cli`
-`0.2.0-preview.1` tool are not published. Use those projects from a repository
-checkout. After creating a fixture described by the
+Starting with the repository's `0.2.0-preview.1` release, the supported package
+graph is `Spanfold` → `Spanfold.Artifacts` → `Spanfold.Testing`. All three
+packages share one version and are published together in dependency order.
+`Spanfold.Cli` is not a NuGet tool and remains checkout-only. Until that release
+is available, use the Artifacts and CLI projects from a repository checkout.
+After creating a fixture described by the
 [fixture schema](docs/fixture-schema.md), run the documented comparison command
 through the source project:
 

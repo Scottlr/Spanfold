@@ -9,9 +9,15 @@ From `packages/dotnet`:
 dotnet restore Spanfold.slnx
 dotnet test Spanfold.slnx --no-restore --configuration Release
 dotnet pack src/Spanfold/Spanfold.csproj --no-restore --configuration Release --output artifacts/package
+dotnet pack src/Spanfold.Artifacts/Spanfold.Artifacts.csproj --no-restore --configuration Release --output artifacts/package
 dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj --no-restore --configuration Release --output artifacts/package
-dotnet pack src/Spanfold.Cli/Spanfold.Cli.csproj --no-restore --configuration Release --output artifacts/package
 ```
+
+The published package order is `Spanfold`, `Spanfold.Artifacts`, then
+`Spanfold.Testing`. `Spanfold.Cli` is built and tested from the solution but is
+not packed or published as a NuGet tool. Follow
+[`docs/package-validation.md`](docs/package-validation.md) when changing the
+package graph or metadata.
 
 From `packages/rust`:
 

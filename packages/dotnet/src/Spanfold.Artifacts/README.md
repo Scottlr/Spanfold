@@ -3,6 +3,10 @@
 Optional deterministic exports, explanations, audit bundles, and integrity
 verification for `Spanfold` comparison results.
 
+Install `Spanfold.Artifacts` at the same version as `Spanfold`. The package has
+a direct dependency on the matching core package and is published before
+`Spanfold.Testing`, which depends on both.
+
 ```csharp
 using Spanfold.Artifacts;
 

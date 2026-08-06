@@ -51,8 +51,8 @@ jobs:
           set -euo pipefail
           rm -rf artifacts/package
           dotnet pack src/Spanfold/Spanfold.csproj --no-restore --configuration Release --output artifacts/package
+          dotnet pack src/Spanfold.Artifacts/Spanfold.Artifacts.csproj --no-restore --configuration Release --output artifacts/package
           dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj --no-restore --configuration Release --output artifacts/package
-          dotnet pack src/Spanfold.Cli/Spanfold.Cli.csproj --no-restore --configuration Release --output artifacts/package
 
       - name: Verify package contents and dependency metadata
         shell: bash
@@ -60,16 +60,36 @@ jobs:
           set -euo pipefail
           test -f "artifacts/package/Spanfold.${VERSION}.nupkg"
           test -f "artifacts/package/Spanfold.${VERSION}.snupkg"
+          test -f "artifacts/package/Spanfold.Artifacts.${VERSION}.nupkg"
+          test -f "artifacts/package/Spanfold.Artifacts.${VERSION}.snupkg"
           test -f "artifacts/package/Spanfold.Testing.${VERSION}.nupkg"
           test -f "artifacts/package/Spanfold.Testing.${VERSION}.snupkg"
-          test -f "artifacts/package/Spanfold.Cli.${VERSION}.nupkg"
-          test -f "artifacts/package/Spanfold.Cli.${VERSION}.snupkg"
+          test ! -f "artifacts/package/Spanfold.Cli.${VERSION}.nupkg"
           unzip -Z1 "artifacts/package/Spanfold.${VERSION}.nupkg" | grep -Fx 'README.md'
           unzip -Z1 "artifacts/package/Spanfold.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.dll'
           unzip -Z1 "artifacts/package/Spanfold.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.xml'
+          unzip -Z1 "artifacts/package/Spanfold.Artifacts.${VERSION}.nupkg" | grep -Fx 'README.md'
+          unzip -Z1 "artifacts/package/Spanfold.Artifacts.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Artifacts.dll'
+          unzip -Z1 "artifacts/package/Spanfold.Artifacts.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Artifacts.xml'
+          unzip -p "artifacts/package/Spanfold.Artifacts.${VERSION}.nupkg" '*.nuspec' | grep -F "<dependency id=\"Spanfold\" version=\"${VERSION}\""
+          unzip -Z1 "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" | grep -Fx 'README.md'
           unzip -Z1 "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Testing.dll'
-          unzip -p "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" '*.nuspec' | grep -F '<dependency id="Spanfold"'
-          unzip -Z1 "artifacts/package/Spanfold.Cli.${VERSION}.nupkg" | grep -F 'Spanfold.Cli.dll'
+          unzip -Z1 "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Testing.xml'
+          unzip -p "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" '*.nuspec' | grep -F "<dependency id=\"Spanfold\" version=\"${VERSION}\""
+          unzip -p "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" '*.nuspec' | grep -F "<dependency id=\"Spanfold.Artifacts\" version=\"${VERSION}\""
+
+      - name: Restore isolated package consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/consumer
+          for package in Spanfold Spanfold.Artifacts Spanfold.Testing; do
+            dotnet restore tests/Spanfold.PackageConsumer/Spanfold.PackageConsumer.csproj \
+              --source "$PWD/artifacts/package" \
+              --packages "$PWD/artifacts/consumer/$package/packages" \
+              -p:PackageUnderTest="$package" \
+              -p:BaseIntermediateOutputPath="artifacts/consumer/$package/obj/"
+          done
 
       - name: Authenticate to NuGet.org
         id: nuget_login
@@ -85,8 +105,8 @@ jobs:
           set -euo pipefail
           source_url='https://api.nuget.org/v3/index.json'
           dotnet nuget push "artifacts/package/Spanfold.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
+          dotnet nuget push "artifacts/package/Spanfold.Artifacts.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
           dotnet nuget push "artifacts/package/Spanfold.Testing.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
-          dotnet nuget push "artifacts/package/Spanfold.Cli.${VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source "$source_url" --skip-duplicate
 
       - name: Preserve release packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -53,8 +53,8 @@
         <tbody>
           <tr><td>Core library</td><td><code>Spanfold</code> <strong>0.1.0-preview.2</strong> on NuGet.org; repository source is <strong>0.2.0-preview.1</strong>.</td><td><code>spanfold</code> <strong>0.1.1</strong> on crates.io.</td></tr>
           <tr><td>Testing helpers</td><td><code>Spanfold.Testing</code> <strong>0.1.0-preview.2</strong> is a separate NuGet package.</td><td><code>SpanfoldAssert</code>, <code>SpanfoldSnapshot</code>, fixture builders, and the virtual clock ship in <code>spanfold</code>.</td></tr>
-          <tr><td>Exports and bundles</td><td><code>Spanfold.Artifacts</code> is a separate, source-only project at the current repository version.</td><td>Deterministic export functions ship in <code>spanfold</code>; audit-bundle assembly is owned by <code>spanfold-cli</code>.</td></tr>
-          <tr><td>Command line</td><td><code>Spanfold.Cli</code> <strong>0.1.0-preview.2</strong> is a published global tool whose command is <code>spanfold</code>. The current 0.2.0-preview.1 CLI surface is source-only.</td><td><code>spanfold-cli</code> <strong>0.1.1</strong> is published; its installed command is <code>spanfold</code>.</td></tr>
+          <tr><td>Exports and bundles</td><td><code>Spanfold.Artifacts</code> joins <code>Spanfold</code> and <code>Spanfold.Testing</code> as a supported package in the repository's 0.2.0-preview.1 release set.</td><td>Deterministic export functions ship in <code>spanfold</code>; audit-bundle assembly is owned by <code>spanfold-cli</code>.</td></tr>
+          <tr><td>Command line</td><td>The supported <code>Spanfold.Cli</code> surface is checkout-only and runs through its source project; it is not published as a NuGet tool.</td><td><code>spanfold-cli</code> <strong>0.1.1</strong> is published; its installed command is <code>spanfold</code>.</td></tr>
         </tbody>
       </table>
       <div class="code-grid">
@@ -401,7 +401,7 @@ var journeys = history
         <h2>Do not infer parity beyond the documented contract.</h2>
       </div>
       <div class="comparison-list">
-        <article><h3>Release availability</h3><p>NuGet.org publishes <code>Spanfold</code> and <code>Spanfold.Testing</code> 0.1.0-preview.2, and the matching <code>Spanfold.Cli</code> global tool is published. The current .NET 0.2.0-preview.1 API—including Episodes, sequences, assessments, Artifacts, and the expanded CLI surface—is source-first. Rust library and CLI 0.1.1 are published.</p></article>
+        <article><h3>Release availability</h3><p>NuGet.org currently publishes <code>Spanfold</code> and <code>Spanfold.Testing</code> 0.1.0-preview.2. The .NET 0.2.0-preview.1 release set adds <code>Spanfold.Artifacts</code> as a supported package; its CLI remains checkout-only. Rust library and CLI 0.1.1 are published.</p></article>
         <article><h3>Portable identity</h3><p>Compare semantic rows, ranges, finality, and evidence lineage across runtimes. Current row IDs are runtime-specific, and portable Episode output intentionally excludes runtime Episode IDs.</p></article>
         <article><h3>Portable time</h3><p>Contract fixtures and portable Episode schema version 1 use processing positions. Portable timestamp-known-at input remains deferred until both runtimes share one explicit clock and availability contract.</p></article>
         <article><h3>Tooling specialties</h3><p>Rust owns declarative event JSONL/CSV import. .NET owns assessment specifications, integrity-verifiable bundles, and artifact revision/diff workflows. These are supported runtime-specific capabilities, not missing aliases to invent in application code.</p></article>
