@@ -69,7 +69,11 @@ public sealed class ComparisonArtifact
                 throw new InvalidDataException("The comparison artifact contains malformed row identity metadata.");
             }
 
-            if (!Enum.TryParse<ComparisonFinality>(item.GetProperty("finality").GetString(), out var finality))
+            if (!Enum.TryParse<ComparisonFinality>(
+                    item.GetProperty("finality").GetString(),
+                    ignoreCase: false,
+                    out var finality)
+                || !Enum.IsDefined(finality))
             {
                 throw new InvalidDataException("The comparison artifact contains malformed row finality metadata.");
             }
