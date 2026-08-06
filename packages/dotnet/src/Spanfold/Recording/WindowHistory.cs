@@ -21,6 +21,13 @@ public sealed class WindowHistory
 
     internal IReadOnlyDictionary<string, IEqualityComparer<object>> KeyComparers => this.keyComparers;
 
+    internal IEqualityComparer<object> GetKeyComparer(string windowName)
+    {
+        return this.keyComparers.TryGetValue(windowName, out var comparer)
+            ? comparer
+            : EqualityComparer<object>.Default;
+    }
+
     internal WindowHistory(bool enabled)
         : this(enabled, new Dictionary<string, IEqualityComparer<object>>(StringComparer.Ordinal))
     {
@@ -46,10 +53,40 @@ public sealed class WindowHistory
         IEnumerable<ClosedWindow> closedWindows,
         IEnumerable<OpenWindow> openWindows)
     {
+        return FromRecords(
+            closedWindows,
+            openWindows,
+            new Dictionary<string, IEqualityComparer<object>>(StringComparer.Ordinal));
+    }
+
+    /// <summary>Creates an immutable history snapshot from materialized window records.</summary>
+    /// <remarks>
+    /// This import boundary is intended for persisted history, tools, and test
+    /// fixtures. The comparer map restores the configured logical key identity
+    /// for each imported window family.
+    /// </remarks>
+    /// <param name="closedWindows">The materialized closed windows.</param>
+    /// <param name="openWindows">The materialized open windows.</param>
+    /// <param name="keyComparers">The logical key comparer for each configured window name.</param>
+    /// <returns>An imported history using the supplied key identity policy.</returns>
+    public static WindowHistory FromRecords(
+        IEnumerable<ClosedWindow> closedWindows,
+        IEnumerable<OpenWindow> openWindows,
+        IReadOnlyDictionary<string, IEqualityComparer<object>> keyComparers)
+    {
         ArgumentNullException.ThrowIfNull(closedWindows);
         ArgumentNullException.ThrowIfNull(openWindows);
+        ArgumentNullException.ThrowIfNull(keyComparers);
 
-        var history = new WindowHistory(enabled: true);
+        var comparerCopy = new Dictionary<string, IEqualityComparer<object>>(StringComparer.Ordinal);
+        foreach (var pair in keyComparers)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(pair.Key);
+            ArgumentNullException.ThrowIfNull(pair.Value);
+            comparerCopy.Add(pair.Key, pair.Value);
+        }
+
+        var history = new WindowHistory(enabled: true, comparerCopy);
         history.closedWindows.AddRange(closedWindows);
         foreach (var window in openWindows)
         {

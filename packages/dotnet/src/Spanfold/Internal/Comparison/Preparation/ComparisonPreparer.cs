@@ -60,6 +60,7 @@ internal static class ComparisonPreparer
 
         foreach (var window in windows)
         {
+            var keyComparer = history.GetKeyComparer(window.WindowName);
             if (canFilterByKnownAt
                 && !WindowRangeNormalizer.TryNormalize(
                     window,
@@ -80,7 +81,7 @@ internal static class ComparisonPreparer
             }
 
             var matched = false;
-            if (plan.Target.Value.Matches(window))
+            if (plan.Target.Value.Matches(window, keyComparer))
             {
                 matched = true;
                 AddNormalized(window, plan.Target.Value.Name, ComparisonSide.Target, plan, knownAtFilter, canFilterByKnownAt, diagnostics, selected, excluded, normalized, memberships);
@@ -89,7 +90,7 @@ internal static class ComparisonPreparer
             for (var i = 0; i < plan.Against.Count; i++)
             {
                 var selector = plan.Against[i];
-                if (!selector.Matches(window))
+                if (!selector.Matches(window, keyComparer))
                 {
                     continue;
                 }
