@@ -66,6 +66,8 @@ public readonly record struct ComparisonSelector
         && !string.IsNullOrWhiteSpace(Description)
         && this.predicate is not null;
 
+    internal object? RuntimeIdentity => IsSerializable ? null : this.predicate;
+
     /// <summary>
     /// Creates a selector for a configured window name.
     /// </summary>
