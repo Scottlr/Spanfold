@@ -352,11 +352,18 @@ public sealed class CohortComparisonTests
         var inactive = Assert.Single(result.CohortEvidence(), evidence =>
             !evidence.IsActive
             && evidence.ActiveCount == 1);
+        var compatibilityMetadata = Assert.Single(result.ExtensionMetadata, metadata =>
+            metadata.ExtensionId == "spanfold.cohort"
+            && metadata.Key == "segment[0]");
 
+        Assert.Same(result.CohortEvidenceMetadata, result.CohortEvidence());
         Assert.Equal("at-least", inactive.Rule);
         Assert.Equal(2, inactive.RequiredCount);
         Assert.Contains("source-b;=,", inactive.ActiveSources);
-        Assert.Contains("\"required\":2", inactive.RawValue);
+        Assert.Equal(
+            "{\"rule\":\"at-least\",\"required\":2,\"activeCount\":1,\"isActive\":false,\"activeSources\":[\"source-b;=,\"]}",
+            inactive.RawValue);
+        Assert.Equal(inactive.RawValue, compatibilityMetadata.Value);
     }
 
     [Fact]
