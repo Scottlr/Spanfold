@@ -8,4 +8,15 @@ public sealed record AuditBundleOptions
 
     /// <summary>Gets the artifact disclosure profile.</summary>
     public ArtifactExportProfile Profile { get; init; } = ArtifactExportProfile.Full;
+
+    internal void Validate()
+    {
+        if (!Enum.IsDefined(Profile))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(Profile),
+                Profile,
+                "Unknown artifact export profile.");
+        }
+    }
 }

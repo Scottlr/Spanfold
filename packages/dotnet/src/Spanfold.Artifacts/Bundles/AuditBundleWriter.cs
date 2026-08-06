@@ -19,6 +19,7 @@ public static class AuditBundleWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(result);
         options ??= AuditBundleOptions.Default;
+        options.Validate();
 
         var fullPath = Path.GetFullPath(path);
         var parent = Path.GetDirectoryName(fullPath)
@@ -31,15 +32,18 @@ public static class AuditBundleWriter
         {
             Directory.CreateDirectory(temporary);
             var files = new List<AuditBundleFile>();
-            var evidence = options.Profile == ArtifactExportProfile.Redacted
-                ? result.ExportRedactedAgentContext()
-                : result.ExportJson();
-            var evidenceName = options.Profile == ArtifactExportProfile.Redacted
-                ? "result.redacted.json"
-                : "result.json";
+            var (evidenceName, evidence, includeSupportingArtifacts) = options.Profile switch
+            {
+                ArtifactExportProfile.Full => ("result.json", result.ExportJson(), true),
+                ArtifactExportProfile.Redacted => ("result.redacted.json", result.ExportRedactedAgentContext(), false),
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    options.Profile,
+                    "Unknown artifact export profile.")
+            };
             WriteArtifact(temporary, evidenceName, evidence, files);
 
-            if (options.Profile == ArtifactExportProfile.Full && assessment is not null)
+            if (includeSupportingArtifacts && assessment is not null)
             {
                 WriteArtifact(
                     temporary,
@@ -48,7 +52,7 @@ public static class AuditBundleWriter
                     files);
             }
 
-            if (options.Profile == ArtifactExportProfile.Full && traces is not null)
+            if (includeSupportingArtifacts && traces is not null)
             {
                 var traceElements = traces.Select(static trace =>
                     JsonSerializer.SerializeToElement(trace, trace.GetType(), AuditBundleSerialization.JsonOptions));
