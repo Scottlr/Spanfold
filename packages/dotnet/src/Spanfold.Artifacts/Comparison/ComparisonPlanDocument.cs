@@ -509,9 +509,17 @@ public sealed record ComparisonPlanSelectorDocument(string Name, ComparisonSelec
             throw new InvalidDataException(path + " requires exactly two child descriptors.");
         }
 
-        return combine(
-            CompileDescriptor(descriptor.Children[0], path + ".children[0]"),
-            CompileDescriptor(descriptor.Children[1], path + ".children[1]"));
+        var left = CompileDescriptor(descriptor.Children[0], path + ".children[0]");
+        var right = CompileDescriptor(descriptor.Children[1], path + ".children[1]");
+
+        try
+        {
+            return combine(left, right);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidDataException(path + " has invalid cohort composition: " + exception.Message, exception);
+        }
     }
 
     private static CohortActivity CompileActivity(ComparisonSelectorDescriptor descriptor, string path)
