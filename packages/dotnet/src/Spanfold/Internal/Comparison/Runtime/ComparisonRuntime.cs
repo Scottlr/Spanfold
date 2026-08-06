@@ -128,7 +128,7 @@ internal static class ComparisonRuntime
             containmentArray,
             leadLagArray,
             asOfArray);
-        var extensionMetadata = cohortEvidence.BuildMetadata(aligned);
+        var cohortEvidenceMetadata = cohortEvidence.BuildMetadata(aligned);
 
         return new ComparisonResult(
             prepared.Plan,
@@ -148,7 +148,7 @@ internal static class ComparisonRuntime
             leadLagSummaryArray,
             asOfArray,
             rowFinalities,
-            extensionMetadata);
+            cohortEvidenceMetadata: cohortEvidenceMetadata);
     }
 
     private static void AddOverlapRows(

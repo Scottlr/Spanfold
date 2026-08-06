@@ -1,15 +1,45 @@
 namespace Spanfold.Comparison;
 
 /// <summary>
-/// Describes parsed evidence for one cohort-aligned segment.
+/// Describes evidence for one cohort-aligned segment.
 /// </summary>
 /// <remarks>
 /// Cohort evidence explains why a cohort selector was considered active or
-/// inactive over a segment. It is derived from comparison extension metadata
-/// and is intended for diagnostics, export readers, and debug tooling.
+/// inactive over a segment. Results carry this typed representation directly;
+/// string extension metadata remains available as a compatibility projection.
 /// </remarks>
 public sealed record CohortEvidenceMetadata
 {
+    private readonly string? rawValue;
+
+    /// <summary>
+    /// Creates cohort evidence metadata.
+    /// </summary>
+    /// <param name="segmentIndex">The aligned segment index that emitted the evidence.</param>
+    /// <param name="rule">The cohort activity rule name.</param>
+    /// <param name="requiredCount">The number of active members required by the rule.</param>
+    /// <param name="activeCount">The number of active members observed on the segment.</param>
+    /// <param name="isActive">Whether the cohort was active on the segment.</param>
+    /// <param name="activeSources">The active source identities represented as stable strings.</param>
+    public CohortEvidenceMetadata(
+        int segmentIndex,
+        string rule,
+        int requiredCount,
+        int activeCount,
+        bool isActive,
+        IEnumerable<string> activeSources)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rule);
+        ArgumentNullException.ThrowIfNull(activeSources);
+
+        SegmentIndex = segmentIndex;
+        Rule = rule;
+        RequiredCount = requiredCount;
+        ActiveCount = activeCount;
+        IsActive = isActive;
+        ActiveSources = activeSources.ToArray();
+    }
+
     /// <summary>
     /// Creates parsed cohort evidence metadata.
     /// </summary>
@@ -28,18 +58,10 @@ public sealed record CohortEvidenceMetadata
         bool isActive,
         IEnumerable<string> activeSources,
         string rawValue)
+        : this(segmentIndex, rule, requiredCount, activeCount, isActive, activeSources)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(rule);
-        ArgumentNullException.ThrowIfNull(activeSources);
         ArgumentNullException.ThrowIfNull(rawValue);
-
-        SegmentIndex = segmentIndex;
-        Rule = rule;
-        RequiredCount = requiredCount;
-        ActiveCount = activeCount;
-        IsActive = isActive;
-        ActiveSources = activeSources.ToArray();
-        RawValue = rawValue;
+        this.rawValue = rawValue;
     }
 
     /// <summary>
@@ -75,5 +97,5 @@ public sealed record CohortEvidenceMetadata
     /// <summary>
     /// Gets the raw extension metadata value.
     /// </summary>
-    public string RawValue { get; }
+    public string RawValue => this.rawValue ?? CohortEvidenceMetadataCompatibilityProjection.SerializeValue(this);
 }

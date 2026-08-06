@@ -35,6 +35,7 @@ public sealed class ComparisonResult
     /// <param name="asOfRows">Rows emitted by the as-of comparator.</param>
     /// <param name="rowFinalities">Finality metadata for materialized rows.</param>
     /// <param name="extensionMetadata">Serializable metadata emitted by comparison extensions.</param>
+    /// <param name="cohortEvidenceMetadata">Typed cohort evidence emitted by the comparison runtime.</param>
     internal ComparisonResult(
         ComparisonPlan plan,
         IEnumerable<ComparisonPlanDiagnostic> diagnostics,
@@ -53,7 +54,8 @@ public sealed class ComparisonResult
         IEnumerable<LeadLagSummary>? leadLagSummaries = null,
         IEnumerable<AsOfRow>? asOfRows = null,
         IEnumerable<ComparisonRowFinality>? rowFinalities = null,
-        IEnumerable<ComparisonExtensionMetadata>? extensionMetadata = null)
+        IEnumerable<ComparisonExtensionMetadata>? extensionMetadata = null,
+        IEnumerable<CohortEvidenceMetadata>? cohortEvidenceMetadata = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(diagnostics);
@@ -75,7 +77,10 @@ public sealed class ComparisonResult
         LeadLagSummaries = Materialize(leadLagSummaries);
         AsOfRows = Materialize(asOfRows);
         RowFinalities = Materialize(rowFinalities);
-        ExtensionMetadata = Materialize(extensionMetadata);
+        CohortEvidenceMetadata = Materialize(cohortEvidenceMetadata);
+        ExtensionMetadata = CohortEvidenceMetadataCompatibilityProjection.Project(
+            extensionMetadata,
+            CohortEvidenceMetadata);
         RecordEvidence = prepared is null
             ? []
             : Array.AsReadOnly(prepared.SelectedWindows
@@ -203,6 +208,8 @@ public sealed class ComparisonResult
     /// Gets serializable metadata emitted by comparison extensions.
     /// </summary>
     public IReadOnlyList<ComparisonExtensionMetadata> ExtensionMetadata { get; }
+
+    internal IReadOnlyList<CohortEvidenceMetadata> CohortEvidenceMetadata { get; }
 
     /// <summary>
     /// Gets source segment, tag, and boundary evidence for selected records.

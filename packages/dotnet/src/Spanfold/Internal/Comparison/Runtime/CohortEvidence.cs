@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text.Json;
 using Spanfold.Internal.Keys;
 
 namespace Spanfold.Internal.Comparison;
@@ -50,14 +48,14 @@ internal sealed class CohortEvidence
             this.cohort.Value.CohortSources.Count);
     }
 
-    internal IReadOnlyList<ComparisonExtensionMetadata> BuildMetadata(AlignedComparison aligned)
+    internal IReadOnlyList<CohortEvidenceMetadata> BuildMetadata(AlignedComparison aligned)
     {
         if (!HasCohort)
         {
             return [];
         }
 
-        var metadata = new List<ComparisonExtensionMetadata>();
+        var metadata = new List<CohortEvidenceMetadata>();
         for (var i = 0; i < aligned.Segments.Count; i++)
         {
             var segment = aligned.Segments[i];
@@ -66,20 +64,17 @@ internal sealed class CohortEvidence
                 continue;
             }
 
-            metadata.Add(new ComparisonExtensionMetadata(
-                "spanfold.cohort",
-                "segment[" + i.ToString(CultureInfo.InvariantCulture) + "]",
-                Describe(segment)));
+            metadata.Add(Describe(i, segment));
         }
 
         return metadata.ToArray();
     }
 
-    private string Describe(AlignedSegment segment)
+    private CohortEvidenceMetadata Describe(int segmentIndex, AlignedSegment segment)
     {
         if (this.cohort is null)
         {
-            return string.Empty;
+            throw new InvalidOperationException("Cohort evidence requires a cohort selector.");
         }
 
         var activeSources = ActiveSources(segment);
@@ -87,14 +82,13 @@ internal sealed class CohortEvidence
             activeSources.Count,
             this.cohort.Value.CohortSources.Count);
 
-        return JsonSerializer.Serialize(new
-        {
-            rule = this.cohort.Value.CohortActivity!.Name,
-            required = RequiredCount(),
-            activeCount = activeSources.Count,
-            isActive = active,
-            activeSources = activeSources.Select(static source => source?.ToString() ?? "<null>").ToArray()
-        });
+        return new CohortEvidenceMetadata(
+            segmentIndex,
+            this.cohort.Value.CohortActivity!.Name,
+            RequiredCount(),
+            activeSources.Count,
+            active,
+            activeSources.Select(static source => source?.ToString() ?? "<null>"));
     }
 
     private int RequiredCount()
