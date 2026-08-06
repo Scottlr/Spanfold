@@ -213,6 +213,7 @@ internal static class ComparisonExporter
         writer.WritePropertyName("plan");
         writer.WriteStartObject();
         WritePlanFields(writer, result.Plan, result.Diagnostics);
+        writer.WriteString("compatibilityIdentity", result.Plan.CompatibilityIdentity.Fingerprint);
         writer.WriteEndObject();
         WriteDiagnostics(writer, "diagnostics", result.Diagnostics);
         if (result.RecordEvidence.Any(static evidence =>

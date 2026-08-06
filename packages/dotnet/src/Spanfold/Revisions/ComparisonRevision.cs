@@ -38,7 +38,12 @@ public sealed class ComparisonRevision
         && LeadLagSummaries.Count == 0
         && AssessmentViolations.Count == 0;
 
-    /// <summary>Creates a semantic revision between two comparison snapshots.</summary>
+    /// <summary>Creates a semantic revision between two compatible comparison snapshots.</summary>
+    /// <remarks>
+    /// Availability and open-window horizons may differ. All other plan semantics must match.
+    /// Runtime-only selectors are compatible only when both plans retain the same predicate delegate.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The snapshots answer incompatible comparison plans.</exception>
     public static ComparisonRevision Between(
         ComparisonResult previous,
         ComparisonResult current,
@@ -47,6 +52,13 @@ public sealed class ComparisonRevision
     {
         ArgumentNullException.ThrowIfNull(previous);
         ArgumentNullException.ThrowIfNull(current);
+
+        if (!previous.Plan.CompatibilityIdentity.IsCompatibleWith(current.Plan.CompatibilityIdentity))
+        {
+            throw new ArgumentException(
+                "Comparison revisions require snapshots produced by compatible comparison plans.",
+                nameof(current));
+        }
 
         if ((previousAssessment is null) != (currentAssessment is null))
         {

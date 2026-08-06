@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using Spanfold.Artifacts.Internal;
+
 namespace Spanfold.Artifacts;
 
 /// <summary>
@@ -11,6 +13,8 @@ public sealed class ComparisonArtifact
         string schema,
         int schemaVersion,
         string name,
+        string? compatibilityIdentity,
+        string legacyCompatibilityIdentity,
         bool isValid,
         IEnumerable<ComparisonArtifactRow> rows,
         string rawJson)
@@ -18,6 +22,8 @@ public sealed class ComparisonArtifact
         Schema = schema;
         SchemaVersion = schemaVersion;
         Name = name;
+        CompatibilityIdentity = compatibilityIdentity;
+        LegacyCompatibilityIdentity = legacyCompatibilityIdentity;
         IsValid = isValid;
         RowMetadata = Array.AsReadOnly(rows.ToArray());
         Rows = Array.AsReadOnly(RowMetadata.Select(static row => row.Reference).ToArray());
@@ -32,6 +38,10 @@ public sealed class ComparisonArtifact
 
     /// <summary>Gets the comparison plan name.</summary>
     public string Name { get; }
+
+    internal string? CompatibilityIdentity { get; }
+
+    internal string LegacyCompatibilityIdentity { get; }
 
     /// <summary>Gets whether the producing comparison result was valid.</summary>
     public bool IsValid { get; }
@@ -84,10 +94,15 @@ public sealed class ComparisonArtifact
                 item.GetProperty("version").GetInt32()));
         }
 
+        var plan = root.GetProperty("plan");
         return new ComparisonArtifact(
             schema!,
             schemaVersion,
-            root.GetProperty("plan").GetProperty("name").GetString() ?? string.Empty,
+            plan.GetProperty("name").GetString() ?? string.Empty,
+            plan.TryGetProperty("compatibilityIdentity", out var identity)
+                ? identity.GetString()
+                : null,
+            ComparisonArtifactPlanIdentity.CreateLegacy(plan),
             root.GetProperty("isValid").GetBoolean(),
             rows,
             json);

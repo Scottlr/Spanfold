@@ -37,6 +37,7 @@ public sealed class ComparisonPlan
         Normalization = normalization ?? ComparisonNormalizationPolicy.Default;
         Comparators = MaterializeComparators(comparators);
         IsStrict = isStrict;
+        CompatibilityIdentity = ComparisonPlanIdentity.Create(this);
     }
 
     /// <summary>
@@ -73,6 +74,8 @@ public sealed class ComparisonPlan
     /// Gets whether later execution should treat validation warnings strictly.
     /// </summary>
     public bool IsStrict { get; }
+
+    internal ComparisonPlanIdentity CompatibilityIdentity { get; }
 
     /// <summary>
     /// Gets whether every selector in the plan can be exported as portable data.
