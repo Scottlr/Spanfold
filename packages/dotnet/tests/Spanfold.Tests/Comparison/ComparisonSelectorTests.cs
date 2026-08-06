@@ -48,6 +48,42 @@ public sealed class ComparisonSelectorTests
         Assert.False(selector.Matches(ClosedWindow(source: "provider-c")));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CohortAndNarrowingSelectorPreservesCohortSemantics(bool cohortFirst)
+    {
+        var cohort = ComparisonSelector.ForCohortSources(
+            ["provider-a", "provider-b"],
+            CohortActivity.AtLeast(2));
+        var narrowing = ComparisonSelector.ForWindowName("DeviceOffline");
+
+        var selector = cohortFirst
+            ? cohort.And(narrowing)
+            : narrowing.And(cohort);
+
+        Assert.Equal(cohort.CohortActivity, selector.CohortActivity);
+        Assert.Equal(cohort.CohortSources, selector.CohortSources);
+        Assert.True(selector.Matches(ClosedWindow(windowName: "DeviceOffline", source: "provider-a")));
+        Assert.False(selector.Matches(ClosedWindow(windowName: "DeviceDegraded", source: "provider-a")));
+    }
+
+    [Fact]
+    public void CohortCompositionRejectsAmbiguousOperators()
+    {
+        var first = ComparisonSelector.ForCohortSources(
+            ["provider-a", "provider-b"],
+            CohortActivity.AtLeast(2));
+        var second = ComparisonSelector.ForCohortSources(
+            ["provider-c", "provider-d"],
+            CohortActivity.Any());
+        var narrowing = ComparisonSelector.ForWindowName("DeviceOffline");
+
+        Assert.Throws<InvalidOperationException>(() => first.Or(narrowing));
+        Assert.Throws<InvalidOperationException>(() => narrowing.Or(first));
+        Assert.Throws<InvalidOperationException>(() => first.And(second));
+    }
+
     [Fact]
     public void RuntimeSelectorMatchesByDelegateAndIsNotSerializable()
     {

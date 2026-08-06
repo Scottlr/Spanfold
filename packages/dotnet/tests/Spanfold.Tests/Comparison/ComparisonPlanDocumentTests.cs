@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 using Spanfold.Artifacts.Comparison;
 using Spanfold.Testing;
 
@@ -77,6 +79,61 @@ public sealed class ComparisonPlanDocumentTests
         Assert.Equal(["provider-b", "provider-c"], compiledCohort.CohortSources);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PortableRoundTrip_ComposedCohort_PreservesActivityAndPopulation(bool cohortFirst)
+    {
+        var cohort = ComparisonSelector.ForCohortSources(
+            ["provider-b", "provider-c"],
+            CohortActivity.AtLeast(2));
+        var narrowing = ComparisonSelector.ForWindowName("DeviceOffline");
+        var composed = cohortFirst
+            ? cohort.And(narrowing)
+            : narrowing.And(cohort);
+        var plan = new ComparisonPlan(
+            "Portable composed cohort plan",
+            ComparisonSelector.ForSource("provider-a"),
+            [composed],
+            ComparisonScope.All(),
+            ComparisonNormalizationPolicy.Default,
+            ["overlap"]);
+
+        var compiled = ComparisonPlanDocument.Parse(
+                ComparisonPlanDocument.FromPlan(plan).WriteJson())
+            .Compile();
+
+        var compiledCohort = Assert.Single(compiled.Against);
+        Assert.Equal("at-least", compiledCohort.CohortActivity!.Name);
+        Assert.Equal(2, compiledCohort.CohortActivity.Count);
+        Assert.Equal(["provider-b", "provider-c"], compiledCohort.CohortSources);
+    }
+
+    [Fact]
+    public void Compile_PortableCohortOrComposition_FailsClosed()
+    {
+        var root = CreateComposedCohortDocument();
+        root["against"]![0]!["descriptor"]!["kind"] = "or";
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            ComparisonPlanDocument.Parse(root.ToJsonString()).Compile());
+
+        Assert.Contains("invalid cohort composition", exception.Message);
+    }
+
+    [Fact]
+    public void Compile_PortableTwoCohortComposition_FailsClosed()
+    {
+        var root = CreateComposedCohortDocument();
+        var children = root["against"]![0]!["descriptor"]!["children"]!.AsArray();
+        children[1] = children[0]!.DeepClone();
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            ComparisonPlanDocument.Parse(root.ToJsonString()).Compile());
+
+        Assert.Contains("invalid cohort composition", exception.Message);
+    }
+
     [Fact]
     public void Parse_UnsupportedSchemaVersion_FailsClosed()
     {
@@ -109,6 +166,23 @@ public sealed class ComparisonPlanDocumentTests
             ComparisonScope.All(),
             ComparisonNormalizationPolicy.Default,
             ["overlap"]);
+    }
+
+    private static JsonObject CreateComposedCohortDocument()
+    {
+        var cohort = ComparisonSelector.ForCohortSources(
+            ["provider-b", "provider-c"],
+            CohortActivity.AtLeast(2));
+        var plan = new ComparisonPlan(
+            "Portable composed cohort plan",
+            ComparisonSelector.ForSource("provider-a"),
+            [cohort.And(ComparisonSelector.ForWindowName("DeviceOffline"))],
+            ComparisonScope.All(),
+            ComparisonNormalizationPolicy.Default,
+            ["overlap"]);
+        var json = ComparisonPlanDocument.FromPlan(plan).WriteJson();
+
+        return JsonNode.Parse(json)!.AsObject();
     }
 
     private static ComparisonResult Run(WindowHistory history, ComparisonPlan plan)

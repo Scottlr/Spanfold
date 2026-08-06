@@ -93,6 +93,44 @@ public sealed class CohortComparisonTests
         Assert.Empty(result.ResidualRows);
     }
 
+    [Theory]
+    [InlineData(true, 1, 10)]
+    [InlineData(true, 2, 0)]
+    [InlineData(false, 1, 10)]
+    [InlineData(false, 2, 0)]
+    public void ComposedAtLeastCohortUsesThresholdRegardlessOfOperandOrder(
+        bool cohortFirst,
+        int activeSourceCount,
+        long expectedResidualLength)
+    {
+        var pipeline = CreatePipeline();
+
+        AddClosedWindow(pipeline, source: "source-a", start: 1, end: 11);
+        AddClosedWindow(pipeline, source: "source-b", start: 1, end: 11);
+        if (activeSourceCount == 2)
+        {
+            AddClosedWindow(pipeline, source: "source-c", start: 1, end: 11);
+        }
+
+        var cohort = ComparisonSelector.ForCohortSources(
+            ["source-b", "source-c"],
+            CohortActivity.AtLeast(2));
+        var narrowing = ComparisonSelector.ForWindowName("SelectionPriced");
+        var composed = cohortFirst
+            ? cohort.And(narrowing)
+            : narrowing.And(cohort);
+
+        var result = pipeline.History
+            .Compare("Source A vs composed threshold cohort")
+            .Target("source-a", selector => selector.Source("source-a"))
+            .Against("cohort", _ => composed)
+            .Within(scope => scope.Window("SelectionPriced"))
+            .Using(comparators => comparators.Residual())
+            .Run();
+
+        Assert.Equal(expectedResidualLength, result.ResidualRows.TotalPositionLength());
+    }
+
     [Fact]
     public void ResidualAgainstAtMostCohortUsesThreshold()
     {

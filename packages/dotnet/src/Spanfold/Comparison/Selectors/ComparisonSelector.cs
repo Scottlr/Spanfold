@@ -337,9 +337,11 @@ public readonly record struct ComparisonSelector
     /// </summary>
     /// <param name="other">The selector to combine with this selector.</param>
     /// <returns>A combined selector.</returns>
+    /// <exception cref="InvalidOperationException">Both selectors carry cohort semantics.</exception>
     public ComparisonSelector And(ComparisonSelector other)
     {
         var current = this;
+        var cohort = GetSingleCohort(current, other);
 
         return new ComparisonSelector(
             $"{Name}&{other.Name}",
@@ -347,6 +349,8 @@ public readonly record struct ComparisonSelector
             IsSerializable && other.IsSerializable,
             (window, keyComparer) => current.Matches(window, keyComparer)
                 && other.Matches(window, keyComparer),
+            cohort?.CohortActivity,
+            cohort?.CohortSources,
             descriptor: current.Descriptor is { } left && other.Descriptor is { } right
                 ? new ComparisonSelectorDescriptor("and", children: [left, right])
                 : null);
@@ -357,9 +361,14 @@ public readonly record struct ComparisonSelector
     /// </summary>
     /// <param name="other">The selector to combine with this selector.</param>
     /// <returns>A combined selector.</returns>
+    /// <exception cref="InvalidOperationException">Either selector carries cohort semantics.</exception>
     public ComparisonSelector Or(ComparisonSelector other)
     {
         var current = this;
+        if (current.CohortActivity is not null || other.CohortActivity is not null)
+        {
+            throw new InvalidOperationException("Cohort selectors cannot be combined with logical OR.");
+        }
 
         return new ComparisonSelector(
             $"{Name}|{other.Name}",
@@ -398,5 +407,24 @@ public readonly record struct ComparisonSelector
     private static void EnsurePortableValue(object value)
     {
         _ = CanonicalValueFormatter.Format(value);
+    }
+
+    private static ComparisonSelector? GetSingleCohort(
+        ComparisonSelector left,
+        ComparisonSelector right)
+    {
+        var leftIsCohort = left.CohortActivity is not null;
+        var rightIsCohort = right.CohortActivity is not null;
+        if (leftIsCohort && rightIsCohort)
+        {
+            throw new InvalidOperationException("Two cohort selectors cannot be combined.");
+        }
+
+        if (leftIsCohort)
+        {
+            return left;
+        }
+
+        return rightIsCohort ? right : null;
     }
 }
