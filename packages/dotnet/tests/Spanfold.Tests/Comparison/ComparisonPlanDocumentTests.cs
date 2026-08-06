@@ -157,6 +157,52 @@ public sealed class ComparisonPlanDocumentTests
         Assert.Contains("future-selector", exception.Message);
     }
 
+    [Fact]
+    public void Write_ExistingDestination_ReplacesWithDeterministicJson()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "spanfold-plan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "portable-plan.json");
+        File.WriteAllText(path, "old plan");
+        var document = ComparisonPlanDocument.FromPlan(CreateSimplePlan());
+
+        try
+        {
+            document.Write(path);
+
+            Assert.Equal(document.WriteJson(), File.ReadAllText(path));
+            Assert.Empty(Directory.EnumerateFiles(directory, ".portable-plan.json.tmp-*"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Write_ReplacementFails_RemovesTemporaryFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "spanfold-plan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "portable-plan.json");
+        Directory.CreateDirectory(path);
+        var markerPath = Path.Combine(path, "preserve");
+        File.WriteAllText(markerPath, "existing destination");
+        var document = ComparisonPlanDocument.FromPlan(CreateSimplePlan());
+
+        try
+        {
+            Assert.ThrowsAny<IOException>(() => document.Write(path));
+
+            Assert.Equal("existing destination", File.ReadAllText(markerPath));
+            Assert.Empty(Directory.EnumerateFiles(directory, ".portable-plan.json.tmp-*"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static ComparisonPlan CreateSimplePlan()
     {
         return new ComparisonPlan(

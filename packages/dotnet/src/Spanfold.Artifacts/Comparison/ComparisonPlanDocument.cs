@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 
+using Spanfold.Artifacts.Internal;
 using Spanfold.Comparison;
 
 namespace Spanfold.Artifacts.Comparison;
@@ -136,7 +137,7 @@ public sealed record ComparisonPlanDocument
     public void Write(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        File.WriteAllText(Path.GetFullPath(path), WriteJson());
+        AtomicTextFile.Write(Path.GetFullPath(path), WriteJson());
     }
 
     /// <summary>Compiles the document into the existing executable comparison plan API.</summary>
