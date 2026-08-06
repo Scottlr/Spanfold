@@ -87,7 +87,7 @@ public sealed class ComparisonPlan
         : Target.Value.IsSerializable && Against.All(static selector => selector.IsSerializable);
 
     /// <summary>
-    /// Validates the structural completeness of the comparison plan.
+    /// Validates the structural and temporal completeness of the comparison plan.
     /// </summary>
     /// <remarks>
     /// Diagnostics are returned in stable path order so tooling can snapshot and
@@ -165,6 +165,16 @@ public sealed class ComparisonPlan
                 "scope",
                 ComparisonPlanDiagnosticSeverity.Error));
         }
+        else if (!IsDefinedTimeAxis(Scope.TimeAxis))
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.InvalidTemporalAxis,
+                $"Comparison scope temporal axis '{Scope.TimeAxis}' is not supported.",
+                "scope.timeAxis",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+
+        ValidateNormalization(diagnostics);
 
         if (Comparators.Count == 0)
         {
@@ -192,6 +202,121 @@ public sealed class ComparisonPlan
         }
 
         return diagnostics.ToArray();
+    }
+
+    private void ValidateNormalization(List<ComparisonPlanDiagnostic> diagnostics)
+    {
+        var hasDefinedNormalizationAxis = IsDefinedTimeAxis(Normalization.TimeAxis);
+        if (!hasDefinedNormalizationAxis)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.InvalidTemporalAxis,
+                $"Comparison normalization temporal axis '{Normalization.TimeAxis}' is not supported.",
+                "normalization.timeAxis",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+
+        if (Scope is not null
+            && IsDefinedTimeAxis(Scope.TimeAxis)
+            && hasDefinedNormalizationAxis
+            && Scope.TimeAxis != Normalization.TimeAxis)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.MixedTimeAxes,
+                "Comparison scope and normalization policy use different temporal axes.",
+                "normalization.timeAxis",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+
+        var hasDefinedOpenWindowPolicy = Normalization.OpenWindowPolicy is
+            ComparisonOpenWindowPolicy.RequireClosed or ComparisonOpenWindowPolicy.ClipToHorizon;
+        if (!hasDefinedOpenWindowPolicy)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.InvalidOpenWindowPolicy,
+                $"Open-window policy '{Normalization.OpenWindowPolicy}' is not supported.",
+                "normalization.openWindowPolicy",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+        else
+        {
+            ValidateOpenWindowPolicy(diagnostics, hasDefinedNormalizationAxis);
+        }
+
+        var hasDefinedNullTimestampPolicy = Normalization.NullTimestampPolicy is
+            ComparisonNullTimestampPolicy.Reject or ComparisonNullTimestampPolicy.Exclude;
+        if (!hasDefinedNullTimestampPolicy)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.InvalidNullTimestampPolicy,
+                $"Null-timestamp policy '{Normalization.NullTimestampPolicy}' is not supported.",
+                "normalization.nullTimestampPolicy",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+        else if (hasDefinedNormalizationAxis
+            && Normalization.TimeAxis == TemporalAxis.ProcessingPosition
+            && Normalization.NullTimestampPolicy != ComparisonNullTimestampPolicy.Reject)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.InvalidNormalizationPolicy,
+                "Processing-position normalization cannot exclude missing event timestamps.",
+                "normalization.nullTimestampPolicy",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+
+        if (Normalization.KnownAt.HasValue
+            && Normalization.KnownAt.Value.Axis != TemporalAxis.ProcessingPosition)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.KnownAtRequiresProcessingPosition,
+                "Known-at filtering currently requires processing-position availability information.",
+                "normalization.knownAt",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+    }
+
+    private void ValidateOpenWindowPolicy(
+        List<ComparisonPlanDiagnostic> diagnostics,
+        bool hasDefinedNormalizationAxis)
+    {
+        if (Normalization.OpenWindowPolicy == ComparisonOpenWindowPolicy.RequireClosed)
+        {
+            if (Normalization.OpenWindowHorizon.HasValue)
+            {
+                diagnostics.Add(new ComparisonPlanDiagnostic(
+                    ComparisonPlanValidationCode.InvalidNormalizationPolicy,
+                    "Closed-window normalization cannot define an open-window horizon.",
+                    "normalization.openWindowHorizon",
+                    ComparisonPlanDiagnosticSeverity.Error));
+            }
+
+            return;
+        }
+
+        if (!Normalization.OpenWindowHorizon.HasValue)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.OpenWindowsWithoutPolicy,
+                "Open-window clipping requires an explicit horizon.",
+                "normalization.openWindowHorizon",
+                ComparisonPlanDiagnosticSeverity.Error));
+            return;
+        }
+
+        if (hasDefinedNormalizationAxis
+            && Normalization.OpenWindowHorizon.Value.Axis != Normalization.TimeAxis)
+        {
+            diagnostics.Add(new ComparisonPlanDiagnostic(
+                ComparisonPlanValidationCode.MixedTimeAxes,
+                "Open-window horizon must use the normalization temporal axis.",
+                "normalization.openWindowHorizon",
+                ComparisonPlanDiagnosticSeverity.Error));
+        }
+    }
+
+    private static bool IsDefinedTimeAxis(TemporalAxis axis)
+    {
+        return axis is TemporalAxis.ProcessingPosition or TemporalAxis.Timestamp;
     }
 
     private static IReadOnlyList<ComparisonSelector> Materialize(IEnumerable<ComparisonSelector>? selectors)

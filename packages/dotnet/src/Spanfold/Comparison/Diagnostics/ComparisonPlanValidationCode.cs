@@ -123,5 +123,25 @@ public enum ComparisonPlanValidationCode
     /// <summary>
     /// Indicates that hierarchy co-activity includes open windows without a bounded horizon.
     /// </summary>
-    HierarchyOpenWindowsWithoutHorizon = 23
+    HierarchyOpenWindowsWithoutHorizon = 23,
+
+    /// <summary>
+    /// Indicates that a comparison scope or normalization policy uses an unknown temporal axis.
+    /// </summary>
+    InvalidTemporalAxis = 24,
+
+    /// <summary>
+    /// Indicates that a normalization policy uses an unknown open-window policy.
+    /// </summary>
+    InvalidOpenWindowPolicy = 25,
+
+    /// <summary>
+    /// Indicates that a normalization policy uses an unknown missing-timestamp policy.
+    /// </summary>
+    InvalidNullTimestampPolicy = 26,
+
+    /// <summary>
+    /// Indicates that otherwise defined normalization policy values form an invalid combination.
+    /// </summary>
+    InvalidNormalizationPolicy = 27
 }

@@ -125,14 +125,14 @@ internal static class ComparisonExporter
 
     private static void EnsureExportable(ComparisonPlan plan)
     {
-        if (plan.IsSerializable)
+        var diagnostics = plan.Validate()
+            .Where(IsExportBlockingDiagnostic)
+            .ToArray();
+
+        if (plan.IsSerializable && diagnostics.Length == 0)
         {
             return;
         }
-
-        var diagnostics = plan.Validate()
-            .Where(static diagnostic => diagnostic.Code == ComparisonPlanValidationCode.NonSerializableSelector)
-            .ToArray();
 
         if (diagnostics.Length == 0)
         {
@@ -147,8 +147,23 @@ internal static class ComparisonExporter
         }
 
         throw new ComparisonExportException(
-            "Comparison plan contains runtime-only selectors and cannot be exported as portable data.",
+            plan.IsSerializable
+                ? "Comparison plan contains invalid temporal configuration and cannot be exported as portable data."
+                : "Comparison plan contains runtime-only selectors and cannot be exported as portable data.",
             diagnostics);
+    }
+
+    private static bool IsExportBlockingDiagnostic(ComparisonPlanDiagnostic diagnostic)
+    {
+        return diagnostic.Code is
+            ComparisonPlanValidationCode.NonSerializableSelector
+            or ComparisonPlanValidationCode.InvalidTemporalAxis
+            or ComparisonPlanValidationCode.InvalidOpenWindowPolicy
+            or ComparisonPlanValidationCode.InvalidNullTimestampPolicy
+            or ComparisonPlanValidationCode.InvalidNormalizationPolicy
+            or ComparisonPlanValidationCode.MixedTimeAxes
+            or ComparisonPlanValidationCode.OpenWindowsWithoutPolicy
+            or ComparisonPlanValidationCode.KnownAtRequiresProcessingPosition;
     }
 
     private static Utf8JsonWriter CreateWriter(Stream stream, bool indented)

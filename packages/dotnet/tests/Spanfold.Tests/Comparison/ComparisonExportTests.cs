@@ -87,6 +87,38 @@ public sealed class ComparisonExportTests
     }
 
     [Fact]
+    public void InvalidTemporalPlanFailsBeforePortableExport()
+    {
+        var plan = new ComparisonPlan(
+            "Invalid temporal QA",
+            ComparisonSelector.ForSource("provider-a"),
+            [ComparisonSelector.ForSource("provider-b")],
+            ComparisonScope.Window("DeviceOffline", TemporalAxis.Unknown),
+            ComparisonNormalizationPolicy.Default with
+            {
+                TimeAxis = TemporalAxis.Unknown
+            },
+            ["overlap"]
+            );
+
+        var exception = Assert.Throws<ComparisonExportException>(() => plan.ExportPortableJson());
+
+        Assert.Contains("invalid temporal configuration", exception.Message);
+        Assert.Collection(
+            exception.Diagnostics,
+            scope =>
+            {
+                Assert.Equal(ComparisonPlanValidationCode.InvalidTemporalAxis, scope.Code);
+                Assert.Equal("scope.timeAxis", scope.Path);
+            },
+            normalization =>
+            {
+                Assert.Equal(ComparisonPlanValidationCode.InvalidTemporalAxis, normalization.Code);
+                Assert.Equal("normalization.timeAxis", normalization.Path);
+            });
+    }
+
+    [Fact]
     public void ResultJsonLinesStreamsSummaryAndRows()
     {
         var result = CreateResult();
