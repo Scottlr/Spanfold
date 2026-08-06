@@ -3,6 +3,10 @@
 Spanfold CLI fixtures are compact JSON files for portable comparison examples and
 agent-readable regression cases.
 
+`Spanfold.Artifacts.Comparison.ComparisonFixtureRunner` owns validation,
+construction, and execution of this schema. The CLI calls that API directly;
+`Spanfold.Testing.ContractFixtureRunner` remains a compatibility facade.
+
 ## Shape
 
 JSON examples are left uncommented because JSON fixtures must remain valid JSON.

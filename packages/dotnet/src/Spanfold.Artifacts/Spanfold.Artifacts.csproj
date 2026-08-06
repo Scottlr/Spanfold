@@ -4,14 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <PackageId>Spanfold.Artifacts</PackageId>
     <Authors>Spanfold contributors</Authors>
-    <Description>Deterministic exports, audit bundles, and artifact verification for Spanfold comparisons.</Description>
+    <Description>Contract fixture execution, deterministic exports, audit bundles, and artifact verification for Spanfold comparisons.</Description>
     <PackageProjectUrl>https://github.com/Scottlr/spanfold</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Scottlr/spanfold</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Copyright>Copyright (c) 2026 Spanfold contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageTags>spanfold;comparison;artifacts;audit;verification</PackageTags>
+    <PackageTags>spanfold;comparison;artifacts;fixtures;audit;verification</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageReleaseNotes>See https://github.com/Scottlr/spanfold/blob/main/CHANGELOG.md for release details.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

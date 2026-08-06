@@ -19,7 +19,6 @@
   <ItemGroup>
     <ProjectReference Include="../Spanfold/Spanfold.csproj" />
     <ProjectReference Include="../Spanfold.Artifacts/Spanfold.Artifacts.csproj" />
-    <ProjectReference Include="../Spanfold.Testing/Spanfold.Testing.csproj" />
   </ItemGroup>
 
 </Project>

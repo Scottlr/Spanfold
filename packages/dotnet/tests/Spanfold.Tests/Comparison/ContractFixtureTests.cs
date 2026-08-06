@@ -1,7 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
-using Spanfold.Testing;
+using ArtifactFixtureRunner = Spanfold.Artifacts.Comparison.ComparisonFixtureRunner;
+using TestingFixtureRunner = Spanfold.Testing.ContractFixtureRunner;
 
 namespace Spanfold.Tests.Comparison;
 
@@ -13,7 +14,7 @@ public sealed class ContractFixtureTests
         foreach (var fixturePath in FixturePaths())
         {
             using var fixture = JsonDocument.Parse(File.ReadAllText(fixturePath));
-            var result = ContractFixtureRunner.Run(fixture.RootElement);
+            var result = ArtifactFixtureRunner.Run(fixture.RootElement);
 
             Assert.NotNull(result);
             Assert.Equal(
@@ -28,7 +29,7 @@ public sealed class ContractFixtureTests
         foreach (var fixturePath in FixturePaths())
         {
             using var fixture = JsonDocument.Parse(File.ReadAllText(fixturePath));
-            using var exported = JsonDocument.Parse(ContractFixtureRunner.Run(fixture.RootElement).ExportJson());
+            using var exported = JsonDocument.Parse(ArtifactFixtureRunner.Run(fixture.RootElement).ExportJson());
 
             AssertExpectedDiagnostics(fixture.RootElement, exported.RootElement);
             AssertExpectedSummaries(fixture.RootElement, exported.RootElement);
@@ -51,10 +52,21 @@ public sealed class ContractFixtureTests
         foreach (var fixturePath in invalidFixturePaths)
         {
             using var fixture = JsonDocument.Parse(File.ReadAllText(fixturePath));
-            using var exported = JsonDocument.Parse(ContractFixtureRunner.Run(fixture.RootElement).ExportJson());
+            using var exported = JsonDocument.Parse(ArtifactFixtureRunner.Run(fixture.RootElement).ExportJson());
 
             AssertExpectedDiagnostics(fixture.RootElement, exported.RootElement);
         }
+    }
+
+    [Fact]
+    public void TestingFacade_ValidFixture_MatchesArtifactsOwner()
+    {
+        using var fixture = JsonDocument.Parse(File.ReadAllText(FixturePaths()[0]));
+
+        var ownerResult = ArtifactFixtureRunner.Run(fixture.RootElement).ExportJson();
+        var facadeResult = TestingFixtureRunner.Run(fixture.RootElement).ExportJson();
+
+        Assert.Equal(ownerResult, facadeResult);
     }
 
     private static void AssertExpectedDiagnostics(JsonElement fixture, JsonElement exported)

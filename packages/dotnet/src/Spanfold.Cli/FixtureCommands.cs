@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-using Spanfold.Testing;
+using Spanfold.Artifacts.Comparison;
 
 namespace Spanfold.Cli;
 
@@ -10,7 +10,7 @@ internal static class FixtureCommands
     {
         var format = ReadFormat(args);
         using var fixture = JsonDocument.Parse(File.ReadAllText(args[1]));
-        var result = ContractFixtureRunner.Run(fixture.RootElement);
+        var result = ComparisonFixtureRunner.Run(fixture.RootElement);
 
         if (string.Equals(command, "audit", StringComparison.Ordinal))
         {
