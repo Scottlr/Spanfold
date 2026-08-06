@@ -1,0 +1,86 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+tab_width = 4
+
+# Keep correctness and security findings build-visible without forcing broad API and performance churn.
+dotnet_analyzer_diagnostic.severity = suggestion
+dotnet_analyzer_diagnostic.category-Design.severity = suggestion
+dotnet_analyzer_diagnostic.category-Globalization.severity = suggestion
+dotnet_analyzer_diagnostic.category-Interoperability.severity = suggestion
+dotnet_analyzer_diagnostic.category-Maintainability.severity = suggestion
+dotnet_analyzer_diagnostic.category-Naming.severity = suggestion
+dotnet_analyzer_diagnostic.category-Performance.severity = suggestion
+dotnet_analyzer_diagnostic.category-Reliability.severity = warning
+dotnet_analyzer_diagnostic.category-Security.severity = error
+dotnet_analyzer_diagnostic.category-Style.severity = suggestion
+dotnet_analyzer_diagnostic.category-Usage.severity = warning
+
+# These recommended rules currently require API-shape or broad performance changes; keep them review-visible.
+dotnet_diagnostic.CA1050.severity = suggestion
+dotnet_diagnostic.CA1305.severity = suggestion
+dotnet_diagnostic.CA1310.severity = suggestion
+dotnet_diagnostic.CA1512.severity = suggestion
+dotnet_diagnostic.CA1707.severity = suggestion
+dotnet_diagnostic.CA1720.severity = suggestion
+dotnet_diagnostic.CA1822.severity = suggestion
+dotnet_diagnostic.CA1859.severity = suggestion
+
+# Match the repository's established C# shape.
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = when_on_single_line:suggestion
+csharp_style_expression_bodied_accessors = when_on_single_line:suggestion
+csharp_style_prefer_not_pattern = true:suggestion
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:suggestion
+dotnet_style_qualification_for_field = true:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+csharp_indent_case_contents = true
+csharp_indent_case_contents_when_block = true
+csharp_indent_switch_labels = true
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_around_binary_operators = before_and_after
+csharp_space_after_comma = true
+csharp_space_before_comma = false
+csharp_preserve_single_line_statements = false
+
+# Private fields use camelCase in this repository; an underscore prefix is not part of the convention.
+dotnet_naming_rule.private_fields_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.private_fields_should_be_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_should_be_camel_case.style = camel_case
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.camel_case.capitalization = camel_case
+
+[*.{csproj,props,targets,slnx,xml}]
+indent_style = space
+indent_size = 2
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

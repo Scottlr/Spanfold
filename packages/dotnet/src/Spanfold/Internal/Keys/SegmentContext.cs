@@ -10,15 +10,23 @@ internal sealed class SegmentContext : IEquatable<SegmentContext>
 
     public bool Equals(SegmentContext? other)
     {
-        if (other is null || this.segments.Length != other.segments.Length) return false;
+        if (other is null || this.segments.Length != other.segments.Length)
+        {
+            return false;
+        }
+
         for (var i = 0; i < this.segments.Length; i++)
         {
             var left = this.segments[i];
             var right = other.segments[i];
             if (!string.Equals(left.Name, right.Name, StringComparison.Ordinal)
                 || !string.Equals(left.ParentName, right.ParentName, StringComparison.Ordinal)
-                || !EqualityComparer<object?>.Default.Equals(left.Value, right.Value)) return false;
+                || !EqualityComparer<object?>.Default.Equals(left.Value, right.Value))
+            {
+                return false;
+            }
         }
+
         return true;
     }
 

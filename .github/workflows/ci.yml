@@ -20,7 +20,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet restore Spanfold.slnx
-      - run: dotnet test Spanfold.slnx --no-restore --configuration Release
+      - name: Verify .NET formatting and analyzer style
+        run: dotnet format Spanfold.slnx --no-restore --verify-no-changes --severity warn
+      - name: Build with .NET analyzers
+        run: dotnet build Spanfold.slnx --no-restore --configuration Release
+      - run: dotnet test Spanfold.slnx --no-restore --no-build --configuration Release
       - name: Pack NuGet packages
         run: |
           rm -rf artifacts/package

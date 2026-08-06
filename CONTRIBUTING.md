@@ -7,11 +7,18 @@ From `packages/dotnet`:
 
 ```text
 dotnet restore Spanfold.slnx
-dotnet test Spanfold.slnx --no-restore --configuration Release
+dotnet format Spanfold.slnx --no-restore --verify-no-changes --severity warn
+dotnet build Spanfold.slnx --no-restore --configuration Release
+dotnet test Spanfold.slnx --no-restore --no-build --configuration Release
 dotnet pack src/Spanfold/Spanfold.csproj --no-restore --configuration Release --output artifacts/package
 dotnet pack src/Spanfold.Artifacts/Spanfold.Artifacts.csproj --no-restore --configuration Release --output artifacts/package
 dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj --no-restore --configuration Release --output artifacts/package
 ```
+
+The repository-root `.editorconfig` owns .NET formatting, code style, naming,
+and per-rule analyzer severity. `Directory.Build.props` enables the first-party
+.NET SDK analyzers during builds; no separate analyzer command or package is
+required.
 
 The published package order is `Spanfold`, `Spanfold.Artifacts`, then
 `Spanfold.Testing`. `Spanfold.Cli` is built and tested from the solution but is
