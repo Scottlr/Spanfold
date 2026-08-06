@@ -6,6 +6,7 @@ public sealed class ApiFreezeReadinessTests
 {
     [Theory]
     [InlineData("src/Spanfold/Spanfold.csproj")]
+    [InlineData("src/Spanfold.Artifacts/Spanfold.Artifacts.csproj")]
     [InlineData("src/Spanfold.Testing/Spanfold.Testing.csproj")]
     public void PackableProjectsEnforcePublicXmlDocumentation(string projectPath)
     {
@@ -17,20 +18,15 @@ public sealed class ApiFreezeReadinessTests
 
     [Theory]
     [InlineData("src/Spanfold/Spanfold.csproj", "true")]
+    [InlineData("src/Spanfold.Artifacts/Spanfold.Artifacts.csproj", "true")]
     [InlineData("src/Spanfold.Testing/Spanfold.Testing.csproj", "true")]
-    [InlineData("src/Spanfold.Cli/Spanfold.Cli.csproj", "true")]
+    [InlineData("src/Spanfold.Cli/Spanfold.Cli.csproj", "false")]
     [InlineData("benchmarks/Spanfold.Benchmarks/Spanfold.Benchmarks.csproj", "false")]
     public void PackageBoundariesAreExplicit(string projectPath, string expectedPackable)
     {
         var project = LoadProject(projectPath);
 
-        var isPackable = GetProperty(project, "IsPackable");
-        if (string.IsNullOrEmpty(isPackable) && projectPath == "src/Spanfold/Spanfold.csproj")
-        {
-            isPackable = "true";
-        }
-
-        Assert.Equal(expectedPackable, isPackable);
+        Assert.Equal(expectedPackable, GetProperty(project, "IsPackable"));
     }
 
     private static XDocument LoadProject(string projectPath)
