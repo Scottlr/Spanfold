@@ -44,7 +44,8 @@
         "path": "comparators[3]",
         "severity": "Warning"
       }
-    ]
+    ],
+    "compatibilityIdentity": "spanfold.comparison.compatibility.v1:7859DCF18568027D4C46217AB720D5C136211C68C525FB76989C5188FA01F8AD"
   },
   "diagnostics": [
     {
