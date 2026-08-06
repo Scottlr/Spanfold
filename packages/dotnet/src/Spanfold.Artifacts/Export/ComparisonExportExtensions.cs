@@ -163,7 +163,7 @@ public static class ComparisonExportExtensions
             Directory.CreateDirectory(directory);
         }
 
-        WriteAtomically(fullPath, result.ExportDebugHtml());
+        AtomicTextFile.Write(fullPath, result.ExportDebugHtml());
     }
 
     /// <summary>
@@ -194,24 +194,6 @@ public static class ComparisonExportExtensions
             Directory.CreateDirectory(directory);
         }
 
-        WriteAtomically(fullPath, content);
-    }
-
-    private static void WriteAtomically(string path, string content)
-    {
-        var directory = Path.GetDirectoryName(path)!;
-        var temporary = Path.Combine(directory, "." + Path.GetFileName(path) + ".tmp-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            File.WriteAllText(temporary, content);
-            File.Move(temporary, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporary))
-            {
-                File.Delete(temporary);
-            }
-        }
+        AtomicTextFile.Write(fullPath, content);
     }
 }
