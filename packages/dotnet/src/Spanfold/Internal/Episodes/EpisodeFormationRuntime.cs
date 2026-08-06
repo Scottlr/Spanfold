@@ -16,7 +16,7 @@ internal static class EpisodeFormationRuntime
         for (var i = 0; i < windows.Count; i++)
         {
             var window = windows[i];
-            if (!plan.Selector.Matches(window)
+            if (!plan.Selector.Matches(window, history.GetKeyComparer(window.WindowName))
                 || !WindowScopeMatcher.Matches(window, plan.Scope))
             {
                 continue;

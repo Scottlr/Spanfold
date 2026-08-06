@@ -12,13 +12,13 @@ namespace Spanfold.Comparison;
 /// </remarks>
 public readonly record struct ComparisonSelector
 {
-    private readonly Func<WindowRecord, bool>? predicate;
+    private readonly Func<WindowRecord, IEqualityComparer<object>, bool>? predicate;
 
     private ComparisonSelector(
         string name,
         string description,
         bool isSerializable,
-        Func<WindowRecord, bool>? predicate,
+        Func<WindowRecord, IEqualityComparer<object>, bool>? predicate,
         CohortActivity? cohortActivity = null,
         IReadOnlyList<object>? cohortSources = null,
         ComparisonSelectorDescriptor? descriptor = null)
@@ -79,7 +79,7 @@ public readonly record struct ComparisonSelector
             $"window:{windowName}",
             $"window name = {windowName}",
             isSerializable: true,
-            window => string.Equals(window.WindowName, windowName, StringComparison.Ordinal),
+            (window, _) => string.Equals(window.WindowName, windowName, StringComparison.Ordinal),
             descriptor: new ComparisonSelectorDescriptor("windowName", value: windowName));
     }
 
@@ -97,7 +97,7 @@ public readonly record struct ComparisonSelector
             $"key:{key}",
             $"key = {key}",
             isSerializable: true,
-            window => EqualityComparer<object>.Default.Equals(window.Key, key),
+            (window, keyComparer) => keyComparer.Equals(window.Key, key),
             descriptor: new ComparisonSelectorDescriptor("key", value: key));
     }
 
@@ -115,7 +115,7 @@ public readonly record struct ComparisonSelector
             $"source:{source}",
             $"source = {source}",
             isSerializable: true,
-                window => EqualityComparer<object?>.Default.Equals(window.Source, source),
+            (window, _) => EqualityComparer<object?>.Default.Equals(window.Source, source),
             descriptor: new ComparisonSelectorDescriptor("source", value: source));
     }
 
@@ -181,7 +181,7 @@ public readonly record struct ComparisonSelector
             "sources:" + string.Join(",", orderedSources.Select(static source => source.ToString())),
             "source in [" + string.Join(", ", orderedSources.Select(static source => source.ToString())) + "]",
             isSerializable: true,
-            window =>
+            (window, _) =>
             {
                 for (var i = 0; i < orderedSources.Length; i++)
                 {
@@ -216,7 +216,7 @@ public readonly record struct ComparisonSelector
             $"partition:{partition}",
             $"partition = {partition}",
             isSerializable: true,
-            window => EqualityComparer<object?>.Default.Equals(window.Partition, partition),
+            (window, _) => EqualityComparer<object?>.Default.Equals(window.Partition, partition),
             descriptor: new ComparisonSelectorDescriptor("partition", value: partition));
     }
 
@@ -237,7 +237,7 @@ public readonly record struct ComparisonSelector
             $"position:{startInclusive}..{endExclusive?.ToString() ?? "*"}",
             $"start position in [{startInclusive}, {endExclusive?.ToString() ?? "*"})",
             isSerializable: true,
-            window => window.StartPosition >= startInclusive
+            (window, _) => window.StartPosition >= startInclusive
                 && (!endExclusive.HasValue || window.StartPosition < endExclusive.Value),
             descriptor: new ComparisonSelectorDescriptor("positionRange", startPosition: startInclusive, endPosition: endExclusive));
     }
@@ -268,7 +268,7 @@ public readonly record struct ComparisonSelector
             $"time:{startInclusive:O}..{endExclusive?.ToString("O") ?? "*"}",
             $"start time in [{startInclusive:O}, {endExclusive?.ToString("O") ?? "*"})",
             isSerializable: true,
-            window => window.StartTime.HasValue
+            (window, _) => window.StartTime.HasValue
                 && (clock is null || string.Equals(window.TimestampClock, clock, StringComparison.Ordinal))
                 && window.StartTime.Value >= startInclusive
                 && (!endExclusive.HasValue || window.StartTime.Value < endExclusive.Value),
@@ -306,7 +306,11 @@ public readonly record struct ComparisonSelector
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
         ArgumentNullException.ThrowIfNull(predicate);
 
-        return new ComparisonSelector(name, description, isSerializable: false, predicate);
+        return new ComparisonSelector(
+            name,
+            description,
+            isSerializable: false,
+            (window, _) => predicate(window));
     }
 
     /// <summary>
@@ -341,7 +345,8 @@ public readonly record struct ComparisonSelector
             $"{Name}&{other.Name}",
             $"({Description}) and ({other.Description})",
             IsSerializable && other.IsSerializable,
-            window => current.Matches(window) && other.Matches(window),
+            (window, keyComparer) => current.Matches(window, keyComparer)
+                && other.Matches(window, keyComparer),
             descriptor: current.Descriptor is { } left && other.Descriptor is { } right
                 ? new ComparisonSelectorDescriptor("and", children: [left, right])
                 : null);
@@ -360,7 +365,8 @@ public readonly record struct ComparisonSelector
             $"{Name}|{other.Name}",
             $"({Description}) or ({other.Description})",
             IsSerializable && other.IsSerializable,
-            window => current.Matches(window) || other.Matches(window),
+            (window, keyComparer) => current.Matches(window, keyComparer)
+                || other.Matches(window, keyComparer),
             descriptor: current.Descriptor is { } left && other.Descriptor is { } right
                 ? new ComparisonSelectorDescriptor("or", children: [left, right])
                 : null);
@@ -375,7 +381,17 @@ public readonly record struct ComparisonSelector
     {
         ArgumentNullException.ThrowIfNull(window);
 
-        return this.predicate?.Invoke(window)
+        return Matches(window, EqualityComparer<object>.Default);
+    }
+
+    internal bool Matches(
+        WindowRecord window,
+        IEqualityComparer<object> keyComparer)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(keyComparer);
+
+        return this.predicate?.Invoke(window, keyComparer)
             ?? throw new InvalidOperationException("The comparison selector is uninitialized.");
     }
 
