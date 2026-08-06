@@ -16,34 +16,18 @@ internal static class ComparisonPreparer
         var normalized = new List<NormalizedWindowRecord>();
         var memberships = new HashSet<(WindowRecordId RecordId, ComparisonSide Side)>();
 
-        if (plan.Target is null || plan.Scope is null)
+        if (plan.Target is null
+            || plan.Scope is null
+            || diagnostics.Any(IsTemporalConfigurationError))
         {
             return Create(history, plan, diagnostics, selected, excluded, normalized);
-        }
-
-        if (plan.Scope.TimeAxis != plan.Normalization.TimeAxis)
-        {
-            diagnostics.Add(new ComparisonPlanDiagnostic(
-                ComparisonPlanValidationCode.MixedTimeAxes,
-                "Comparison scope and normalization policy use different temporal axes.",
-                "normalization.timeAxis",
-                ComparisonPlanDiagnosticSeverity.Error));
         }
 
         var knownAt = plan.Normalization.KnownAt;
         var knownAtFilter = default(TemporalPoint);
         var canFilterByKnownAt = false;
 
-        if (knownAt.HasValue
-            && knownAt.Value.Axis != TemporalAxis.ProcessingPosition)
-        {
-            diagnostics.Add(new ComparisonPlanDiagnostic(
-                ComparisonPlanValidationCode.KnownAtRequiresProcessingPosition,
-                "Known-at filtering currently requires processing-position availability information.",
-                "normalization.knownAt",
-                ComparisonPlanDiagnosticSeverity.Error));
-        }
-        else if (knownAt.HasValue)
+        if (knownAt.HasValue)
         {
             knownAtFilter = knownAt.Value;
             canFilterByKnownAt = true;
@@ -215,5 +199,17 @@ internal static class ComparisonPreparer
     private static string StableObjectValue(object? value)
     {
         return CanonicalValueFormatter.Format(value);
+    }
+
+    private static bool IsTemporalConfigurationError(ComparisonPlanDiagnostic diagnostic)
+    {
+        return diagnostic.Code is
+            ComparisonPlanValidationCode.InvalidTemporalAxis
+            or ComparisonPlanValidationCode.InvalidOpenWindowPolicy
+            or ComparisonPlanValidationCode.InvalidNullTimestampPolicy
+            or ComparisonPlanValidationCode.InvalidNormalizationPolicy
+            or ComparisonPlanValidationCode.MixedTimeAxes
+            or ComparisonPlanValidationCode.OpenWindowsWithoutPolicy
+            or ComparisonPlanValidationCode.KnownAtRequiresProcessingPosition;
     }
 }

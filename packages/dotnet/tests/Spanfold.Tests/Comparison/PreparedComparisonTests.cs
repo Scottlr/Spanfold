@@ -137,7 +137,7 @@ public sealed class PreparedComparisonTests
         var prepared = history.Compare("Provider QA")
             .Target("provider-a", s => s.Source("provider-a"))
             .Against("provider-b", s => s.Source("provider-b"))
-            .Within(s => s.Window("DeviceOffline"))
+            .Within(s => s.Window("DeviceOffline", TemporalAxis.Timestamp))
             .Normalize(n => n.OnEventTime())
             .Using(c => c.Overlap())
             .Prepare();

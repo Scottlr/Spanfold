@@ -19,8 +19,8 @@ public static class ComparisonExportExtensions
     /// <param name="plan">The plan to export.</param>
     /// <returns>Deterministic JSON for the plan.</returns>
     /// <exception cref="ComparisonExportException">
-    /// Thrown when the plan contains runtime-only selectors that cannot be
-    /// exported as portable data.
+    /// Thrown when the plan contains runtime-only selectors or invalid temporal
+    /// configuration that cannot be exported as portable data.
     /// </exception>
     public static string ExportJson(this ComparisonPlan plan)
     {
@@ -35,6 +35,10 @@ public static class ComparisonExportExtensions
     /// </summary>
     /// <param name="plan">The serializable plan to export.</param>
     /// <returns>Portable plan JSON with selector descriptors.</returns>
+    /// <exception cref="ComparisonExportException">
+    /// Thrown when the plan contains runtime-only selectors or invalid temporal
+    /// configuration that cannot be exported as portable data.
+    /// </exception>
     public static string ExportPortableJson(this ComparisonPlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -47,8 +51,8 @@ public static class ComparisonExportExtensions
     /// <param name="result">The result to export.</param>
     /// <returns>Deterministic JSON for the result.</returns>
     /// <exception cref="ComparisonExportException">
-    /// Thrown when the result's plan contains runtime-only selectors that
-    /// cannot be exported as portable data.
+    /// Thrown when the result's plan contains runtime-only selectors or invalid
+    /// temporal configuration that cannot be exported as portable data.
     /// </exception>
     public static string ExportJson(this ComparisonResult result)
     {
@@ -87,8 +91,8 @@ public static class ComparisonExportExtensions
     /// <param name="result">The result to export.</param>
     /// <returns>A lazy sequence of JSON Lines documents for result rows.</returns>
     /// <exception cref="ComparisonExportException">
-    /// Thrown when the result's plan contains runtime-only selectors that
-    /// cannot be exported as portable data.
+    /// Thrown when the result's plan contains runtime-only selectors or invalid
+    /// temporal configuration that cannot be exported as portable data.
     /// </exception>
     public static IEnumerable<string> ExportJsonLines(this ComparisonResult result)
     {
@@ -126,8 +130,8 @@ public static class ComparisonExportExtensions
     /// <param name="result">The result to export.</param>
     /// <returns>Deterministic JSON shaped for LLM and agent analysis.</returns>
     /// <exception cref="ComparisonExportException">
-    /// Thrown when the result's plan contains runtime-only selectors that
-    /// cannot be exported as portable data.
+    /// Thrown when the result's plan contains runtime-only selectors or invalid
+    /// temporal configuration that cannot be exported as portable data.
     /// </exception>
     public static string ExportLlmContext(this ComparisonResult result)
     {
@@ -173,11 +177,16 @@ public static class ComparisonExportExtensions
     /// <param name="result">The result to export.</param>
     /// <param name="path">The destination JSON file path.</param>
     /// <exception cref="ArgumentException">Thrown when <paramref name="path" /> is empty.</exception>
+    /// <exception cref="ComparisonExportException">
+    /// Thrown before destination creation when the result's plan contains
+    /// runtime-only selectors or invalid temporal configuration.
+    /// </exception>
     public static void ExportLlmContext(this ComparisonResult result, string path)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
+        var content = result.ExportLlmContext();
         var fullPath = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(directory))
@@ -185,7 +194,7 @@ public static class ComparisonExportExtensions
             Directory.CreateDirectory(directory);
         }
 
-        WriteAtomically(fullPath, result.ExportLlmContext());
+        WriteAtomically(fullPath, content);
     }
 
     private static void WriteAtomically(string path, string content)

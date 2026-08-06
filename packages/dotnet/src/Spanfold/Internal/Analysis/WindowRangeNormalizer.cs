@@ -29,6 +29,14 @@ internal static class WindowRangeNormalizer
         normalized = default;
         failure = null;
 
+        if (policy.TimeAxis is not TemporalAxis.ProcessingPosition and not TemporalAxis.Timestamp)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                policy.TimeAxis,
+                "Window normalization requires a known temporal axis.");
+        }
+
         if (knownAt.HasValue && window.StartPosition > knownAt.Value.Position)
         {
             failure = new WindowRangeNormalizationFailure(
@@ -37,9 +45,24 @@ internal static class WindowRangeNormalizer
             return false;
         }
 
-        return policy.TimeAxis == TemporalAxis.Timestamp
-            ? TryNormalizeTimestamp(window, policy, out normalized, out failure)
-            : TryNormalizePosition(window, policy, knownAt, out normalized, out failure);
+        return policy.TimeAxis switch
+        {
+            TemporalAxis.ProcessingPosition => TryNormalizePosition(
+                window,
+                policy,
+                knownAt,
+                out normalized,
+                out failure),
+            TemporalAxis.Timestamp => TryNormalizeTimestamp(
+                window,
+                policy,
+                out normalized,
+                out failure),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                policy.TimeAxis,
+                "Window normalization requires a known temporal axis.")
+        };
     }
 
     private static bool TryNormalizePosition(
