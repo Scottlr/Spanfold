@@ -25,22 +25,44 @@ jobs:
         run: |
           rm -rf artifacts/package
           dotnet pack src/Spanfold/Spanfold.csproj --no-restore --configuration Release --output artifacts/package
+          dotnet pack src/Spanfold.Artifacts/Spanfold.Artifacts.csproj --no-restore --configuration Release --output artifacts/package
           dotnet pack src/Spanfold.Testing/Spanfold.Testing.csproj --no-restore --configuration Release --output artifacts/package
-          dotnet pack src/Spanfold.Cli/Spanfold.Cli.csproj --no-restore --configuration Release --output artifacts/package
       - name: Verify package contents and dependency metadata
         run: |
           set -euo pipefail
           version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)"
           test -n "$version"
           test -f "artifacts/package/Spanfold.${version}.nupkg"
+          test -f "artifacts/package/Spanfold.${version}.snupkg"
+          test -f "artifacts/package/Spanfold.Artifacts.${version}.nupkg"
+          test -f "artifacts/package/Spanfold.Artifacts.${version}.snupkg"
           test -f "artifacts/package/Spanfold.Testing.${version}.nupkg"
-          test -f "artifacts/package/Spanfold.Cli.${version}.nupkg"
+          test -f "artifacts/package/Spanfold.Testing.${version}.snupkg"
+          test ! -f "artifacts/package/Spanfold.Cli.${version}.nupkg"
           unzip -Z1 "artifacts/package/Spanfold.${version}.nupkg" | grep -Fx 'README.md'
           unzip -Z1 "artifacts/package/Spanfold.${version}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.dll'
           unzip -Z1 "artifacts/package/Spanfold.${version}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.xml'
+          unzip -Z1 "artifacts/package/Spanfold.Artifacts.${version}.nupkg" | grep -Fx 'README.md'
+          unzip -Z1 "artifacts/package/Spanfold.Artifacts.${version}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Artifacts.dll'
+          unzip -Z1 "artifacts/package/Spanfold.Artifacts.${version}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Artifacts.xml'
+          unzip -p "artifacts/package/Spanfold.Artifacts.${version}.nupkg" '*.nuspec' | grep -F "<dependency id=\"Spanfold\" version=\"${version}\""
+          unzip -Z1 "artifacts/package/Spanfold.Testing.${version}.nupkg" | grep -Fx 'README.md'
           unzip -Z1 "artifacts/package/Spanfold.Testing.${version}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Testing.dll'
-          unzip -p "artifacts/package/Spanfold.Testing.${version}.nupkg" '*.nuspec' | grep -F '<dependency id="Spanfold"'
-          unzip -Z1 "artifacts/package/Spanfold.Cli.${version}.nupkg" | grep -F 'Spanfold.Cli.dll'
+          unzip -Z1 "artifacts/package/Spanfold.Testing.${version}.nupkg" | grep -Fx 'lib/net10.0/Spanfold.Testing.xml'
+          unzip -p "artifacts/package/Spanfold.Testing.${version}.nupkg" '*.nuspec' | grep -F "<dependency id=\"Spanfold\" version=\"${version}\""
+          unzip -p "artifacts/package/Spanfold.Testing.${version}.nupkg" '*.nuspec' | grep -F "<dependency id=\"Spanfold.Artifacts\" version=\"${version}\""
+      - name: Restore isolated package consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/consumer
+          for package in Spanfold Spanfold.Artifacts Spanfold.Testing; do
+            dotnet restore tests/Spanfold.PackageConsumer/Spanfold.PackageConsumer.csproj \
+              --source "$PWD/artifacts/package" \
+              --packages "$PWD/artifacts/consumer/$package/packages" \
+              -p:PackageUnderTest="$package" \
+              -p:BaseIntermediateOutputPath="artifacts/consumer/$package/obj/"
+          done
 
   rust:
     runs-on: ubuntu-latest

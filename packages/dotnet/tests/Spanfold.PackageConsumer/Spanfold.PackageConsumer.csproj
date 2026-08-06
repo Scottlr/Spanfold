@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="$(PackageUnderTest)" Version="$(Version)" />
+  </ItemGroup>
+
+  <Target Name="RequirePackageUnderTest" BeforeTargets="CollectPackageReferences">
+    <Error Condition="'$(PackageUnderTest)' == ''" Text="Set PackageUnderTest to a supported Spanfold package ID." />
+  </Target>
+
+</Project>

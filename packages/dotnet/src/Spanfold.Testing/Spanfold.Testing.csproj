@@ -13,7 +13,7 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageTags>events;windows;analytics;testing</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Fix NuGet package README logo rendering.</PackageReleaseNotes>
+    <PackageReleaseNotes>See https://github.com/Scottlr/spanfold/blob/main/CHANGELOG.md for release details.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <WarningsAsErrors>$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <IsPackable>true</IsPackable>
